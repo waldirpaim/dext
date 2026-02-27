@@ -4,12 +4,11 @@
         <MainSource>Dext.Core.dpk</MainSource>
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Debug</Config>
-        <ProjectName Condition="'$(ProjectName)'==''">Dext.Core</ProjectName>
         <TargetedPlatforms>1048705</TargetedPlatforms>
         <AppType>Package</AppType>
         <FrameworkType>None</FrameworkType>
         <ProjectVersion>20.3</ProjectVersion>
-        <Platform Condition="'$(Platform)'==''">Win32</Platform>
+        <Platform Condition="'$(Platform)'==''">Linux64</Platform>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
         <Base>true</Base>
@@ -1107,8 +1106,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
     <Import Project="$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj" Condition="Exists('$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj')"/>
     <Import Project="$(MSBuildProjectName).deployproj" Condition="Exists('$(MSBuildProjectName).deployproj')"/>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Android'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1116,8 +1114,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Android64'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1125,8 +1122,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Linux64'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1134,8 +1130,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Win32'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1143,8 +1138,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Win64'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1152,8 +1146,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Win64x'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1161,8 +1154,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Android'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1170,8 +1162,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Android64'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1179,8 +1170,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Linux64'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1188,8 +1178,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Win32'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1197,8 +1186,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Win64'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
@@ -1206,8 +1194,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Win64x'">
-        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;
-</PreBuildEvent>
+        <PreBuildEvent>copy /Y &quot;.\Dext.inc&quot; &quot;..\Output\$(ProductVersion)_$(Platform)_$(Config)\Dext.inc&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>

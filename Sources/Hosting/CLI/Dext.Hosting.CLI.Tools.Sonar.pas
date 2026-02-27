@@ -7,7 +7,9 @@ uses
   System.IOUtils,
   System.SysUtils,
   System.Variants,
+  {$IFDEF MSWINDOWS}
   Winapi.ActiveX,
+  {$ENDIF}
   Xml.XMLDoc,
   Xml.XMLIntf,
   Dext.Collections,
@@ -26,12 +28,16 @@ implementation
 
 class procedure TSonarConverter.Convert(const DccXmlFile, SonarXmlFile, SourceDir: string; Threshold: Double);
 begin
+  {$IFDEF MSWINDOWS}
   CoInitialize(nil);
   try
     ConvertInternal(DccXmlFile, SonarXmlFile, SourceDir, Threshold);
   finally
     CoUninitialize;
   end;
+  {$ELSE}
+  ConvertInternal(DccXmlFile, SonarXmlFile, SourceDir, Threshold);
+  {$ENDIF}
 end;
 
 class procedure TSonarConverter.ConvertInternal(const DccXmlFile, SonarXmlFile, SourceDir: string; Threshold: Double);

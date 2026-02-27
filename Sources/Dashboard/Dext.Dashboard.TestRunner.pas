@@ -8,8 +8,13 @@ uses
   System.IOUtils,
   Dext.Json,
   Dext.Json.Types,
+  {$IFDEF MSWINDOWS}
   WinApi.Windows,
-  WinApi.ShellAPI;
+  WinApi.ShellAPI
+  {$ENDIF}
+  {$IFDEF POSIX}
+  Posix.Stdlib
+  {$ENDIF};
 
 type
   TTestRunner = class
@@ -28,6 +33,7 @@ implementation
 
 
 class function TTestRunner.ExecuteProcess(const AExePath, AParams: string): Boolean;
+{$IFDEF MSWINDOWS}
 var
   SI: TStartupInfo;
   PI: TProcessInformation;
@@ -52,10 +58,20 @@ begin
     Result := True;
   end;
 end;
+{$ELSE}
+begin
+  {$IFDEF POSIX}
+  // Fire and forget in background on Linux
+  Result := _system(PAnsiChar(AnsiString(AExePath + ' ' + AParams + ' &'))) = 0;
+  {$ELSE}
+  Result := False;
+  {$ENDIF}
+end;
+{$ENDIF}
 
 class function TTestRunner.FindExecutable(const AProjectPath: string): string;
 var
-  BaseName, ProjectDir: string;
+  BaseName, ProjectDir, ExeExt: string;
   Candidates: TArray<string>;
   Path: string;
 begin
@@ -63,17 +79,23 @@ begin
   BaseName := TPath.GetFileNameWithoutExtension(AProjectPath);
   ProjectDir := TPath.GetDirectoryName(AProjectPath);
   
+  {$IFDEF MSWINDOWS}
+  ExeExt := '.exe';
+  {$ELSE}
+  ExeExt := '';
+  {$ENDIF}
+  
   // Potential locations
   Candidates := [
-    TPath.Combine(ProjectDir, BaseName + '.exe'),
-    TPath.Combine(TPath.Combine(ProjectDir, 'TestOutput'), BaseName + '.exe'),
-    TPath.Combine(TPath.Combine(ProjectDir, 'Output'), BaseName + '.exe'),
+    TPath.Combine(ProjectDir, BaseName + ExeExt),
+    TPath.Combine(TPath.Combine(ProjectDir, 'TestOutput'), BaseName + ExeExt),
+    TPath.Combine(TPath.Combine(ProjectDir, 'Output'), BaseName + ExeExt),
     // Repo Root Output (approximate)
-    TPath.Combine(TPath.GetFullPath(TPath.Combine(ProjectDir, '..\..\Output')), BaseName + '.exe'),
+    TPath.Combine(TPath.GetFullPath(TPath.Combine(ProjectDir, '..\..\Output')), BaseName + ExeExt),
     // Common Win32 Debug output
-    TPath.Combine(TPath.Combine(ProjectDir, 'Win32\Debug'), BaseName + '.exe'),
+    TPath.Combine(TPath.Combine(ProjectDir, 'Win32\Debug'), BaseName + ExeExt),
     // Tests/Output (Relative to Tests/Testing)
-    TPath.Combine(TPath.Combine(ProjectDir, '..\Output'), BaseName + '.exe')
+    TPath.Combine(TPath.Combine(ProjectDir, '..\Output'), BaseName + ExeExt)
   ];
   
   for Path in Candidates do

@@ -9,12 +9,17 @@ uses
   System.IOUtils,
   System.Diagnostics,
   System.Masks,
+  {$IFDEF MSWINDOWS}
   Winapi.Windows,
   Winapi.ShellAPI,
+  {$ENDIF}
   Dext.Hosting.CLI.Args,
   Dext.Hosting.CLI.Config,
   Dext.Hosting.CLI.Tools.Sonar,
   Dext.Hosting.CLI.Tools.CodeCoverage,
+  {$IFDEF POSIX}
+  Posix.Stdlib,
+  {$ENDIF}
   Dext.Utils;
 
 type
@@ -24,12 +29,13 @@ type
       BUILD_DIR = 'TestOutput';
     
     function FindProjectFile(const Directory: string): string;
-    function GetMapFile(const ProjectName: string): string;
     function GetExeFile(const ProjectName: string): string;
     
     function BuildProject(const ProjectFile: string; EnableMap: Boolean; GlobalConfig: TDextGlobalConfig; const DesiredDelphi: string): Boolean;
     function RunProcess(const Exe, Params: string): Boolean;
     
+    {$IFDEF MSWINDOWS}
+    function GetMapFile(const ProjectName: string): string;
     function GetSourceDirectory(const BaseDir: string): string;
     procedure GenerateCoverageLists(const BaseDir, SourceDir: string; const Excludes: TArray<string>; out UnitFile, SourcePathFile: string);
     procedure GenerateAutoInclude(const BaseDir, SourceDir: string);
@@ -39,8 +45,10 @@ type
 
     function CheckTestResults(const JsonPath: string): Boolean;
     
-    procedure RunTests(const ProjectFile: string; const Args: TCommandLineArgs; Config: TDextConfig; GlobalConfig: TDextGlobalConfig; const DesiredDelphi: string);
     procedure RunWithCoverage(const ProjectFile: string; const Args: TCommandLineArgs; Config: TDextConfig; GlobalConfig: TDextGlobalConfig; const DesiredDelphi: string);
+    {$ENDIF}
+    
+    procedure RunTests(const ProjectFile: string; const Args: TCommandLineArgs; Config: TDextConfig; GlobalConfig: TDextGlobalConfig; const DesiredDelphi: string);
   public
     function GetName: string;
     function GetDescription: string;
@@ -99,7 +107,14 @@ begin
     if DesiredDelphi <> '' then SafeWriteLn('Target Delphi: ' + DesiredDelphi);
   
     if Args.HasOption('coverage') then
-      RunWithCoverage(ProjectFile, Args, Config, GlobalConfig, DesiredDelphi)
+    begin
+      {$IFDEF MSWINDOWS}
+      RunWithCoverage(ProjectFile, Args, Config, GlobalConfig, DesiredDelphi);
+      {$ELSE}
+      SafeWriteLn('Error: Code coverage analysis is currently only supported on Windows.');
+      SafeWriteLn('Basic tests can still be run with "dext test".');
+      {$ENDIF}
+    end
     else
       RunTests(ProjectFile, Args, Config, GlobalConfig, DesiredDelphi);
   finally
@@ -127,15 +142,15 @@ end;
 
 function TTestCommand.GetExeFile(const ProjectName: string): string;
 begin
+  {$IFDEF MSWINDOWS}
   Result := TPath.GetFullPath(TPath.Combine(BUILD_DIR, ProjectName + '.exe'));
-end;
-
-function TTestCommand.GetMapFile(const ProjectName: string): string;
-begin
-  Result := TPath.GetFullPath(TPath.Combine(BUILD_DIR, ProjectName + '.map'));
+  {$ELSE}
+  Result := TPath.GetFullPath(TPath.Combine(BUILD_DIR, ProjectName));
+  {$ENDIF}
 end;
 
 function TTestCommand.RunProcess(const Exe, Params: string): Boolean;
+{$IFDEF MSWINDOWS}
 var
   SI: TStartupInfo;
   PI: TProcessInformation;
@@ -160,6 +175,77 @@ begin
   CloseHandle(PI.hProcess);
   CloseHandle(PI.hThread);
   Result := ExitCode = 0;
+end;
+{$ELSE}
+begin
+  SafeWriteLn(Format('Running: %s %s', [Exe, Params]));
+  {$IFDEF POSIX}
+  Result := _system(PAnsiChar(AnsiString(Exe + ' ' + Params))) = 0;
+  {$ELSE}
+  Result := False;
+  {$ENDIF}
+end;
+{$ENDIF}
+
+function TTestCommand.BuildProject(const ProjectFile: string; EnableMap: Boolean; GlobalConfig: TDextGlobalConfig; const DesiredDelphi: string): Boolean;
+var
+  Args, ProjectName, OutDir, RSVars: string;
+begin
+  ProjectName := TPath.GetFileNameWithoutExtension(ProjectFile);
+  OutDir := TPath.Combine(GetCurrentDir, BUILD_DIR);
+  ForceDirectories(OutDir);
+  
+  Args := Format('"%s" /t:Build /p:Config=Debug /p:Platform=Win32 /p:DCC_ExeOutput="%s" /p:DCC_DcuOutput="%s"', 
+    [ProjectFile, OutDir, TPath.Combine(OutDir, 'dcu')]);
+    
+  if EnableMap then
+    Args := Args + ' /p:DCC_MapFile=3 /p:DCC_GenerateStackFrames=true /p:DCC_Define="DEBUG;TESTING;COVERAGE"';
+
+  RSVars := '';
+  {$IFDEF MSWINDOWS}
+  RSVars := FindRSVars(GlobalConfig, DesiredDelphi);
+  {$ENDIF}
+  
+  if RSVars <> '' then
+  begin
+    SafeWriteLn('Using Environment: ' + RSVars);
+    SafeWriteLn('Building project...');
+    Result := RunProcess('cmd', Format('/c "call "%s" && msbuild %s"', [RSVars, Args]));
+  end
+  else
+  begin
+    SafeWriteLn('WARNING: Environment vars not found or not needed. Relying on system PATH.');
+    if DesiredDelphi <> '' then SafeWriteLn('Requested version: ' + DesiredDelphi);
+    {$IFDEF MSWINDOWS}
+    Result := RunProcess('msbuild', Args);
+    {$ELSE}
+    Result := RunProcess('dcc64', Args); 
+    {$ENDIF}
+  end;
+  if not Result then SafeWriteLn('Error: Build failed.');
+end;
+
+procedure TTestCommand.RunTests(const ProjectFile: string; const Args: TCommandLineArgs; Config: TDextConfig; GlobalConfig: TDextGlobalConfig; const DesiredDelphi: string);
+var
+  ExePath, ProjectName: string;
+begin
+  if not BuildProject(ProjectFile, False, GlobalConfig, DesiredDelphi) then Exit;
+  ProjectName := TPath.GetFileNameWithoutExtension(ProjectFile);
+  ExePath := GetExeFile(ProjectName);
+  
+  if not FileExists(ExePath) then
+  begin
+    SafeWriteLn('Error: Executable not found at ' + ExePath);
+    Exit;
+  end;
+  SafeWriteLn('Running tests...');
+  RunProcess(ExePath, '');
+end;
+
+{$IFDEF MSWINDOWS}
+function TTestCommand.GetMapFile(const ProjectName: string): string;
+begin
+  Result := TPath.GetFullPath(TPath.Combine(BUILD_DIR, ProjectName + '.map'));
 end;
 
 function TTestCommand.FindRSVars(GlobalConfig: TDextGlobalConfig; const DesiredVersion: string): string;
@@ -193,36 +279,6 @@ begin
   Result := '';
 end;
 
-function TTestCommand.BuildProject(const ProjectFile: string; EnableMap: Boolean; GlobalConfig: TDextGlobalConfig; const DesiredDelphi: string): Boolean;
-var
-  Args, ProjectName, OutDir, RSVars: string;
-begin
-  ProjectName := TPath.GetFileNameWithoutExtension(ProjectFile);
-  OutDir := TPath.Combine(GetCurrentDir, BUILD_DIR);
-  ForceDirectories(OutDir);
-  
-  Args := Format('"%s" /t:Build /p:Config=Debug /p:Platform=Win32 /p:DCC_ExeOutput="%s" /p:DCC_DcuOutput="%s"', 
-    [ProjectFile, OutDir, TPath.Combine(OutDir, 'dcu')]);
-    
-  if EnableMap then
-    Args := Args + ' /p:DCC_MapFile=3 /p:DCC_GenerateStackFrames=true /p:DCC_Define="DEBUG;TESTING;COVERAGE"';
-
-  RSVars := FindRSVars(GlobalConfig, DesiredDelphi);
-  if RSVars <> '' then
-  begin
-    SafeWriteLn('Using Environment: ' + RSVars);
-    SafeWriteLn('Building project...');
-    Result := RunProcess('cmd', Format('/c "call "%s" && msbuild %s"', [RSVars, Args]));
-  end
-  else
-  begin
-    SafeWriteLn('WARNING: rsvars.bat not found for requested version. Relying on system PATH.');
-    if DesiredDelphi <> '' then SafeWriteLn('Requested version: ' + DesiredDelphi);
-    Result := RunProcess('msbuild', Args);
-  end;
-  if not Result then SafeWriteLn('Error: Build failed.');
-end;
-
 function TTestCommand.CheckTestResults(const JsonPath: string): Boolean;
 var
   JsonText: string;
@@ -252,23 +308,6 @@ begin
   except
     // If we can't parse the results, assume success to avoid false negatives
   end;
-end;
-
-procedure TTestCommand.RunTests(const ProjectFile: string; const Args: TCommandLineArgs; Config: TDextConfig; GlobalConfig: TDextGlobalConfig; const DesiredDelphi: string);
-var
-  ExePath, ProjectName: string;
-begin
-  if not BuildProject(ProjectFile, False, GlobalConfig, DesiredDelphi) then Exit;
-  ProjectName := TPath.GetFileNameWithoutExtension(ProjectFile);
-  ExePath := GetExeFile(ProjectName);
-  
-  if not FileExists(ExePath) then
-  begin
-    SafeWriteLn('Error: Executable not found at ' + ExePath);
-    Exit;
-  end;
-  SafeWriteLn('Running tests...');
-  RunProcess(ExePath, '');
 end;
 
 procedure TTestCommand.GenerateAutoInclude(const BaseDir, SourceDir: string);
@@ -504,7 +543,9 @@ begin
          if FileExists(HtmlReport) then
          begin
             SafeWriteLn('Opening report: ' + HtmlReport);
+            {$IFDEF MSWINDOWS}
             ShellExecute(0, 'open', PChar(HtmlReport), nil, nil, SW_SHOWNORMAL);
+            {$ENDIF}
          end;
       end;
     end;
@@ -512,5 +553,6 @@ begin
     SetEnvironmentVariable('DEXT_HEADLESS', '');
   end;
 end;
+{$ENDIF}
 
 end.

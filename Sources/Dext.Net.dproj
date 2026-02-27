@@ -6,8 +6,7 @@
         <FrameworkType>None</FrameworkType>
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Debug</Config>
-        <Platform Condition="'$(Platform)'==''">Win32</Platform>
-        <ProjectName Condition="'$(ProjectName)'==''">Dext.Net</ProjectName>
+        <Platform Condition="'$(Platform)'==''">Linux64</Platform>
         <TargetedPlatforms>1081491</TargetedPlatforms>
         <AppType>Package</AppType>
     </PropertyGroup>

@@ -6,7 +6,7 @@ uses
   System.SysUtils,
   System.Classes,
   System.IOUtils,
-  System.Generics.Collections,
+  Dext.Collections,
   System.DateUtils,
   System.JSON,
   System.Types, // RT_RCDATA

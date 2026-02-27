@@ -21,7 +21,7 @@ type
 
 implementation
 
-{$IF defined(CPUX86) or defined(CPUX64)}
+{$IF (defined(CPUX86) or defined(CPUX64)) and defined(MSWINDOWS)}
 function HasSSE2: Boolean;
 asm
   {$IFDEF CPUX86} push ebx {$ENDIF}
@@ -67,7 +67,7 @@ function HasSSE42: Boolean; begin Result := False; end;
 function HasAVX2: Boolean; begin Result := False; end;
 {$ENDIF}
 
-{$IF defined(CPUX86) or defined(CPUX64)}
+{$IF (defined(CPUX86) or defined(CPUX64)) and defined(MSWINDOWS)}
 
 {$IFDEF CPUX86}
 function IndexOfInt32_SSE2_32(Data: Pointer; Count: Integer; Value: Integer): Integer;
@@ -337,6 +337,7 @@ end;
 
 class function TDextSimd.IndexOfInt32(Data: Pointer; Count: Integer; Value: Integer): Integer;
 begin
+  {$IFDEF MSWINDOWS}
   if FCapability >= scSSE2 then
   begin
     {$IFDEF CPUX64}
@@ -346,6 +347,7 @@ begin
     {$ENDIF}
   end
   else
+  {$ENDIF}
   begin
     Result := IndexOfInt32_Pascal(Data, Count, Value);
   end;
@@ -353,6 +355,7 @@ end;
 
 class function TDextSimd.IndexOfByte(Data: Pointer; Count: Integer; Value: Byte): Integer;
 begin
+  {$IFDEF MSWINDOWS}
   if FCapability >= scSSE2 then
   begin
     {$IFDEF CPUX64}
@@ -362,6 +365,7 @@ begin
     {$ENDIF}
   end
   else
+  {$ENDIF}
   begin
     Result := IndexOfByte_Pascal(Data, Count, Value);
   end;

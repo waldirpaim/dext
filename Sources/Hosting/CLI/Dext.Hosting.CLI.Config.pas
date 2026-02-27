@@ -7,8 +7,10 @@ uses
   System.IOUtils,
   System.JSON,
   System.SysUtils,
+  {$IFDEF MSWINDOWS}
   System.Win.Registry,
   Winapi.Windows,
+  {$ENDIF}
   Dext.Yaml,
   Dext.Collections,
   Dext.Configuration.Yaml;
@@ -50,8 +52,10 @@ type
     function GetScalarValue(Node: TYamlNode; const Def: string = ''): string;
     function CleanYamlValue(const S: string): string;
     // Scan Helpers
+{$IFDEF MSWINDOWS}
     class function GetDelphiName(const RegVersion: string): string;
     class function GetCompilerPath(const BinDir, Platform: string): string;
+{$ENDIF}
  public
     constructor Create;
     destructor Destroy; override;
@@ -330,6 +334,7 @@ begin
   end;
 end;
 
+{$IFDEF MSWINDOWS}
 class function TDextGlobalConfig.GetDelphiName(const RegVersion: string): string;
 begin
   if RegVersion = '8.0' then Exit('Delphi XE');
@@ -352,7 +357,9 @@ begin
   if RegVersion = '37.0' then Exit('Delphi 13'); // As per user environment
   Result := 'Delphi ' + RegVersion;
 end;
+{$ENDIF}
 
+{$IFDEF MSWINDOWS}
 class function TDextGlobalConfig.GetCompilerPath(const BinDir, Platform: string): string;
 var
   ExeName: string;
@@ -373,8 +380,10 @@ begin
   else
     Result := '';
 end;
+{$ENDIF}
 
 function TDextGlobalConfig.ScanEnvironments: string;
+{$IFDEF MSWINDOWS}
 var
   Reg: TRegistry;
   Versions: TStringList;
@@ -524,6 +533,11 @@ begin
     LogContent.Free;
   end;
 end;
+{$ELSE}
+begin
+  Result := 'Environment scanning is only supported on Windows.';
+end;
+{$ENDIF}
 
 end.
 

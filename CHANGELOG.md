@@ -35,6 +35,18 @@
 **[PT-BR]** Lançamento de documentação bilíngue completa e novos capítulos no Dext Book dedicados a coleções e gerenciamento de memória.
 **[EN]** Launch of full bilingual documentation and new Dext Book chapters dedicated to collections and memory management.
 
+#### 🗺️ Future Roadmap / Planejamento Futuro
+
+**[PT-BR]**
+
+- 🏗️ **Namespace Refactoring** - O pacote `Dext.UI` será renomeado para `Dext.Vcl.UI` para melhor clareza e evitar conflitos com futuras implementações de UI (ex: FMX ou Web).
+- 🐧 **Linux Improvements** - Continuação da limpeza de dependências de Windows nos pacotes Core e Hosting para garantir compatibilidade 100% com CI/CD em Linux.
+
+**[EN]**
+
+- 🏗️ **Namespace Refactoring** - The `Dext.UI` package will be renamed to `Dext.Vcl.UI` for better clarity and to avoid conflicts with future UI implementations (e.g., FMX or Web).
+- 🐧 **Linux Improvements** - Ongoing removal of Windows dependencies in Core and Hosting packages to ensure 100% compatibility with Linux CI/CD.
+
 ---
 
 ## 🚀 2026-02-22 - Dext v1.0 Release Candidate: ORM Evolution & Performance

@@ -27,3 +27,5 @@ node_modules/
 *.dsk
 *.tvsconfig
 *.~*
+*.a
+/Sources/*.bpi
