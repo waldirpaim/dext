@@ -1,4 +1,4 @@
-﻿unit Dext.ModelBinding.Tests;
+unit Dext.ModelBinding.Tests;
 
 interface
 
@@ -97,9 +97,6 @@ begin
 
       // ✅ DEBUG: Verificar o que o mock está recebendo
       Writeln('Query string: ', 'active=' + BoolValue);
-      Writeln('Query params count: ', MockContext.Request.Query.Count);
-      for var I := 0 to MockContext.Request.Query.Count - 1 do
-        Writeln('  Param[', I, ']: ', MockContext.Request.Query[I]);
 
       Value := Binder.BindQuery(TypeInfo(TQueryTest), MockContext);
       var Test := Value.AsType<TQueryTest>;
@@ -417,6 +414,7 @@ begin
 end;
 
 type
+  {$M+}
   IUserService = interface
     ['{C172F92C-7F73-483E-8BED-311D23204973}']
     function GetUserName: string;
@@ -426,6 +424,7 @@ type
     ['{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}']
     procedure Log(const Msg: string);
   end;
+  {$M-}
 
   TUserService = class(TInterfacedObject, IUserService)
   public
@@ -437,10 +436,12 @@ type
     procedure Log(const Msg: string);
   end;
 
+  {$M+}
   TDatabaseService = class
   public
     function GetConnection: string;
   end;
+  {$M-}
 
   TServiceTest = record
     [FromServices] UserService: IUserService;    // ✅ Interface registrada

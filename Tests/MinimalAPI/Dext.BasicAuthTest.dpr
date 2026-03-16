@@ -6,71 +6,63 @@ uses
   Dext.MM,
   Dext.Utils,
   System.SysUtils,
+  System.Rtti,
   Dext.Web,
   Dext.Auth.BasicAuth,
   Dext.Web.Interfaces,
   Dext.Assertions,
   Dext.Collections,
   Dext.Collections.Dict,
+  Dext.Mocks,
+  Dext.Mocks.Matching,
   Dext.Web.Mocks in '..\Common\Dext.Web.Mocks.pas';
 
 function MakeContext(const APath: string; const AHeaders: IDictionary<string, string> = nil): IHttpContext;
 var
-  Req: IHttpRequest;
-  Res: IHttpResponse;
+  MockReq: Mock<IHttpRequest>;
+  QueryParams: IStringDictionary;
+  EmptyCookies: IStringDictionary;
+  EmptyRoute: TRouteValueDictionary;
+  HeadersDict: IStringDictionary;
+  Pair: TPair<string, string>;
 begin
-  if Assigned(AHeaders) then
-    Req := TMockHttpRequestWithHeaders.CreateWithHeaders('', AHeaders)
-  else
-    Req := TMockHttpRequest.Create('', 'GET', APath);
+  MockReq := Mock<IHttpRequest>.Create;
+  
+  QueryParams := TCollections.CreateStringDictionary;
+  EmptyCookies := TCollections.CreateStringDictionary;
+  EmptyRoute.Clear;
+  HeadersDict := TCollections.CreateStringDictionary;
 
-  // If headers were provided the path is still default '/api/test' - we create a new request with proper path
   if Assigned(AHeaders) then
   begin
-    // Re-create with path set. TMockHttpRequestWithHeaders doesn't accept path yet,
-    // so we cast and override via the parent constructor's FPath field via RTTI is complex.
-    // Simpler: just use the factory method and pass path directly.
-    // Since TMockHttpRequestWithHeaders.CreateWithHeaders takes only querystring,
-    // we embed the path in the query string parsing... actually the mock reads path separately.
-    // Let's just create context directly.
-    Res := TMockHttpResponse.Create;
-    Result := TMockFactory.CreateHttpContextWithHeaders('', AHeaders);
-    // Override path using the request field - TMockHttpRequest stores FPath
-    // FPath is private, but we can use RTTI or expose it via a property.
-    // For now, cast to class and call the constructor path param via inherited.
-    // The simplest solution: not use FPath directly, but pass path in constructor.
-    Exit;
+    for Pair in AHeaders do
+      HeadersDict.AddOrSetValue(Pair.Key, Pair.Value);
   end;
 
-  Res := TMockHttpResponse.Create;
-  Result := TMockHttpContext.Create(Req, Res);
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(QueryParams)).When.GetQuery;
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(HeadersDict)).When.GetHeaders;
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(EmptyCookies)).When.GetCookies;
+  MockReq.Setup.Returns(TValue.From<TRouteValueDictionary>(EmptyRoute)).When.GetRouteParams;
+  
+  MockReq.Setup.Returns(TValue.From<string>('GET')).When.GetMethod;
+  MockReq.Setup.Returns(TValue.From<string>(APath)).When.GetPath;
+  MockReq.Setup.Returns(TValue.From<string>('127.0.0.1')).When.GetRemoteIpAddress;
+
+  Result := TMockHttpContext.Create(MockReq.Instance, TMockHttpResponse.Create, nil);
 end;
 
 function MakeContextWithPath(const APath: string): IHttpContext;
-var
-  Req: TMockHttpRequest;
-  Res: TMockHttpResponse;
 begin
-  Req := TMockHttpRequest.Create('', 'GET', APath);
-  Res := TMockHttpResponse.Create;
-  Result := TMockHttpContext.Create(Req, Res);
+  Result := MakeContext(APath);
 end;
 
 function MakeContextWithPathAndAuth(const APath, AAuthHeader: string): IHttpContext;
 var
   Headers: IDictionary<string, string>;
-  Req: TMockHttpRequestWithHeaders;
-  Res: TMockHttpResponse;
 begin
   Headers := TCollections.CreateDictionary<string, string>;
   Headers.Add('Authorization', AAuthHeader);
-  Req := TMockHttpRequestWithHeaders.CreateWithHeaders('', Headers);
-  // Override path via field access - since FPath is private we use the constructor trick:
-  // TMockHttpRequest.Create sets FPath in the passed APath parameter.
-  // TMockHttpRequestWithHeaders.CreateWithHeaders calls inherited Create('', ...) setting FPath = '/api/test'
-  // We need to expose path or patch the mock. Let's patch Dext.Web.Mocks instead to add a Path property.
-  Res := TMockHttpResponse.Create;
-  Result := TMockHttpContext.Create(Req, Res);
+  Result := MakeContext(APath, Headers);
 end;
 
 procedure RunTests;
@@ -123,8 +115,7 @@ begin
   // --- Scenario 3: Protected endpoint, valid credentials ---
   Writeln('Scenario 3: Protected endpoint, valid credentials (expect 200)');
   // testuser:testpass -> Base64 = dGVzdHVzZXI6dGVzdHBhc3M=
-  Context := MakeContextWithPath('/protected');
-  (Context.Request as TMockHttpRequest).GetHeaders.AddOrSetValue('Authorization', 'Basic dGVzdHVzZXI6dGVzdHBhc3M=');
+  Context := MakeContextWithPathAndAuth('/protected', 'Basic dGVzdHVzZXI6dGVzdHBhc3M=');
   Pipeline(Context);
   Should(Context.Response.StatusCode).Be(200);
   Writeln('  PASS');
@@ -132,8 +123,7 @@ begin
   // --- Scenario 4: Protected endpoint, wrong credentials ---
   Writeln('Scenario 4: Protected endpoint, wrong credentials (expect 401)');
   // user:wrong -> Base64 = dXNlcjp3cm9uZw==
-  Context := MakeContextWithPath('/protected');
-  (Context.Request as TMockHttpRequest).GetHeaders.AddOrSetValue('Authorization', 'Basic dXNlcjp3cm9uZw==');
+  Context := MakeContextWithPathAndAuth('/protected', 'Basic dXNlcjp3cm9uZw==');
   Pipeline(Context);
   Should(Context.Response.StatusCode).Be(401);
   Writeln('  PASS');

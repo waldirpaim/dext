@@ -7,567 +7,232 @@ uses
   System.Classes,
   System.SysUtils,
   System.Rtti,
-  System.TypInfo,
   Dext.Collections,
   Dext.Collections.Dict,
   Dext.DI.Interfaces,
-  Dext.Web.Indy,
   Dext.Web.Interfaces,
   Dext.Auth.Identity,
+  Dext.Mocks,
+  Dext.Mocks.Matching,
   Dext.Json;
 
 type
-  TMockHttpRequest = class(TInterfacedObject, IHttpRequest)
-  private
-    FMethod: string;
-    FPath: string;
-    FQueryParams: IStringDictionary;
-    FBodyStream: TStream;
-    FRouteParams: TRouteValueDictionary;
-    FHeaders: IStringDictionary;
-    FCookies: IStringDictionary;
-    FFiles: IFormFileCollection;
-    FRemoteIpAddress: string;
+  { Retrocompatibility aliases, kept as pure factories around Mock<T> }
+  TMockHttpRequest = class
   public
-    constructor Create(const AQueryString: string; const AMethod: string = 'GET'; const APath: string = '/api/test');
-    destructor Destroy; override;
-
-    // IHttpRequest
-    function GetMethod: string;
-    function GetPath: string;
-    function GetQuery: IStringDictionary;
-    function GetBody: TStream;
-    function GetRouteParams: TRouteValueDictionary;
-    function GetHeaders: IStringDictionary; virtual;
-    function GetRemoteIpAddress: string;
-    function GetHeader(const AName: string): string;
-    function GetQueryParam(const AName: string): string;
-    function GetCookies: IStringDictionary;
-    function GetFiles: IFormFileCollection;
-
-    property RemoteIpAddress: string read FRemoteIpAddress write FRemoteIpAddress;
-    property Cookies: IStringDictionary read GetCookies;
-    property Files: IFormFileCollection read GetFiles;
+    class function Create(const AQueryString: string): IHttpRequest; static;
   end;
 
-  TMockHttpResponse = class(TInterfacedObject, IHttpResponse)
-  private
-    FStatusCode: Integer;
-    FContentType: string;
-    FContentText: string;
-    FCustomHeaders: IStringDictionary;
+  TMockHttpResponse = class
   public
-    constructor Create;
-    destructor Destroy; override;
-
-    // IHttpResponse
-    function GetStatusCode: Integer;
-    function GetContentType: string;
-    function Status(AValue: Integer): IHttpResponse;
-    procedure SetStatusCode(AValue: Integer);
-    procedure SetContentType(const AValue: string);
-    procedure SetContentLength(const AValue: Int64);
-    procedure Write(const AContent: string); overload;
-    procedure Write(const ABuffer: TBytes); overload;
-    procedure Write(const AStream: TStream); overload;
-    procedure Json(const AJson: string); overload;
-    procedure Json(const AValue: TValue); overload;
-    procedure AddHeader(const AName, AValue: string);
-    procedure AppendCookie(const AName, AValue: string; const AOptions: TCookieOptions); overload;
-    procedure AppendCookie(const AName, AValue: string); overload;
-    procedure DeleteCookie(const AName: string);
-
-    // Propriedades para teste
-    property StatusCode: Integer read GetStatusCode write SetStatusCode;
-    property ContentText: string read FContentText;
+    class function Create: IHttpResponse; static;
   end;
 
-  TMockHttpContext = class(TInterfacedObject, IHttpContext)
-  private
-    FRequest: IHttpRequest;
-    FResponse: IHttpResponse;
-    FServices: IServiceProvider;
-    FUser: IClaimsPrincipal;
-    FItems: IDictionary<string, TValue>;
+  TMockHttpContext = class
   public
-    constructor Create(ARequest: IHttpRequest; AResponse: IHttpResponse;
-      AServices: IServiceProvider = nil);
-    destructor Destroy; override;
-
-    // IHttpContext
-    function GetRequest: IHttpRequest;
-
-    function GetResponse: IHttpResponse;
-    procedure SetResponse(const AValue: IHttpResponse);
-
-    function GetServices: IServiceProvider; virtual;
-    procedure SetServices(const AValue: IServiceProvider);
-
-    function GetUser: IClaimsPrincipal;
-    procedure SetUser(const AValue: IClaimsPrincipal);
-
-    function GetItems: IDictionary<string, TValue>;
-
-    procedure SetRouteParams(const AParams: TRouteValueDictionary);
-  end;
-
-  TMockHttpRequestWithHeaders = class(TMockHttpRequest)
-  private
-    FCustomHeaders: IStringDictionary;
-  public
-    constructor CreateWithHeaders(const AQueryString: string;
-      const AHeaders: IStringDictionary);
-    destructor Destroy; override;
-    function GetHeaders: IStringDictionary; override;
-  end;
-
-  TMockHttpContextWithServices = class(TMockHttpContext)
-  private
-    FCustomServices: IServiceProvider;
-  public
-    constructor CreateWithServices(ARequest: IHttpRequest;
-      AResponse: IHttpResponse; AServices: IServiceProvider);
-    function GetServices: IServiceProvider; override;
+    class function Create(ARequest: IHttpRequest; AResponse: IHttpResponse; AServices: IServiceProvider = nil): IHttpContext; static;
   end;
 
   TMockFactory = class
   public
-    class function CreateHttpContextWithHeaders(const AQueryString: string; const
-      AHeaders: IDictionary<string, string>): IHttpContext;
-    class function CreateHttpContextWithServices(const AQueryString: string; const
-      AServices: IServiceProvider): IHttpContext;
+    class function CreateHttpContextWithHeaders(const AQueryString: string; const AHeaders: IStringDictionary): IHttpContext; overload;
+    class function CreateHttpContextWithHeaders(const AQueryString: string; const AHeaders: IDictionary<string, string>): IHttpContext; overload;
+    
+    class function CreateHttpContextWithServices(const AQueryString: string; const AServices: IServiceProvider): IHttpContext;
+    
     class function CreateHttpContext(const AQueryString: string): IHttpContext; static;
-    class function CreateHttpContextWithRoute(const AQueryString: string; const
-      ARouteParams: IDictionary<string, string>): IHttpContext; static;
+    
+    // Kept for backward compatibility, translates IDictionary to TRouteValueDictionary internally
+    class function CreateHttpContextWithRoute(const AQueryString: string; const ARouteParams: IDictionary<string, string>): IHttpContext; static;
   end;
 
 implementation
 
-{ TMockHttpRequest }
-
-constructor TMockHttpRequest.Create(const AQueryString: string; const AMethod: string = 'GET'; const APath: string = '/api/test');
+{ Helper }
+procedure ParseQueryStringInto(const AQueryString: string; out ADict: IStringDictionary);
 var
   I, PosEqual: Integer;
   ParamList: TStringList;
-  Key, Value: string;
+  Key, Value, QueryPart: string;
 begin
-  inherited Create;
-  FMethod := AMethod;
-  FPath := APath;
+  ADict := TCollections.CreateStringDictionary;
+  if AQueryString = '' then Exit;
 
-  FRouteParams.Clear;
-  FQueryParams := TCollections.CreateStringDictionary;
+  QueryPart := AQueryString;
+  var PosQuery := Pos('?', AQueryString);
+  if PosQuery > 0 then
+    QueryPart := Copy(AQueryString, PosQuery + 1, MaxInt);
 
-  if AQueryString <> '' then
-  begin
-    // ✅ SEPARAR path de query string
-    var QueryPart := AQueryString;
-    var PosQuery := Pos('?', AQueryString);
-    if PosQuery > 0 then
-      QueryPart := Copy(AQueryString, PosQuery + 1, MaxInt);
-
-    ParamList := TStringList.Create;
-    try
-      ParamList.Delimiter := '&';
-      ParamList.StrictDelimiter := True;
-      ParamList.DelimitedText := QueryPart; // ✅ Só a parte depois do ?
-
-      for I := 0 to ParamList.Count - 1 do
+  ParamList := TStringList.Create;
+  try
+    ParamList.Delimiter := '&';
+    ParamList.StrictDelimiter := True;
+    ParamList.DelimitedText := QueryPart;
+    for I := 0 to ParamList.Count - 1 do
+    begin
+      PosEqual := Pos('=', ParamList[I]);
+      if PosEqual > 0 then
       begin
-        PosEqual := Pos('=', ParamList[I]);
-        if PosEqual > 0 then
-        begin
-          Key := Copy(ParamList[I], 1, PosEqual - 1);
-          Value := Copy(ParamList[I], PosEqual + 1, MaxInt);
-          FQueryParams.AddOrSetValue(Key, Value);
-        end;
-      end;
-    finally
-      ParamList.Free;
+        Key := Copy(ParamList[I], 1, PosEqual - 1);
+        Value := Copy(ParamList[I], PosEqual + 1, MaxInt);
+        ADict.AddOrSetValue(Key, Value);
+      end
+      else
+        ADict.AddOrSetValue(ParamList[I], '');
     end;
+  finally
+    ParamList.Free;
   end;
-
-  // Inicializar outros campos
-  FHeaders := TCollections.CreateStringDictionary;
-  FCookies := TCollections.CreateStringDictionary;
-  FFiles := TFormFileCollection.Create(TCollections.CreateList<IFormFile>);
-  FBodyStream := TMemoryStream.Create;
-  FRemoteIpAddress := '127.0.0.1'; // Default mock IP
-
-  // ✅ DEBUG: Log do que foi parseado
-  Writeln('Mock Request Created:');
-  Writeln('  QueryString: ', AQueryString);
-  Writeln('  Parsed params: ', FQueryParams.Count);
-  for var Pair in FQueryParams.ToArray do
-    Writeln('    ', Pair.Key, ' = ', Pair.Value);
 end;
 
-destructor TMockHttpRequest.Destroy;
-begin
-  FCookies := nil;
-  FBodyStream.Free;
-  inherited Destroy;
-end;
+{ TMockHttpRequest }
 
-function TMockHttpRequest.GetMethod: string;
+class function TMockHttpRequest.Create(const AQueryString: string): IHttpRequest;
+var
+  MockReq: Mock<IHttpRequest>;
+  QueryParams: IStringDictionary;
+  EmptyHeaders: IStringDictionary;
+  EmptyCookies: IStringDictionary;
+  EmptyRoute: TRouteValueDictionary;
 begin
-  Result := FMethod;
-end;
+  MockReq := Mock<IHttpRequest>.Create;
 
-function TMockHttpRequest.GetPath: string;
-begin
-  Result := FPath;
-end;
+  ParseQueryStringInto(AQueryString, QueryParams);
+  EmptyHeaders := TCollections.CreateStringDictionary;
+  EmptyCookies := TCollections.CreateStringDictionary;
+  EmptyRoute.Clear; 
 
-function TMockHttpRequest.GetQuery: IStringDictionary;
-begin
-  Result := FQueryParams; 
-end;
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(QueryParams)).When.GetQuery;
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(EmptyHeaders)).When.GetHeaders;
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(EmptyCookies)).When.GetCookies;
+  MockReq.Setup.Returns(TValue.From<TRouteValueDictionary>(EmptyRoute)).When.GetRouteParams;
+  
+  // Default values
+  MockReq.Setup.Returns(TValue.From<string>('GET')).When.GetMethod;
+  MockReq.Setup.Returns(TValue.From<string>('/api/test')).When.GetPath;
+  MockReq.Setup.Returns(TValue.From<string>('127.0.0.1')).When.GetRemoteIpAddress;
 
-function TMockHttpRequest.GetBody: TStream;
-begin
-  Result := FBodyStream;
-end;
-
-function TMockHttpRequest.GetRouteParams: TRouteValueDictionary;
-begin
-  Result := FRouteParams;
-end;
-
-function TMockHttpRequest.GetHeaders: IStringDictionary;
-begin
-  Result := FHeaders;
-end;
-
-function TMockHttpRequest.GetRemoteIpAddress: string;
-begin
-  Result := FRemoteIpAddress;
-end;
-
-function TMockHttpRequest.GetHeader(const AName: string): string;
-begin
-  if not FHeaders.TryGetValue(AName, Result) then
-    Result := '';
-end;
-
-function TMockHttpRequest.GetQueryParam(const AName: string): string;
-begin
-  if not FQueryParams.TryGetValue(AName, Result) then
-    Result := '';
-end;
-
-function TMockHttpRequest.GetCookies: IStringDictionary;
-begin
-  Result := FCookies;
-end;
-
-function TMockHttpRequest.GetFiles: IFormFileCollection;
-begin
-  Result := FFiles;
+  Result := MockReq.Instance;
 end;
 
 { TMockHttpResponse }
 
-constructor TMockHttpResponse.Create;
+class function TMockHttpResponse.Create: IHttpResponse;
+var
+  MockRes: Mock<IHttpResponse>;
 begin
-  inherited Create;
-  FStatusCode := 200;
-  FContentType := 'text/plain';
-  FCustomHeaders := TCollections.CreateDictionary<string, string>;
-end;
+  MockRes := Mock<IHttpResponse>.Create;
 
-destructor TMockHttpResponse.Destroy;
-begin
-  // FCustomHeaders.Free;
-  inherited Destroy;
-end;
+  MockRes.Setup.Returns(TValue.From<Integer>(200)).When.GetStatusCode;
+  MockRes.Setup.Returns(TValue.From<string>('text/plain')).When.GetContentType;
+  
+  // Note: Mock<T> dynamically handles unconfigured methods natively without failing 
+  // (unless explicitly configured). So write methods etc just swallow calls correctly!
 
-function TMockHttpResponse.GetContentType: string;
-begin
-  Result := FContentType;
-end;
-
-function TMockHttpResponse.GetStatusCode: Integer;
-begin
-  Result := FStatusCode;
-end;
-
-procedure TMockHttpResponse.Json(const AValue: TValue);
-begin
-  var JsonStr := TDextJson.Serialize(AValue);
-  FContentText := JsonStr;
-  FContentType := 'application/json';
-end;
-
-function TMockHttpResponse.Status(AValue: Integer): IHttpResponse;
-begin
-  FStatusCode := AValue;
-  Result := Self;
-end;
-
-procedure TMockHttpResponse.SetStatusCode(AValue: Integer);
-begin
-  FStatusCode := AValue;
-end;
-
-procedure TMockHttpResponse.SetContentType(const AValue: string);
-begin
-  FContentType := AValue;
-end;
-
-procedure TMockHttpResponse.SetContentLength(const AValue: Int64);
-begin
-  // Mock implementation - ignore
-end;
-
-procedure TMockHttpResponse.Write(const AContent: string);
-begin
-  FContentText := AContent;
-end;
-
-procedure TMockHttpResponse.Write(const ABuffer: TBytes);
-begin
-  FContentText := TEncoding.UTF8.GetString(ABuffer);
-end;
-
-procedure TMockHttpResponse.Write(const AStream: TStream);
-begin
-  // Mock implementation
-end;
-
-procedure TMockHttpResponse.Json(const AJson: string);
-begin
-  FContentText := AJson;
-  FContentType := 'application/json';
-end;
-
-procedure TMockHttpResponse.AddHeader(const AName, AValue: string);
-begin
-  FCustomHeaders.AddOrSetValue(AName, AValue);
-end;
-
-procedure TMockHttpResponse.AppendCookie(const AName, AValue: string; const AOptions: TCookieOptions);
-begin
-  // Mock implementation - ignore or store if needed for tests
-end;
-
-procedure TMockHttpResponse.AppendCookie(const AName, AValue: string);
-begin
-  // Mock implementation - ignore
-end;
-
-procedure TMockHttpResponse.DeleteCookie(const AName: string);
-begin
-  // Mock implementation - ignore
+  Result := MockRes.Instance;
 end;
 
 { TMockHttpContext }
 
-constructor TMockHttpContext.Create(ARequest: IHttpRequest; AResponse: IHttpResponse;
-  AServices: IServiceProvider);
-begin
-  inherited Create;
-  FRequest := ARequest;
-  FResponse := AResponse;
-  FServices := AServices;
-  FItems := TCollections.CreateDictionary<string, TValue>;
-end;
-
-destructor TMockHttpContext.Destroy;
-begin
-  // FItems.Free;
-  inherited;
-end;
-
-function TMockHttpContext.GetRequest: IHttpRequest;
-begin
-  Result := FRequest;
-end;
-
-function TMockHttpContext.GetResponse: IHttpResponse;
-begin
-  Result := FResponse;
-end;
-
-procedure TMockHttpContext.SetResponse(const AValue: IHttpResponse);
-begin
-  FResponse := AValue;
-end;
-
-function TMockHttpContext.GetServices: IServiceProvider;
-begin
-  Result := FServices;
-end;
-
-function TMockHttpContext.GetUser: IClaimsPrincipal;
-begin
-  Result := FUser;
-end;
-
-procedure TMockHttpContext.SetUser(const AValue: IClaimsPrincipal);
-begin
-  FUser := AValue;
-end;
-
-procedure TMockHttpContext.SetRouteParams(const AParams: TRouteValueDictionary);
+class function TMockHttpContext.Create(ARequest: IHttpRequest; AResponse: IHttpResponse;
+  AServices: IServiceProvider): IHttpContext;
 var
-  MockRequest: TMockHttpRequest;
+  MockCtx: Mock<IHttpContext>;
+  Items: IDictionary<string, TValue>;
 begin
-  try
-    MockRequest := TMockHttpRequest(FRequest);
-    MockRequest.FRouteParams := AParams;
-  except
-    on E: Exception do
-    begin
-      Writeln('❌ ERROR in SetRouteParams: ', E.Message);
-    end;
-  end;
+  MockCtx := Mock<IHttpContext>.Create;
+
+  Items := TCollections.CreateDictionary<string, TValue>;
+
+  MockCtx.Setup.Returns(TValue.From<IHttpRequest>(ARequest)).When.GetRequest;
+  MockCtx.Setup.Returns(TValue.From<IHttpResponse>(AResponse)).When.GetResponse;
+  MockCtx.Setup.Returns(TValue.From<IServiceProvider>(AServices)).When.GetServices;
+  MockCtx.Setup.Returns(TValue.From<IDictionary<string, TValue>>(Items)).When.GetItems;
+
+  Result := MockCtx.Instance;
 end;
-
-procedure TMockHttpContext.SetServices(const AValue: IServiceProvider);
-begin
-  FServices := AValue;
-end;
-
-function TMockHttpContext.GetItems: IDictionary<string, TValue>;
-begin
-  Result := FItems;
-end;
-
-//procedure TMockHttpContext.SetRouteParams(const AParams: IDictionary<string, string>);
-//var
-//  Param: TPair<string, string>;
-//begin
-//  if FRequest is TMockHttpRequest then
-//  begin
-//    var MockRequest := TMockHttpRequest(FRequest);
-//    MockRequest.FRouteParams.Clear;
-//    for Param in AParams do
-//      MockRequest.FRouteParams.Add(Param.Key, Param.Value);
-//  end;
-//end;
-
-//procedure TMockHttpContext.SetRouteParams(const AParams: IDictionary<string, string>);
-//var
-//  IndyRequest: TIndyHttpRequest;
-//  Param: TPair<string, string>;
-//begin
-//  Writeln('🔍 SetRouteParams Debug:');
-//  Writeln('  Input params count: ', AParams.Count);
-//  for Param in AParams do
-//    Writeln('  ', Param.Key, ' = ', Param.Value);
-//
-//  if FRequest is TIndyHttpRequest then
-//  begin
-//    IndyRequest := TIndyHttpRequest(FRequest);
-//    IndyRequest.GetRouteParams.Clear;
-//    for Param in AParams do
-//    begin
-//      IndyRequest.GetRouteParams.Add(Param.Key, Param.Value);
-//    end;
-//
-//    Writeln('  After injection - FRouteParams count: ', IndyRequest.GetRouteParams.Count);
-//  end
-//  else
-//  begin
-//    Writeln('❌ ERROR: FRequest is not TIndyHttpRequest');
-//  end;
-//end;
 
 { TMockFactory }
 
 class function TMockFactory.CreateHttpContext(const AQueryString: string): IHttpContext;
-var
-  Request: IHttpRequest;
-  Response: IHttpResponse;
 begin
-  Request := TMockHttpRequest.Create(AQueryString);
-  Response := TMockHttpResponse.Create;
-  Result := TMockHttpContext.Create(Request, Response);
+  Result := CreateHttpContextWithServices(AQueryString, nil);
 end;
 
-//class function TMockFactory.CreateHttpContextWithRoute(const AQueryString: string;
-//  const ARouteParams: IDictionary<string, string>): IHttpContext;
-//begin
-//  Result := CreateHttpContext(AQueryString);
-//  (Result as TMockHttpContext).SetRouteParams(ARouteParams);
-//end;
+class function TMockFactory.CreateHttpContextWithServices(const AQueryString: string;
+  const AServices: IServiceProvider): IHttpContext;
+begin
+  Result := TMockHttpContext.Create(TMockHttpRequest.Create(AQueryString), TMockHttpResponse.Create, AServices);
+end;
+
+class function TMockFactory.CreateHttpContextWithHeaders(const AQueryString: string;
+  const AHeaders: IStringDictionary): IHttpContext;
+var
+  MockReq: Mock<IHttpRequest>;
+  QueryParams: IStringDictionary;
+  EmptyCookies: IStringDictionary;
+  EmptyRoute: TRouteValueDictionary;
+begin
+  MockReq := Mock<IHttpRequest>.Create;
+  
+  ParseQueryStringInto(AQueryString, QueryParams);
+  EmptyCookies := TCollections.CreateStringDictionary;
+  EmptyRoute.Clear;
+
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(QueryParams)).When.GetQuery;
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(AHeaders)).When.GetHeaders;
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(EmptyCookies)).When.GetCookies;
+  MockReq.Setup.Returns(TValue.From<TRouteValueDictionary>(EmptyRoute)).When.GetRouteParams;
+  
+  MockReq.Setup.Returns(TValue.From<string>('GET')).When.GetMethod;
+  MockReq.Setup.Returns(TValue.From<string>('/api/test')).When.GetPath;
+  MockReq.Setup.Returns(TValue.From<string>('127.0.0.1')).When.GetRemoteIpAddress;
+
+  Result := TMockHttpContext.Create(MockReq.Instance, TMockHttpResponse.Create, nil);
+end;
+
+class function TMockFactory.CreateHttpContextWithHeaders(const AQueryString: string;
+  const AHeaders: IDictionary<string, string>): IHttpContext;
+var
+  NewHeaders: IStringDictionary;
+  Pair: TPair<string, string>;
+begin
+  NewHeaders := TCollections.CreateStringDictionary;
+  for Pair in AHeaders do
+    NewHeaders.AddOrSetValue(Pair.Key, Pair.Value);
+  Result := CreateHttpContextWithHeaders(AQueryString, NewHeaders);
+end;
 
 class function TMockFactory.CreateHttpContextWithRoute(const AQueryString: string;
   const ARouteParams: IDictionary<string, string>): IHttpContext;
 var
-  Request: IHttpRequest;
-  Response: IHttpResponse;
+  MockReq: Mock<IHttpRequest>;
+  QueryParams: IStringDictionary;
+  EmptyHeaders: IStringDictionary;
+  EmptyCookies: IStringDictionary;
+  RouteValDict: TRouteValueDictionary;
+  Pair: TPair<string, string>;
 begin
-  Request := TMockHttpRequest.Create(AQueryString);
-  Response := TMockHttpResponse.Create;
-  Result := TMockHttpContext.Create(Request, Response);
+  MockReq := Mock<IHttpRequest>.Create;
+  
+  ParseQueryStringInto(AQueryString, QueryParams);
+  EmptyHeaders := TCollections.CreateStringDictionary;
+  EmptyCookies := TCollections.CreateStringDictionary;
+  
+  RouteValDict.Clear;
+  for Pair in ARouteParams do
+    RouteValDict.Add(Pair.Key, Pair.Value);
 
-  // Injeta os route params
-  (Result as TMockHttpContext).SetRouteParams(ARouteParams);
-end;
+  // Set up standard getters
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(QueryParams)).When.GetQuery;
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(EmptyHeaders)).When.GetHeaders;
+  MockReq.Setup.Returns(TValue.From<IStringDictionary>(EmptyCookies)).When.GetCookies;
+  MockReq.Setup.Returns(TValue.From<TRouteValueDictionary>(RouteValDict)).When.GetRouteParams;
+  MockReq.Setup.Returns(TValue.From<string>('GET')).When.GetMethod;
+  MockReq.Setup.Returns(TValue.From<string>('/api/test')).When.GetPath;
+  MockReq.Setup.Returns(TValue.From<string>('127.0.0.1')).When.GetRemoteIpAddress;
 
-class function TMockFactory.CreateHttpContextWithHeaders(const AQueryString:
-  string; const AHeaders: IStringDictionary): IHttpContext;
-var
-  Request: IHttpRequest;
-  Response: IHttpResponse;
-begin
-  Request := TMockHttpRequestWithHeaders.CreateWithHeaders(AQueryString, AHeaders);
-  Response := TMockHttpResponse.Create;
-  Result := TMockHttpContext.Create(Request, Response);
-end;
-
-class function TMockFactory.CreateHttpContextWithServices(const AQueryString:
-  string; const AServices: IServiceProvider): IHttpContext;
-var
-  Request: IHttpRequest;
-  Response: IHttpResponse;
-begin
-  Request := TMockHttpRequest.Create(AQueryString);
-  Response := TMockHttpResponse.Create;
-  Result := TMockHttpContextWithServices.CreateWithServices(Request, Response, AServices);
-end;
-
-{ TMockHttpRequestWithHeaders }
-
-constructor TMockHttpRequestWithHeaders.CreateWithHeaders(const AQueryString: string;
-  const AHeaders: IStringDictionary);
-begin
-  inherited Create(AQueryString);
-
-  // Clonar os headers fornecidos
-  FCustomHeaders := TCollections.CreateStringDictionary;
-  for var Pair in AHeaders.ToArray do
-  begin
-    // Headers são case-insensitive, normalizar para lowercase
-    FCustomHeaders.AddOrSetValue(Pair.Key.ToLower, Pair.Value);
-  end;
-end;
-
-destructor TMockHttpRequestWithHeaders.Destroy;
-begin
-  // FCustomHeaders.Free;
-  inherited Destroy;
-end;
-
-function TMockHttpRequestWithHeaders.GetHeaders: IDictionary<string, string>;
-begin
-  Result := FCustomHeaders;
-end;
-
-{ TMockHttpContextWithServices }
-
-constructor TMockHttpContextWithServices.CreateWithServices(ARequest: IHttpRequest;
-  AResponse: IHttpResponse; AServices: IServiceProvider);
-begin
-  inherited Create(ARequest, AResponse, AServices);
-  FCustomServices := AServices;
-end;
-
-function TMockHttpContextWithServices.GetServices: IServiceProvider;
-begin
-  Result := FCustomServices;
+  Result := TMockHttpContext.Create(MockReq.Instance, TMockHttpResponse.Create, nil);
 end;
 
 end.
