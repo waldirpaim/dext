@@ -1,4 +1,4 @@
-unit Dext.Entity.DataSet.Tests;
+﻿unit Dext.Entity.DataSet.Tests;
 
 interface
 
@@ -729,9 +729,6 @@ begin
   FDataSet.Post;
 
   Should(FDataSet.RecordCount).Be(2);
-
-  // Navegar para o Record 3
-  FDataSet.Last;
   Should(FDataSet.FieldByName('Id').AsInteger).Be(3);
 
   // Inserir entre Record 1 e Record 3
