@@ -755,8 +755,6 @@ begin
   end;
 end;
 
-
-
 { TSQLColumnMapper<T> }
 
 constructor TSQLColumnMapper<T>.Create(ANamingStrategy: INamingStrategy);

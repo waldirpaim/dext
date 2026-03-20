@@ -153,46 +153,35 @@ implementation
 
 uses
   System.StrUtils,
-  Dext.Collections.Comparers,
+  Dext.Specifications.Evaluator,
   Dext.Specifications.Interfaces,
   Dext.Specifications.Parser,
-  Dext.Specifications.Evaluator;
-  
-type
-  TRttiHelper = class
-  public
-    class function GetFieldPtr(Instance: TObject; const FieldName: string): Pointer;
-    class function CreateInstance(AClass: TClass): TObject;
-  end;
+  Dext.Core.Reflection,
+  Dext.Core.Activator,
+  Dext.Core.ValueConverters,
+  Dext.Entity;
 
-{ TRttiHelper }
-
-class function TRttiHelper.CreateInstance(AClass: TClass): TObject;
-var
-  RType: TRttiType;
-  Method: TRttiMethod;
-  Ctx: TRttiContext;
+function TValueBufferToValue(ABuffer: TValueBuffer; ADataType: TFieldType): TValue;
 begin
-  Ctx := TRttiContext.Create;
-  RType := Ctx.GetType(AClass);
-  for Method in RType.GetMethods do
-    if Method.IsConstructor and (Length(Method.GetParameters) = 0) then
-      Exit(Method.Invoke(AClass, []).AsObject);
-  Result := nil;
-end;
-
-class function TRttiHelper.GetFieldPtr(Instance: TObject; const FieldName: string): Pointer;
-var
-  Ctx: TRttiContext;
-  RField: TRttiField;
-begin
-  Ctx := TRttiContext.Create;
-  RField := Ctx.GetType(Instance.ClassType).GetField(FieldName);
-  if RField <> nil then
-    Result := PByte(Instance) + RField.Offset
+  case ADataType of
+    ftString, ftWideString:
+      Result := TValue.From<string>(TEncoding.Unicode.GetString(ABuffer));
+    ftInteger:
+      Result := TValue.From<Integer>(PInteger(ABuffer)^);
+    ftLargeint:
+      Result := TValue.From<Int64>(PInt64(ABuffer)^);
+    ftFloat, ftCurrency:
+      Result := TValue.From<Double>(PDouble(ABuffer)^);
+    ftBoolean:
+      Result := TValue.From<Boolean>(PBoolean(ABuffer)^);
+    ftDateTime, ftDate, ftTime:
+      Result := TValue.From<TDateTime>(PDouble(ABuffer)^);
   else
-    Result := nil;
+    Result := TValue.Empty;
+  end;
 end;
+
+{ TEntityDataSet }
 
 { TEntityDataSet }
 
@@ -445,7 +434,7 @@ begin
     var LContext := TRttiContext.Create;
     try
       var LType := LContext.GetType(FEntityClass);
-      FVirtualIndex.Sort(TComparer<Integer>.Construct(
+      FVirtualIndex.Sort(Dext.Collections.Comparers.TComparer<Integer>.Construct(
         function(const A, B: Integer): Integer
         begin
           // A and B are indices in FItems
@@ -493,18 +482,29 @@ begin
   for I := 0 to FVirtualIndex.Count - 1 do
   begin
     // Ler o valor do campo usando offset direto ou RTTI
-    if PropMap.FieldValueOffset > 0 then
+    if (PropMap.FieldValueOffset > 0) or (PropMap.FieldOffset > 0) then
     begin
-      PValue := Pointer(PByte(FItems[FVirtualIndex[I]]) + PropMap.FieldValueOffset);
-      case PropMap.DataType of
-        ftInteger, ftSmallint: CurVal := PInteger(PValue)^;
-        ftLargeint: CurVal := PInt64(PValue)^;
-        ftString, ftWideString: CurVal := PString(PValue)^;
-        ftFloat: CurVal := PDouble(PValue)^;
-        ftCurrency: CurVal := PCurrency(PValue)^;
-        ftBoolean: CurVal := PBoolean(PValue)^;
+      // Use smart types null flag check only for SmartProps that have a null flag
+      if (PropMap.FieldValueOffset > 0) and (PropMap.FieldOffset > 0) and
+         not PBoolean(Pointer(PByte(FItems[FVirtualIndex[I]]) + PropMap.FieldOffset))^ then
+        CurVal := Null
       else
-        Continue;
+      begin
+        if PropMap.FieldValueOffset > 0 then
+          PValue := Pointer(PByte(FItems[FVirtualIndex[I]]) + PropMap.FieldValueOffset)
+        else
+          PValue := Pointer(PByte(FItems[FVirtualIndex[I]]) + PropMap.FieldOffset);
+
+        case PropMap.DataType of
+          ftInteger, ftSmallint, ftAutoInc: CurVal := PInteger(PValue)^;
+          ftLargeint: CurVal := PInt64(PValue)^;
+          ftString, ftWideString: CurVal := PString(PValue)^;
+          ftFloat: CurVal := PDouble(PValue)^;
+          ftCurrency: CurVal := PCurrency(PValue)^;
+          ftBoolean: CurVal := PBoolean(PValue)^;
+        else
+          Continue;
+        end;
       end;
     end
     else if RttiProp <> nil then
@@ -912,6 +912,34 @@ procedure TEntityDataSet.InternalInitFieldDefs;
         Exit(ftLargeint);
       tkVariant:
         Exit(ftVariant);
+      tkRecord:
+      begin
+        // Detect Smart Types (Prop<T>) or Nullable Types (Nullable<T>)
+        var LTypeName := string(ATypeInfo.Name);
+        if LTypeName.StartsWith('Prop<') or LTypeName.StartsWith('Nullable<') then
+        begin
+           // Extract the T from the generic or check known aliases for performance
+           if LTypeName.Contains('<Integer>') or LTypeName.Contains('<System.Integer>') then Exit(ftInteger)
+           else if LTypeName.Contains('<string>') or LTypeName.Contains('<System.string>') or LTypeName.Contains('<UnicodeString>') then Exit(ftWideString)
+           else if LTypeName.Contains('<Boolean>') or LTypeName.Contains('<System.Boolean>') then Exit(ftBoolean)
+           else if LTypeName.Contains('<Int64>') or LTypeName.Contains('<System.Int64>') then Exit(ftLargeint)
+           else if LTypeName.Contains('<Double>') or LTypeName.Contains('<System.Double>') then Exit(ftFloat)
+           else if LTypeName.Contains('<Currency>') or LTypeName.Contains('<System.Currency>') then Exit(ftCurrency)
+           else if LTypeName.Contains('<TDateTime>') or LTypeName.Contains('<System.TDateTime>') then Exit(ftDateTime);
+           
+           // Fallback to RTTI if name check is ambiguous or represents a nested generic (e.g., Nullable<Prop<Integer>>)
+           var LCtx := TRttiContext.Create;
+           try
+             var LT := LCtx.GetType(ATypeInfo);
+             var LF := LT.GetField('FValue');
+             if LF <> nil then
+               Exit(MapTypeToFieldType(LF.FieldType.Handle));
+           finally
+             LCtx.Free;
+           end;
+        end;
+        Exit(ftUnknown);
+      end;
     else
       Exit(ftUnknown);
     end;
@@ -1267,37 +1295,27 @@ begin
   if not FEntityMap.Properties.TryGetValue(Field.FieldName, PropMap) then
     Exit;
 
-  PValue := Pointer(PByte(CurrentObj) + PropMap.FieldValueOffset);
-
-  // 3. RTTI Fallback if field offset is not defined
-  if (PropMap.FieldValueOffset <= 0) then
+  // 3. RTTI Fallback if field offset is not defined or represents a Smart Type / Nullable Wrapper
+  if (PropMap.FieldValueOffset <= 0) or 
+     ((PropMap.PropertyType <> nil) and TReflection.IsSmartProp(PropMap.PropertyType)) then
   begin
    Context := TRttiContext.Create;
     try
       RttiType := Context.GetType(FEntityClass);
       if RttiType <> nil then
       begin
-       RttiProp := RttiType.GetProperty(Field.FieldName);
+        RttiProp := RttiType.GetProperty(Field.FieldName);
         if RttiProp <> nil then
         begin
-          case Field.DataType of
-            ftString, ftWideString:
-              Value := RttiProp.GetValue(CurrentObj).AsString;
-            ftInteger, ftSmallint:
-              Value := RttiProp.GetValue(CurrentObj).AsInteger;
-            ftLargeint:
-              Value := RttiProp.GetValue(CurrentObj).AsInt64;
-            ftFloat:
-              Value := RttiProp.GetValue(CurrentObj).AsExtended;
-            ftCurrency:
-              Value := RttiProp.GetValue(CurrentObj).AsCurrency;
-            ftBoolean:
-              Value := RttiProp.GetValue(CurrentObj).AsBoolean;
-            ftDateTime, ftDate, ftTime:
-              Value := RttiProp.GetValue(CurrentObj).AsExtended;
+          var Temp := RttiProp.GetValue(CurrentObj);
+          var Unwrapped: TValue;
+          if TReflection.TryUnwrapProp(Temp, Unwrapped) then
+          begin
+            if Unwrapped.IsEmpty then Exit;
+            Value := Unwrapped.AsVariant;
+          end
           else
-            Exit;
-          end;
+            Value := Temp.AsVariant;
           Result := True;
           Exit;
         end;
@@ -1305,24 +1323,15 @@ begin
         RttiField := RttiType.GetField(Field.FieldName);
         if RttiField <> nil then
         begin
-          case Field.DataType of
-            ftString, ftWideString:
-              Value := RttiField.GetValue(CurrentObj).AsString;
-            ftInteger, ftSmallint:
-              Value := RttiField.GetValue(CurrentObj).AsInteger;
-            ftLargeint:
-              Value := RttiField.GetValue(CurrentObj).AsInt64;
-            ftFloat:
-              Value := RttiField.GetValue(CurrentObj).AsExtended;
-            ftCurrency:
-              Value := RttiField.GetValue(CurrentObj).AsCurrency;
-            ftBoolean:
-              Value := RttiField.GetValue(CurrentObj).AsBoolean;
-            ftDateTime, ftDate, ftTime:
-              Value := RttiField.GetValue(CurrentObj).AsExtended;
+          var Temp := RttiField.GetValue(CurrentObj);
+          var Unwrapped: TValue;
+          if TReflection.TryUnwrapProp(Temp, Unwrapped) then
+          begin
+            if Unwrapped.IsEmpty then Exit;
+            Value := Unwrapped.AsVariant;
+          end
           else
-            Exit;
-          end;
+            Value := Temp.AsVariant;
           Result := True;
           Exit;
         end;
@@ -1334,6 +1343,17 @@ begin
   end;
 
   // Leitura direta por offset (fast-path)
+  // Somente checa flag de nulo se for um SmartProp (FieldValueOffset > 0) que possui flag (FieldOffset > 0)
+  if (PropMap.FieldValueOffset > 0) and (PropMap.FieldOffset > 0) and
+     not PBoolean(Pointer(PByte(CurrentObj) + PropMap.FieldOffset))^ then
+    Exit;
+
+  // Determinar o ponteiro para o valor real
+  if PropMap.FieldValueOffset > 0 then
+    PValue := Pointer(PByte(CurrentObj) + PropMap.FieldValueOffset)
+  else
+    PValue := Pointer(PByte(CurrentObj) + PropMap.FieldOffset);
+
   case Field.DataType of
     ftString, ftWideString:
       Value := PString(PValue)^;
@@ -1490,10 +1510,20 @@ begin
   if not FEntityMap.Properties.TryGetValue(Field.FieldName, PropMap) then
     Exit;
 
-  PValue := Pointer(PByte(CurrentObj) + PropMap.FieldValueOffset);
+  if PropMap.FieldValueOffset > 0 then
+    PValue := Pointer(PByte(CurrentObj) + PropMap.FieldValueOffset)
+  else
+    PValue := Pointer(PByte(CurrentObj) + PropMap.FieldOffset);
 
-  // RTTI fallback path (for properties without direct offset)
-  if (PropMap.FieldValueOffset <= 0) then
+  // Atualização da flag de nulo (somente para SmartProps que possuem tal flag)
+  if (PropMap.FieldValueOffset > 0) and (PropMap.FieldOffset > 0) then
+  begin
+    PBoolean(Pointer(PByte(CurrentObj) + PropMap.FieldOffset))^ := (P <> nil);
+  end;
+
+  // RTTI fallback path (for properties without direct offset or generic wrappers)
+  if (PropMap.FieldValueOffset <= 0) or 
+     ((PropMap.PropertyType <> nil) and TReflection.IsSmartProp(PropMap.PropertyType)) then
   begin
     Context := TRttiContext.Create;
     try
@@ -1501,43 +1531,23 @@ begin
       if RttiType <> nil then
       begin
         Prop := RttiType.GetProperty(Field.FieldName);
-        if (Prop <> nil) and (P <> nil) then
+        if Prop <> nil then
         begin
-          case Field.DataType of
-            ftString, ftWideString:
-              Prop.SetValue(CurrentObj, string(PWideChar(P)));
-            ftInteger, ftSmallint:
-              Prop.SetValue(CurrentObj, PInteger(P)^);
-            ftLargeint:
-              Prop.SetValue(CurrentObj, PInt64(P)^);
-            ftFloat, ftCurrency:
-              Prop.SetValue(CurrentObj, PDouble(P)^);
-            ftBoolean:
-              Prop.SetValue(CurrentObj, PWordBool(P)^ <> False);
-            ftDateTime, ftDate, ftTime:
-              Prop.SetValue(CurrentObj, TValue.From<Double>(PDouble(P)^));
-          end;
+          if P = nil then
+            TReflection.SetValue(CurrentObj, Prop, TValue.Empty)
+          else
+            TReflection.SetValue(CurrentObj, Prop, TValueBufferToValue(Buffer, Field.DataType));
           SetModified(True);
           Exit;
         end;
 
         Fld := RttiType.GetField(Field.FieldName);
-        if (Fld <> nil) and (P <> nil) then
+        if Fld <> nil then
         begin
-          case Field.DataType of
-            ftString, ftWideString:
-              Fld.SetValue(CurrentObj, string(PWideChar(P)));
-            ftInteger, ftSmallint:
-              Fld.SetValue(CurrentObj, PInteger(P)^);
-            ftLargeint:
-              Fld.SetValue(CurrentObj, PInt64(P)^);
-            ftFloat, ftCurrency:
-              Fld.SetValue(CurrentObj, PDouble(P)^);
-            ftBoolean:
-              Fld.SetValue(CurrentObj, PWordBool(P)^ <> False);
-            ftDateTime, ftDate, ftTime:
-              Fld.SetValue(CurrentObj, TValue.From<Double>(PDouble(P)^));
-          end;
+          if P = nil then
+            TReflection.SetValue(CurrentObj, Fld, TValue.Empty)
+          else
+            TReflection.SetValue(CurrentObj, Fld, TValueBufferToValue(Buffer, Field.DataType));
           SetModified(True);
           Exit;
         end;

@@ -1,4 +1,4 @@
-﻿unit Dext.Core.Reflection;
+unit Dext.Core.Reflection;
 
 interface
 
@@ -51,7 +51,11 @@ type
     class procedure SetValue(AInstance: Pointer; AMember: TRttiMember; const AValue: TValue); static;
     class procedure SetValueByPath(AInstance: TObject; const APath: string; const AValue: TValue); static;
     class function IsSmartProp(AType: PTypeInfo): Boolean; static;
+    class function GetUnderlyingType(AType: PTypeInfo): PTypeInfo; static;
     class function TryUnwrapProp(const ASource: TValue; var ADest: TValue): Boolean; static;
+    class function TryWrapProp(var ADest: TValue; const ASource: TValue): Boolean; static;
+    class function CreateInstance(AClass: TClass): TObject; static;
+    class function GetFieldPtr(Instance: TObject; const FieldName: string): Pointer; static;
   end;
 
 implementation
@@ -150,6 +154,22 @@ begin
   else if AMember is TRttiField then TargetType := TRttiField(AMember).FieldType.Handle
   else Exit;
   var Converted := TValueConverter.Convert(AValue, TargetType);
+  
+  // Handling SmartProps during SetValue
+  if IsSmartProp(TargetType) then
+  begin
+    var Current: TValue;
+    if AMember is TRttiProperty then Current := TRttiProperty(AMember).GetValue(AInstance)
+    else if AMember is TRttiField then Current := TRttiField(AMember).GetValue(AInstance);
+    
+    if TryWrapProp(Current, Converted) then
+    begin
+      if AMember is TRttiProperty then TRttiProperty(AMember).SetValue(AInstance, Current)
+      else if AMember is TRttiField then TRttiField(AMember).SetValue(AInstance, Current);
+      Exit;
+    end;
+  end;
+
   if AMember is TRttiProperty then TRttiProperty(AMember).SetValue(AInstance, Converted)
   else if AMember is TRttiField then TRttiField(AMember).SetValue(AInstance, Converted);
 end;
@@ -233,6 +253,11 @@ begin
   Result := GetMetadata(AType).IsSmartProp;
 end;
 
+class function TReflection.GetUnderlyingType(AType: PTypeInfo): PTypeInfo;
+begin
+  Result := GetMetadata(AType).InnerType;
+end;
+
 class function TReflection.TryUnwrapProp(const ASource: TValue; var ADest: TValue): Boolean;
 var
   PData: Pointer;
@@ -272,6 +297,49 @@ begin
       Result := True;
     end;
   end;
+end;
+
+class function TReflection.TryWrapProp(var ADest: TValue; const ASource: TValue): Boolean;
+var
+  PData: Pointer;
+begin
+  Result := False;
+  if ADest.TypeInfo = nil then Exit;
+
+  var Meta := GetMetadata(ADest.TypeInfo);
+  if Meta.IsSmartProp and (Meta.ValueField <> nil) then
+  begin
+    PData := ADest.GetReferenceToRawData;
+    if PData <> nil then
+    begin
+      // If it's Nullable, also set HasValue
+      if Meta.IsNullable and (Meta.HasValueField <> nil) then
+        Meta.HasValueField.SetValue(PData, not ASource.IsEmpty);
+
+      if not ASource.IsEmpty then
+      begin
+        var Converted := TValueConverter.Convert(ASource, Meta.InnerType);
+        Meta.ValueField.SetValue(PData, Converted);
+      end;
+      Result := True;
+    end;
+  end;
+end;
+
+class function TReflection.CreateInstance(AClass: TClass): TObject;
+begin
+  Result := TActivator.CreateInstance(AClass, []);
+end;
+
+class function TReflection.GetFieldPtr(Instance: TObject; const FieldName: string): Pointer;
+var
+  RField: TRttiField;
+begin
+  RField := FContext.GetType(Instance.ClassType).GetField(FieldName);
+  if RField <> nil then
+    Result := PByte(Instance) + RField.Offset
+  else
+    Result := nil;
 end;
 
 end.

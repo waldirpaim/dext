@@ -1,4 +1,4 @@
-program Dext.Entity.UnitTests;
+﻿program Dext.Entity.UnitTests;
 
 {$APPTYPE CONSOLE}
 
@@ -10,8 +10,9 @@ uses
   Dext.Testing.Fluent,
   Dext.Utils,
   // Unit tests
-  Dext.Entity.SmartTypes.Tests,
-  Dext.Entity.FluentQuery.Tests,
+  Dext.Entity.SmartTypes.Tests in 'Dext.Entity.SmartTypes.Tests.pas',
+  Dext.Entity.FluentQuery.Tests in 'Dext.Entity.FluentQuery.Tests.pas',
+  Dext.Entity.DataSet.Tests in 'Dext.Entity.DataSet.Tests.pas',
   Dext.Entity.Async.Tests in 'Dext.Entity.Async.Tests.pas',
   Dext.Entity.SqlGenerator.Tests in 'Dext.Entity.SqlGenerator.Tests.pas',
   Dext.Entity.FluentMapping.Tests in 'Dext.Entity.FluentMapping.Tests.pas';
@@ -28,6 +29,7 @@ begin
       .Verbose
       .RegisterFixtures([
         TSmartTypesTests,
+        TDataSetSmartTypesTests,
         TFluentQueryTests,
         TSqlGeneratorTests,
         TFluentMappingTests,
@@ -46,11 +48,6 @@ begin
       ExitCode := 1;
     end;
   end;
-  
-  if DebugHook <> 0 then
-  begin
-    WriteLn;
-    Write('Press Enter to exit...');
-    ReadLn;
-  end;
+
+  ConsolePause;
 end.

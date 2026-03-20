@@ -42,8 +42,6 @@ uses
   Dext.Specifications.Interfaces;
 
 type
-
-
   TRelationshipType = (rtNone, rtOneToMany, rtManyToOne, rtOneToOne, rtManyToMany);
 
   // Forward declarations
@@ -54,7 +52,7 @@ type
   ///   Fluent interface to configure an entity.
   /// </summary>
   IEntityTypeBuilder<T: class> = interface
-    ['{50000000-0000-0000-0000-000000000001}']
+    ['{6DC34AF2-B40E-428F-85B6-94D77209476F}']
     function ToTable(const AName: string): IEntityTypeBuilder<T>;
     function HasKey(const APropertyName: string): IEntityTypeBuilder<T>; overload;
     function HasKey(const APropertyNames: array of string): IEntityTypeBuilder<T>; overload;
@@ -76,7 +74,7 @@ type
   ///   Fluent interface to configure a relationship.
   /// </summary>
   IRelationshipBuilder<T: class> = interface
-    ['{50000000-0000-0000-0000-000000000004}']
+    ['{ADF7AC66-198B-4FD2-9E43-9D342A37542C}']
     function WithOne(const AInversePropName: string = ''): IRelationshipBuilder<T>;
     function WithMany(const AInversePropName: string = ''): IRelationshipBuilder<T>;
     function HasForeignKey(const AFKPropertyName: string): IRelationshipBuilder<T>;
@@ -91,7 +89,7 @@ type
   ///   Fluent interface to configure a property.
   /// </summary>
   IPropertyBuilder<T: class> = interface
-    ['{50000000-0000-0000-0000-000000000002}']
+    ['{31A85F1F-53AD-4130-85DC-AC6FCC062AE2}']
     function HasColumnName(const AName: string): IPropertyBuilder<T>;
     function HasFieldName(const AName: string): IPropertyBuilder<T>;
     function UseField: IPropertyBuilder<T>;
@@ -113,8 +111,16 @@ type
   ///   Base interface for user-defined mapping configurations.
   /// </summary>
   IEntityTypeConfiguration<T: class> = interface
-    ['{50000000-0000-0000-0000-000000000003}']
+    ['{F8D58DC7-8AFC-4EC4-ACE5-6CA95E9978F6}']
     procedure Configure(Builder: IEntityTypeBuilder<T>);
+  end;
+
+  /// <summary>
+  ///   Factory interface for dynamic creation of generic DbSets.
+  /// </summary>
+  IDynamicDbSetFactory = interface
+    ['{A578C63F-1596-46EE-A9B5-AA86EB5E831B}']
+    function CreateDbSet(const AContext: IInterface): IInterface;
   end;
 
   // ---------------------------------------------------------------------------
@@ -327,7 +333,9 @@ type
   private var
     FMaps: IDictionary<PTypeInfo, TEntityMap>;
     FDiscoveryNames: IDictionary<PTypeInfo, string>;
+    FFactories: IDictionary<PTypeInfo, IDynamicDbSetFactory>;
     class constructor Create;
+
     class destructor Destroy;
   public
     constructor Create;
@@ -346,7 +354,11 @@ type
     function FindMapByDiscriminator(ABaseType: PTypeInfo; const AValue: Variant): TEntityMap;
     procedure Clear;
     
+    procedure RegisterFactory(AType: PTypeInfo; const AFactory: IDynamicDbSetFactory);
+    function GetFactory(AType: PTypeInfo): IDynamicDbSetFactory;
+    
     class property Instance: TModelBuilder read FInstance;
+
   end;
 
   TRelationshipBuilder<T: class> = class(TInterfacedObject, IRelationshipBuilder<T>)
@@ -499,20 +511,31 @@ begin
     
     for var Fld in Typ.GetFields do
     begin
-      // 1. Smart Properties (Prop<T>)
-      if Fld.FieldType.Name.StartsWith('Prop<') then
+      // 1. Smart Properties (detected by [SmartProp] attribute or Prop<T> naming)
+      var IsSmart := Fld.FieldType.Name.StartsWith('Prop<');
+      if not IsSmart then
+      begin
+        for Attr in Fld.FieldType.GetAttributes do
+          if SameText(Attr.ClassName, 'SmartPropAttribute') then
+          begin
+            IsSmart := True;
+            Break;
+          end;
+      end;
+
+      if IsSmart then
       begin
         var FldName := Fld.Name;
         if (FldName.Length > 1) and (FldName[1] = 'F') and FldName[2].IsUpper then
           FldName := FldName.Substring(1);
         
         PropMap := GetOrAddProperty(FldName);
-        PropMap.FieldOffset := Fld.Offset;
+        PropMap.FieldOffset := -1; // Reset to avoid incorrect null detection for records
         PropMap.FieldValueOffset := -1;
 
         for var InnerFld in Fld.FieldType.GetFields do
         begin
-          if SameText(InnerFld.Name, 'FInfo') then
+          if SameText(InnerFld.Name, 'FHasValue') then
             PropMap.FieldOffset := Fld.Offset + InnerFld.Offset
           else if SameText(InnerFld.Name, 'FValue') then
           begin
@@ -1206,13 +1229,43 @@ constructor TModelBuilder.Create;
 begin
   FMaps := TCollections.CreateDictionary<PTypeInfo, TEntityMap>(True);
   FDiscoveryNames := TCollections.CreateDictionary<PTypeInfo, string>;
+  FFactories := TCollections.CreateDictionary<PTypeInfo, IDynamicDbSetFactory>;
 end;
 
 destructor TModelBuilder.Destroy;
 begin
   FMaps := nil;
   FDiscoveryNames := nil;
+  FFactories := nil;
   inherited;
+end;
+
+procedure TModelBuilder.Clear;
+begin
+  if Assigned(FMaps) then
+    FMaps.Clear;
+  if Assigned(FDiscoveryNames) then
+    FDiscoveryNames.Clear;
+  if Assigned(FFactories) then
+    FFactories.Clear;
+end;
+
+procedure TModelBuilder.RegisterFactory(AType: PTypeInfo; const AFactory: IDynamicDbSetFactory);
+begin
+  if not FFactories.ContainsKey(AType) then
+    FFactories.Add(AType, AFactory);
+end;
+
+function TModelBuilder.GetFactory(AType: PTypeInfo): IDynamicDbSetFactory;
+begin
+  if not FFactories.TryGetValue(AType, Result) then
+  begin
+    // Fallback to global instance if this is a local/context builder (common in tests)
+    if (Self <> FInstance) and (FInstance <> nil) then
+      Result := FInstance.GetFactory(AType)
+    else
+      Result := nil;
+  end;
 end;
 
 class constructor TModelBuilder.Create;
@@ -1234,14 +1287,6 @@ function TModelBuilder.GetDiscoveryName(AType: PTypeInfo): string;
 begin
   if not FDiscoveryNames.TryGetValue(AType, Result) then
     Result := '';
-end;
-
-procedure TModelBuilder.Clear;
-begin
-  if Assigned(FMaps) then
-    FMaps.Clear;
-  if Assigned(FDiscoveryNames) then
-    FDiscoveryNames.Clear;
 end;
 
 procedure TModelBuilder.ApplyConfiguration<T>(AConfig: IEntityTypeConfiguration<T>);
