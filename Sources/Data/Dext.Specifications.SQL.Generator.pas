@@ -2171,7 +2171,7 @@ begin
   FParams.Clear;
   FParamCount := 0;
   
-  WhereGen := TSQLWhereGenerator.Create(FDialect, TSQLColumnMapper<T>.Create);
+  WhereGen := TSQLWhereGenerator.Create(FDialect, TSQLColumnMapper<T>.Create(FNamingStrategy));
   try
     WhereSQL := WhereGen.Generate(ASpec.GetExpression);
     FParamCount := WhereGen.ParamCount;
