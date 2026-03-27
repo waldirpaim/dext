@@ -14,14 +14,14 @@ type
   private
     FId: Integer;
     FDescription: string;
-    FPrice: Double;
+    FPrice: Currency;
   public
-    constructor Create(Id: Integer; const Description: string; Price: Double);
+    constructor Create(Id: Integer; const Description: string; Price: Currency);
 
-    [PK, AutoInc]
+    [PK]
     property Id: Integer read FId write FId;
     property Description: string read FDescription write FDescription;
-    property Price: Double read FPrice write FPrice;
+    property Price: Currency read FPrice write FPrice;
   end;
 
   TFormMain = class(TForm)
@@ -33,7 +33,7 @@ type
     procedure FormCreate(Sender: TObject);
   private
     FDataSet: TEntityDataSet;
-    FProducts: IList<TProduct>;
+    FProducts: IList<TObject>;
   end;
 
 var
@@ -49,25 +49,26 @@ begin
   DataSource.DataSet := FDataSet;
   DBGridProducts.DataSource := DataSource;
 
-  FProducts := TCollections.CreateList<TProduct>(True);
+  FProducts := TCollections.CreateList<TObject>(True);
 
   for var i := 0 to 99 do
   begin
     FProducts.Add(TProduct.Create(
-      100 + i, {Id}
-      'Product ' + IntToStr(i + 1), {Description}
-      100.0 * (i + 1) {Price}
+      {Id}          100 + i,
+      {Description} 'Product ' + IntToStr(i + 1),
+      {Price}       100.0 * (i + 1)
     ));
   end;
 
   // Carregando dados no DataSet
   // TODO
-  // FDataSet.Items := FProducts;
+  FDataSet.Load(FProducts, TProduct);
 end;
 
 { TProduct }
 
-constructor TProduct.Create(Id: Integer; const Description: string; Price: Double);
+constructor TProduct.Create(Id: Integer; const Description: string; Price:
+  Currency);
 begin
   inherited Create;
   FId := Id;
