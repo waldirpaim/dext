@@ -1011,10 +1011,36 @@ begin
 end;
 
 function TSQLServerDialect.QuoteIdentifier(const AName: string): string;
+var
+  i, Len: Integer;
+  SB: TStringBuilder;
 begin
-  // Replaces "core.documents" with "core].[documents" 
-  // then wraps the whole thing in [] to get "[core].[documents]"
-  Result := '[' + StringReplace(AName, '.', '].[', [rfReplaceAll]) + ']';
+  Len := Length(AName);
+  if Len = 0 then Exit('');
+
+  // Avoid double quoting if already bracketed
+  if (AName[1] = '[') and (AName[Len] = ']') then Exit(AName);
+
+  // Optimization for identifiers without dots (most common cases)
+  if Pos('.', AName) = 0 then
+    Exit('[' + AName + ']');
+
+  // Use TStringBuilder for identifiers with dots (schema.table) to avoid multiple string allocations
+  SB := TStringBuilder.Create(Len + 4);
+  try
+    SB.Append('[');
+    for i := 1 to Len do
+    begin
+      if AName[i] = '.' then
+        SB.Append('].[')
+      else
+        SB.Append(AName[i]);
+    end;
+    SB.Append(']');
+    Result := SB.ToString;
+  finally
+    SB.Free;
+  end;
 end;
 
 function TSQLServerDialect.GetColumnType(ATypeInfo: PTypeInfo; AIsAutoInc: Boolean): string;

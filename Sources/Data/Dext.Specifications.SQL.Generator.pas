@@ -822,6 +822,9 @@ begin
   if FMap = nil then
     FMap := TModelBuilder.Instance.GetMap(TypeInfo(T));
     
+  if FMap <> nil then
+    FSchema := FMap.Schema;
+    
   if (FNamingStrategy = nil) then
     FNamingStrategy := TDefaultNamingStrategy.Create;
 

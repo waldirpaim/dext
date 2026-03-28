@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -54,7 +54,8 @@ type
   /// </summary>
   IEntityTypeBuilder<T: class> = interface
     ['{6DC34AF2-B40E-428F-85B6-94D77209476F}']
-    function ToTable(const AName: string): IEntityTypeBuilder<T>;
+    function ToTable(const AName: string): IEntityTypeBuilder<T>; overload;
+    function ToTable(const AName, ASchema: string): IEntityTypeBuilder<T>; overload;
     function HasKey(const APropertyName: string): IEntityTypeBuilder<T>; overload;
     function HasKey(const APropertyNames: array of string): IEntityTypeBuilder<T>; overload;
     function HasDiscriminator(const AColumn: string; const AValue: Variant): IEntityTypeBuilder<T>;
@@ -179,6 +180,7 @@ type
   private
     FEntityType: PTypeInfo;
     FTableName: string;
+    FSchema: string;
     FProperties: IDictionary<string, TPropertyMap>;
     FKeys: IList<string>;
     // Soft Delete Configuration
@@ -199,6 +201,7 @@ type
     
     property EntityType: PTypeInfo read FEntityType;
     property TableName: string read FTableName write FTableName;
+    property Schema: string read FSchema write FSchema;
     property Properties: IDictionary<string, TPropertyMap> read FProperties;
     property Keys: IList<string> read FKeys;
     
@@ -230,7 +233,8 @@ type
     constructor Create(AMap: TEntityMap);
     
     // Entity Configuration
-    function Table(const AName: string): TEntityBuilder<T>;
+    function Table(const AName: string): TEntityBuilder<T>; overload;
+    function Table(const AName, ASchema: string): TEntityBuilder<T>; overload;
     function HasKey(const APropertyName: string): TEntityBuilder<T>; overload;
     function HasKey(const APropertyNames: array of string): TEntityBuilder<T>; overload;
     function HasDiscriminator(const AColumn: string; const AValue: Variant): TEntityBuilder<T>;
@@ -282,7 +286,8 @@ type
     FMap: TEntityMap;
   public
     constructor Create(AMap: TEntityMap);
-    function ToTable(const AName: string): IEntityTypeBuilder<T>;
+    function ToTable(const AName: string): IEntityTypeBuilder<T>; overload;
+    function ToTable(const AName, ASchema: string): IEntityTypeBuilder<T>; overload;
     function HasKey(const APropertyName: string): IEntityTypeBuilder<T>; overload;
     function HasKey(const APropertyNames: array of string): IEntityTypeBuilder<T>; overload;
     function HasDiscriminator(const AColumn: string; const AValue: Variant): IEntityTypeBuilder<T>;
@@ -528,7 +533,11 @@ begin
 
     for Attr in Typ.GetAttributes do
     begin
-      if Attr is TableAttribute then FTableName := TableAttribute(Attr).Name;
+      if Attr is TableAttribute then
+      begin
+        FTableName := TableAttribute(Attr).Name;
+        FSchema := TableAttribute(Attr).Schema;
+      end;
       if Attr is SoftDeleteAttribute then
       begin
         FIsSoftDelete := True;
@@ -864,6 +873,13 @@ begin
   Result := Self;
 end;
 
+function TEntityBuilder<T>.Table(const AName, ASchema: string): TEntityBuilder<T>;
+begin
+  FMap.TableName := AName;
+  FMap.Schema := ASchema;
+  Result := Self;
+end;
+
 function TEntityBuilder<T>.HasKey(const APropertyName: string): TEntityBuilder<T>;
 begin
   FMap.Keys.Clear;
@@ -1083,6 +1099,13 @@ begin
   Result := Self;
 end;
 
+function TEntityTypeBuilder<T>.ToTable(const AName, ASchema: string): IEntityTypeBuilder<T>;
+begin
+  FMap.TableName := AName;
+  FMap.Schema := ASchema;
+  Result := Self;
+end;
+
 function TEntityTypeBuilder<T>.HasKey(const APropertyName: string): IEntityTypeBuilder<T>;
 begin
   FMap.Keys.Clear;
@@ -1143,42 +1166,42 @@ end;
 
 function TEntityTypeBuilder<T>.HasMany(const APropertyName: string): IRelationshipBuilder<T>;
 var
-  LProp: TPropertyMap;
+  PropMap: TPropertyMap;
 begin
-  LProp := FMap.GetOrAddProperty(APropertyName);
-  LProp.IsNavigation := True;
-  LProp.Relationship := rtOneToMany;
-  Result := TRelationshipBuilder<T>.Create(FMap, LProp);
+  PropMap := FMap.GetOrAddProperty(APropertyName);
+  PropMap.IsNavigation := True;
+  PropMap.Relationship := rtOneToMany;
+  Result := TRelationshipBuilder<T>.Create(FMap, PropMap);
 end;
 
 function TEntityTypeBuilder<T>.HasOne(const APropertyName: string): IRelationshipBuilder<T>;
 var
-  LProp: TPropertyMap;
+  PropMap: TPropertyMap;
 begin
-  LProp := FMap.GetOrAddProperty(APropertyName);
-  LProp.IsNavigation := True;
-  LProp.Relationship := rtOneToOne;
-  Result := TRelationshipBuilder<T>.Create(FMap, LProp);
+  PropMap := FMap.GetOrAddProperty(APropertyName);
+  PropMap.IsNavigation := True;
+  PropMap.Relationship := rtOneToOne;
+  Result := TRelationshipBuilder<T>.Create(FMap, PropMap);
 end;
 
 function TEntityTypeBuilder<T>.BelongsTo(const APropertyName: string): IRelationshipBuilder<T>;
 var
-  LProp: TPropertyMap;
+  PropMap: TPropertyMap;
 begin
-  LProp := FMap.GetOrAddProperty(APropertyName);
-  LProp.IsNavigation := True;
-  LProp.Relationship := rtManyToOne;
-  Result := TRelationshipBuilder<T>.Create(FMap, LProp);
+  PropMap := FMap.GetOrAddProperty(APropertyName);
+  PropMap.IsNavigation := True;
+  PropMap.Relationship := rtManyToOne;
+  Result := TRelationshipBuilder<T>.Create(FMap, PropMap);
 end;
 
 function TEntityTypeBuilder<T>.HasManyToMany(const APropertyName: string): IRelationshipBuilder<T>;
 var
-  LProp: TPropertyMap;
+  PropMap: TPropertyMap;
 begin
-  LProp := FMap.GetOrAddProperty(APropertyName);
-  LProp.IsNavigation := True;
-  LProp.Relationship := rtManyToMany;
-  Result := TRelationshipBuilder<T>.Create(FMap, LProp);
+  PropMap := FMap.GetOrAddProperty(APropertyName);
+  PropMap.IsNavigation := True;
+  PropMap.Relationship := rtManyToMany;
+  Result := TRelationshipBuilder<T>.Create(FMap, PropMap);
 end;
 
 function TEntityTypeBuilder<T>.HasSoftDelete(const APropertyName: string): IEntityTypeBuilder<T>;

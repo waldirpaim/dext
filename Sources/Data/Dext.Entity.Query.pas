@@ -360,6 +360,7 @@ uses
   Dext.Specifications.Evaluator,
   Dext.Specifications.OrderBy,
   Dext.Entity.Joining,
+  Dext.Entity.Mapping, // Added for TModelBuilder access and optimization
   Dext.Entity.Prototype; // Add Prototype
 
 { TEmptyIterator<T> }
@@ -1187,25 +1188,40 @@ function TFluentQuery<T>.Sum(const APropertyName: string): Double;
 var
   Enumerator: IEnumerator<T>;
   Val: Double;
-  Ctx: TRttiContext;
   Obj: TObject;
   Prop: TRttiProperty;
+  Map: TEntityMap;
+  PropMap: TPropertyMap;
 begin
   Result := 0;
-  Ctx := TRttiContext.Create;
+  Prop := nil;
+  
+  // Use cached Map for Property lookup (Fastest path)
+  Map := TModelBuilder.Instance.GetMap(TypeInfo(T));
+  if (Map <> nil) and Map.Properties.TryGetValue(APropertyName, PropMap) then
+    Prop := PropMap.Prop;
+  
+  if Prop = nil then
+  begin
+    var Ctx := TRttiContext.Create;
+    var Typ := Ctx.GetType(TypeInfo(T));
+    if Typ <> nil then
+      Prop := Typ.GetProperty(APropertyName);
+  end;
+  
+  if Prop = nil then
+    raise Exception.CreateFmt('Property "%s" not found on type "%s"', [APropertyName, PTypeInfo(TypeInfo(T)).Name]);
+
   Enumerator := GetEnumerator;
   try
     while Enumerator.MoveNext do
     begin
       Obj := TValue.From<T>(Enumerator.Current).AsObject;
-      if Obj = nil then raise Exception.Create('Item is not an object');
-      
-      Prop := Ctx.GetType(Obj.ClassType).GetProperty(APropertyName);
-      if Prop = nil then
-        raise Exception.CreateFmt('Property "%s" not found on class "%s"', [APropertyName, Obj.ClassName]);
-        
-      Val := Prop.GetValue(Obj).AsType<Double>;
-      Result := Result + Val;
+      if Obj <> nil then
+      begin
+        Val := Prop.GetValue(Obj).AsType<Double>;
+        Result := Result + Val;
+      end;
     end;
   finally
     Enumerator := nil;
@@ -1243,27 +1259,41 @@ var
   Val: Double;
   SumVal: Double;
   CountVal: Integer;
-  Ctx: TRttiContext;
   Obj: TObject;
   Prop: TRttiProperty;
+  Map: TEntityMap;
+  PropMap: TPropertyMap;
 begin
   SumVal := 0;
   CountVal := 0;
-  Ctx := TRttiContext.Create;
+  Prop := nil;
+  
+  Map := TModelBuilder.Instance.GetMap(TypeInfo(T));
+  if (Map <> nil) and Map.Properties.TryGetValue(APropertyName, PropMap) then
+    Prop := PropMap.Prop;
+    
+  if Prop = nil then
+  begin
+    var Ctx := TRttiContext.Create;
+    var Typ := Ctx.GetType(TypeInfo(T));
+    if Typ <> nil then
+      Prop := Typ.GetProperty(APropertyName);
+  end;
+
+  if Prop = nil then
+    raise Exception.CreateFmt('Property "%s" not found on type "%s"', [APropertyName, PTypeInfo(TypeInfo(T)).Name]);
+
   Enumerator := GetEnumerator;
   try
     while Enumerator.MoveNext do
     begin
       Obj := TValue.From<T>(Enumerator.Current).AsObject;
-      if Obj = nil then raise Exception.Create('Item is not an object');
-      
-      Prop := Ctx.GetType(Obj.ClassType).GetProperty(APropertyName);
-      if Prop = nil then
-        raise Exception.CreateFmt('Property "%s" not found on class "%s"', [APropertyName, Obj.ClassName]);
-        
-      Val := Prop.GetValue(Obj).AsType<Double>;
-      SumVal := SumVal + Val;
-      Inc(CountVal);
+      if Obj <> nil then
+      begin
+        Val := Prop.GetValue(Obj).AsType<Double>;
+        SumVal := SumVal + Val;
+        Inc(CountVal);
+      end;
     end;
   finally
     Enumerator := nil;
@@ -1309,30 +1339,49 @@ var
   Enumerator: IEnumerator<T>;
   Val: Double;
   HasValue: Boolean;
-  Ctx: TRttiContext;
   Obj: TObject;
   Prop: TRttiProperty;
+  Map: TEntityMap;
+  PropMap: TPropertyMap;
 begin
   HasValue := False;
   Result := 0;
-  Ctx := TRttiContext.Create;
+  Prop := nil;
+  
+  Map := TModelBuilder.Instance.GetMap(TypeInfo(T));
+  if (Map <> nil) and Map.Properties.TryGetValue(APropertyName, PropMap) then
+    Prop := PropMap.Prop;
+  
+  if Prop = nil then
+  begin
+    var Ctx := TRttiContext.Create;
+    var Typ := Ctx.GetType(TypeInfo(T));
+    if Typ <> nil then
+      Prop := Typ.GetProperty(APropertyName);
+  end;
+
+  if Prop = nil then
+    raise Exception.CreateFmt('Property "%s" not found on type "%s"', [APropertyName, PTypeInfo(TypeInfo(T)).Name]);
+
   Enumerator := GetEnumerator;
   try
     if Enumerator.MoveNext then
     begin
       Obj := TValue.From<T>(Enumerator.Current).AsObject;
-      if Obj = nil then raise Exception.Create('Item is not an object');
-      Prop := Ctx.GetType(Obj.ClassType).GetProperty(APropertyName);
-      
-      Val := Prop.GetValue(Obj).AsType<Double>;
-      Result := Val;
-      HasValue := True;
-      
-      while Enumerator.MoveNext do
+      if Obj <> nil then
       begin
-        Obj := TValue.From<T>(Enumerator.Current).AsObject;
-        Val := Prop.GetValue(Obj).AsType<Double>;
-        if Val < Result then Result := Val;
+        Result := Prop.GetValue(Obj).AsType<Double>;
+        HasValue := True;
+        
+        while Enumerator.MoveNext do
+        begin
+          Obj := TValue.From<T>(Enumerator.Current).AsObject;
+          if Obj <> nil then
+          begin
+            Val := Prop.GetValue(Obj).AsType<Double>;
+            if Val < Result then Result := Val;
+          end;
+        end;
       end;
     end;
   finally
@@ -1377,30 +1426,49 @@ var
   Enumerator: IEnumerator<T>;
   Val: Double;
   HasValue: Boolean;
-  Ctx: TRttiContext;
   Obj: TObject;
   Prop: TRttiProperty;
+  Map: TEntityMap;
+  PropMap: TPropertyMap;
 begin
   HasValue := False;
   Result := 0;
-  Ctx := TRttiContext.Create;
+  Prop := nil;
+  
+  Map := TModelBuilder.Instance.GetMap(TypeInfo(T));
+  if (Map <> nil) and Map.Properties.TryGetValue(APropertyName, PropMap) then
+    Prop := PropMap.Prop;
+  
+  if Prop = nil then
+  begin
+    var Ctx := TRttiContext.Create;
+    var Typ := Ctx.GetType(TypeInfo(T));
+    if Typ <> nil then
+      Prop := Typ.GetProperty(APropertyName);
+  end;
+
+  if Prop = nil then
+    raise Exception.CreateFmt('Property "%s" not found on type "%s"', [APropertyName, PTypeInfo(TypeInfo(T)).Name]);
+
   Enumerator := GetEnumerator;
   try
     if Enumerator.MoveNext then
     begin
       Obj := TValue.From<T>(Enumerator.Current).AsObject;
-      if Obj = nil then raise Exception.Create('Item is not an object');
-      Prop := Ctx.GetType(Obj.ClassType).GetProperty(APropertyName);
-      
-      Val := Prop.GetValue(Obj).AsType<Double>;
-      Result := Val;
-      HasValue := True;
-      
-      while Enumerator.MoveNext do
+      if Obj <> nil then
       begin
-        Obj := TValue.From<T>(Enumerator.Current).AsObject;
-        Val := Prop.GetValue(Obj).AsType<Double>;
-        if Val > Result then Result := Val;
+        Result := Prop.GetValue(Obj).AsType<Double>;
+        HasValue := True;
+        
+        while Enumerator.MoveNext do
+        begin
+          Obj := TValue.From<T>(Enumerator.Current).AsObject;
+          if Obj <> nil then
+          begin
+            Val := Prop.GetValue(Obj).AsType<Double>;
+            if Val > Result then Result := Val;
+          end;
+        end;
       end;
     end;
   finally
@@ -1447,25 +1515,45 @@ function TFluentQuery<T>.MaxOrDefault(const APropertyName: string; const ADefaul
 var
   Enumerator: IEnumerator<T>;
   Val: Double;
-  Ctx: TRttiContext;
   Obj: TObject;
   Prop: TRttiProperty;
+  Map: TEntityMap;
+  PropMap: TPropertyMap;
 begin
   Result := ADefault;
-  Ctx := TRttiContext.Create;
+  Prop := nil;
+  
+  Map := TModelBuilder.Instance.GetMap(TypeInfo(T));
+  if (Map <> nil) and Map.Properties.TryGetValue(APropertyName, PropMap) then
+    Prop := PropMap.Prop;
+    
+  if Prop = nil then
+  begin
+    var Ctx := TRttiContext.Create;
+    var Typ := Ctx.GetType(TypeInfo(T));
+    if Typ <> nil then
+      Prop := Typ.GetProperty(APropertyName);
+  end;
+
+  if Prop = nil then Exit;
+
   Enumerator := GetEnumerator;
   try
     if Enumerator.MoveNext then
     begin
       Obj := TValue.From<T>(Enumerator.Current).AsObject;
-      if Obj = nil then raise Exception.Create('Item is not an object');
-      Prop := Ctx.GetType(Obj.ClassType).GetProperty(APropertyName);
-      Result := Prop.GetValue(Obj).AsType<Double>;
-      while Enumerator.MoveNext do
+      if Obj <> nil then
       begin
-        Obj := TValue.From<T>(Enumerator.Current).AsObject;
-        Val := Prop.GetValue(Obj).AsType<Double>;
-        if Val > Result then Result := Val;
+        Result := Prop.GetValue(Obj).AsType<Double>;
+        while Enumerator.MoveNext do
+        begin
+          Obj := TValue.From<T>(Enumerator.Current).AsObject;
+          if Obj <> nil then
+          begin
+            Val := Prop.GetValue(Obj).AsType<Double>;
+            if Val > Result then Result := Val;
+          end;
+        end;
       end;
     end;
   finally

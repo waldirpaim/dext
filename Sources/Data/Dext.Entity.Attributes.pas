@@ -39,10 +39,13 @@ type
   TableAttribute = class(TCustomAttribute)
   private
     FName: string;
+    FSchema: string;
   public
     constructor Create; overload;
     constructor Create(const AName: string); overload;
+    constructor Create(const AName, ASchema: string); overload;
     property Name: string read FName;
+    property Schema: string read FSchema;
   end;
 
   ColumnAttribute = class(TCustomAttribute)
@@ -400,6 +403,13 @@ end;
 constructor TableAttribute.Create(const AName: string);
 begin
   FName := AName;
+  FSchema := '';
+end;
+
+constructor TableAttribute.Create(const AName, ASchema: string);
+begin
+  FName := AName;
+  FSchema := ASchema;
 end;
 
 { ColumnAttribute }
