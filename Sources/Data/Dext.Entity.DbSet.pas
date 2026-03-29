@@ -1018,6 +1018,7 @@ var
   Cmd: IDbCommand;
   Prop, AutoIncProp: TRttiProperty;
   PKVal: Variant;
+  RawPKVal: TValue;
   UseReturning: Boolean;
   RetVal: TValue;
   AutoIncColumn: string;
@@ -1098,10 +1099,9 @@ begin
     if UseReturning then
     begin
       RetVal := Cmd.ExecuteScalar;
-      if not RetVal.IsEmpty then
-        PKVal := RetVal.AsVariant
-      else
-        PKVal := Null;
+      RawPKVal := RetVal;
+      // We no longer call RetVal.AsVariant because calling AsVariant on a TGUID Record TValue 
+      // throws an EInvalidCast ('Invalid class typecast') natively in Delphi.
     end
     else
     begin
@@ -1113,22 +1113,28 @@ begin
          begin
            var IdCmd := FContext.Connection.CreateCommand(LastIdSQL);
            var IdVal := IdCmd.ExecuteScalar;
-           if not IdVal.IsEmpty then
-             PKVal := IdVal.AsVariant
-           else
-             PKVal := Null;
+           RawPKVal := IdVal;
          end
          else
+         begin
            PKVal := FContext.Connection.GetLastInsertId;
+           RawPKVal := TValue.FromVariant(PKVal);
+         end;
       end;
     end;
      if (AutoIncProp <> nil) and (AutoIncColumn <> '') then
      begin
-       if VarIsNull(PKVal) or VarIsEmpty(PKVal) then
+       if RawPKVal.IsEmpty and (VarIsNull(PKVal) or VarIsEmpty(PKVal)) then
          raise Exception.Create('Failed to retrieve AutoInc ID for ' + GetTableName + '.');
        
+        // Convert raw value using specific type converters BEFORE Reflection assigns it
+        var PKConvert := RawPKVal;
+        var Converter := TTypeConverterRegistry.Instance.GetConverter(AutoIncProp.PropertyType.Handle);
+        if Converter <> nil then
+          PKConvert := Converter.FromDatabase(PKConvert, AutoIncProp.PropertyType.Handle);
+          
         // Use centralized reflection helper that handles conversion and Smart Types accurately
-        TReflection.SetValue(Pointer(AEntity), AutoIncProp, TValue.FromVariant(PKVal));
+        TReflection.SetValue(Pointer(AEntity), AutoIncProp, PKConvert);
       end;
      
      // Add to identity map using full entity ID

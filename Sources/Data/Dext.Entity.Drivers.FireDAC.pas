@@ -262,7 +262,7 @@ begin
     ftString, ftWideString, ftMemo, ftWideMemo: Result := TValue.From<string>(Field.AsString);
     ftGuid:
       // Return TGUID directly - TypeConverters handle byte-order conversion
-      Result := TValue.From<TGUID>(TGuidField(Field).AsGuid);
+      Result := TValue.From<TGUID>(Field.AsGuid);
     else
       Result := TValue.FromVariant(Field.Value);
   end;
@@ -281,7 +281,7 @@ begin
     ftString, ftWideString, ftMemo, ftWideMemo: Result := TValue.From<string>(Field.AsString);
     ftGuid:
       // Return TGUID directly - TypeConverters handle byte-order conversion
-      Result := TValue.From<TGUID>(TGuidField(Field).AsGuid);
+      Result := TValue.From<TGUID>(Field.AsGuid);
     else
       Result := TValue.FromVariant(Field.Value);
   end;
@@ -779,7 +779,13 @@ begin
   FQuery.Open;
   try
     if not FQuery.Eof then
-      Result := TValue.FromVariant(FQuery.Fields[0].Value)
+    begin
+      var Field := FQuery.Fields[0];
+      if Field.DataType = ftGuid then
+        Result := TValue.From<TGUID>(Field.AsGuid)
+      else
+        Result := TValue.FromVariant(Field.Value);
+    end
     else
       Result := TValue.Empty;
   finally
