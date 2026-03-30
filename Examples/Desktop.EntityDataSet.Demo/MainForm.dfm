@@ -34,6 +34,7 @@ object FormMain: TFormMain
     Align = alTop
     BevelOuter = bvNone
     TabOrder = 1
+    ExplicitWidth = 874
     object DBNavigator: TDBNavigator
       Left = 8
       Top = 8

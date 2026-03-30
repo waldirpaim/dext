@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -42,6 +42,8 @@ uses
 type
   /// <summary>Collection notification type (compatible with RTL enum values)</summary>
   TCollectionNotification = (cnAdded, cnRemoved, cnExtracted);
+
+  IObjectList = Dext.Collections.Base.IObjectList;
   
   {$M+}
   IList<T> = interface(Dext.Collections.Base.IEnumerable<T>)
@@ -168,7 +170,7 @@ type
 
   {$M+}
   {$RTTI EXPLICIT METHODS([vcPublic, vcPublished])}
-  TList<T> = class(TListBase<T>, IList<T>, ICollection)
+  TList<T> = class(TListBase<T>, IList<T>, ICollection, IObjectList)
   private
     type P_T = ^T;
   private
@@ -190,6 +192,22 @@ type
     function GetInterfaceEnumerator: Dext.Collections.Base.IEnumerator<T>; override;
     function GetEnumerator: TListEnumerator<T>; reintroduce; inline;
     
+    // IObjectList implementation
+    function GetObjectItem(Index: Integer): TObject; virtual;
+    procedure SetObjectItem(Index: Integer; Value: TObject); virtual;
+    procedure AddObject(Value: TObject); virtual;
+    function IndexOfObject(Value: TObject): Integer; virtual;
+    procedure InsertObject(Index: Integer; Value: TObject); virtual;
+    
+    function IObjectList.GetCount = GetCount;
+    function IObjectList.GetItem = GetObjectItem;
+    procedure IObjectList.SetItem = SetObjectItem;
+    procedure IObjectList.Add = AddObject;
+    procedure IObjectList.Insert = InsertObject;
+    function IObjectList.IndexOf = IndexOfObject;
+    procedure IObjectList.Delete = Delete;
+    procedure IObjectList.Clear = Clear;
+
     constructor Create; overload;
     constructor Create(OwnsObjects: Boolean); overload;
 
@@ -358,7 +376,6 @@ begin
 end;
 
 function TList<T>.GetItem(Index: Integer): T;
-type P_T = ^T;
 begin
   Result := P_T(FCore.Data + (Index * FCore.ElementSize))^;
 end;
@@ -388,7 +405,6 @@ begin
 end;
 
 procedure TList<T>.Add(const Value: T);
-type P_T = ^T;
 var
   LData: PByte;
   LCount, LCapacity: Integer;
@@ -898,6 +914,43 @@ end;
 class function TCollections.CreateStringDictionary: IStringDictionary;
 begin
   Result := TDextStringDictionary.Create;
+end;
+
+{ TList<T> IObjectList Implementation }
+
+function TList<T>.GetObjectItem(Index: Integer): TObject;
+begin
+  if not FIsClass then
+    raise Exception.Create('This list does not contain objects');
+  Result := TObject(PPointer(FCore.Data + (Index * FCore.ElementSize))^);
+end;
+
+procedure TList<T>.SetObjectItem(Index: Integer; Value: TObject);
+begin
+  if not FIsClass then
+    raise Exception.Create('This list does not contain objects');
+  SetItem(Index, P_T(@Value)^);
+end;
+
+procedure TList<T>.AddObject(Value: TObject);
+begin
+  if not FIsClass then
+    raise Exception.Create('This list does not contain objects');
+  Add(P_T(@Value)^);
+end;
+
+function TList<T>.IndexOfObject(Value: TObject): Integer;
+begin
+  if not FIsClass then
+    raise Exception.Create('This list does not contain objects');
+  Result := IndexOf(P_T(@Value)^);
+end;
+
+procedure TList<T>.InsertObject(Index: Integer; Value: TObject);
+begin
+  if not FIsClass then
+    raise Exception.Create('This list does not contain objects');
+  Insert(Index, P_T(@Value)^);
 end;
 
 end.

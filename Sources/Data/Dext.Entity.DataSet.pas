@@ -25,6 +25,7 @@ uses
 
 type
   PBytes = ^TBytes;
+  PObject = ^TObject;
 
   /// <summary>
   ///   Data Structure of a Record Buffer for TEntityDataSet.
@@ -38,6 +39,8 @@ type
     DirtyMask: UInt64; // Mask indicating which fields were modified in the Grid
   end;
 
+  TPrepareFieldEvent = procedure(Sender: TObject; AField: TField) of object;
+
   /// <summary>
   ///   Custom TDataSet for high-performance reading and writing to direct objects/lists.
   /// </summary>
@@ -49,7 +52,7 @@ type
     
     // Virtual Buffers (Offsets Index)
     // Physical Objects Reference
-    FItems: IList<TObject>;            // Real reference to the object list
+    FItems: IObjectList;            // Real reference to the object list
     FOwnsItems: Boolean;               // Whether the dataset owns the list and should clear it
     FOwnsEntityMap: Boolean;           // Whether the dataset owns the map
     FVirtualIndex: TVector<Integer>;   // Ordered/filtered view over FItems (contains indices to FItems)
@@ -71,17 +74,20 @@ type
     FCalcAreaSize: Integer;
     FInternalCalcStorage: TArray<TBytes>;
     FPropertyCache: TDictionary<string, TRttiProperty>;
+    FOnPrepareField: TPrepareFieldEvent;
 
     function GetProperty(const APropName: string): TRttiProperty;
-    procedure SetItems(const Value: IList<TObject>);
+    procedure SetItems(const Value: IObjectList);
     procedure SetIndexFieldNames(const Value: string);
     procedure ApplyFilterAndSort; overload;
     procedure ApplyFilterAndSort(AFiltered: Boolean); overload;
     procedure ApplyFilterAndSort(AFiltered: Boolean; ATrackObj: TObject); overload;
     function CompareObjectsInternal(A, B: TObject; const APropNames: TArray<string>; RttiType: TRttiType): Integer;
+    procedure ApplyAttributesToField(AField: TField; AContainer: TRttiObject);
     procedure BuildFieldDefs;
     
-    function ReadFieldValue(Field: TField; out Value: Variant): Boolean;
+    function ReadFieldValue(Field: TField; out Value: Variant): Boolean; overload;
+    function ReadFieldValue(Field: TField; ABuffer: TRecBuf; out Value: Variant): Boolean; overload;
   protected
     // TDataSet overrides for filtering and sorting
     procedure InternalHandleException; override;
@@ -141,16 +147,18 @@ type
     
     function Locate(const KeyFields: string; const KeyValues: Variant; Options: TLocateOptions = []): Boolean; override;
     function BookmarkValid(Bookmark: TBookmark): Boolean; override;
+    
     /// <summary>
     ///  Object data loading (Non-generic legacy)
     /// </summary>
-    procedure Load(const AItems: IList<TObject>; AClass: TClass; AOwns: Boolean = False); overload;
+    procedure Load(const AItems: IObjectList; AClass: TClass; AOwns: Boolean = False); overload;
     procedure Load(const AItems: TArray<TObject>; AClass: TClass); overload;
     
     /// <summary>
     ///  Generic Object data loading
     /// </summary>
     procedure Load<T: class>(const AItems: IList<T>; AOwns: Boolean = False); overload;
+    procedure Load<T: class>(const AItems: IList<T>; AClass: TClass; AOwns: Boolean = False); overload;
     procedure Load<T: class>(const AItems: TArray<T>); overload;
 
     /// <summary>
@@ -174,9 +182,10 @@ type
 
     function CreateBlobStream(Field: TField; Mode: TBlobStreamMode): TStream; override;
     function GetCurrentObject: TObject;
-    property Items: IList<TObject> read FItems write SetItems;
+    property Items: IObjectList read FItems write SetItems;
     property DbContext: TDbContext read FDbContext write FDbContext;
   published
+    property OnPrepareField: TPrepareFieldEvent read FOnPrepareField write FOnPrepareField;
     property Active;
     property Filter;
     property Filtered;
@@ -224,6 +233,7 @@ uses
   Dext.Core.Activator,
   Dext.Core.ValueConverters,
   Dext.Entity,
+  Dext.Entity.Attributes,
   Dext.Json;
 
 type
@@ -423,7 +433,7 @@ begin
   FModified := True;
 end;
 
-procedure TEntityDataSet.Load(const AItems: IList<TObject>; AClass: TClass; AOwns: Boolean = False);
+procedure TEntityDataSet.Load(const AItems: IObjectList; AClass: TClass; AOwns: Boolean = False);
 begin
   if FOwnsItems and Assigned(FItems) and (FItems <> AItems) then
     FItems := nil;
@@ -457,15 +467,23 @@ var
 begin
   LList := TCollections.CreateList<TObject>(False);
   LList.AddRange(AItems);
-  Load(LList, AClass, True); // Owns the wrapper list but not the objects
+  Load(LList as IObjectList, AClass, True); // Owns the wrapper list but not the objects
 end;
 
 function TEntityDataSet.AsJsonArray: string;
+var
+  FilteredItems: IList<TObject>;
+  I: Integer;
 begin
-  if FItems = nil then
+  if (FItems = nil) or (FVirtualIndex.Count = 0) then
     Exit('[]');
-  // Serialize the items using Dext.Json
-  Result := TDextJson.Serialize(TValue.From<IList<TObject>>(FItems));
+
+  // Exportar respeitando filtros e ordenação atuais via FVirtualIndex
+  FilteredItems := TCollections.CreateList<TObject>;
+  for I := 0 to FVirtualIndex.Count - 1 do
+    FilteredItems.Add(FItems[FVirtualIndex[I]]);
+
+  Result := TDextJson.Serialize(TValue.From<IList<TObject>>(FilteredItems));
 end;
 
 function TEntityDataSet.AsJsonObject: string;
@@ -480,22 +498,29 @@ procedure TEntityDataSet.Load<T>(const AItems: TArray<T>);
 var
   i: Integer;
   ObjArray: TArray<TObject>;
+  LClass: TClass;
 begin
+  LClass := TClass(Pointer(GetTypeData(TypeInfo(T))^.ClassType));
   SetLength(ObjArray, Length(AItems));
   for i := 0 to High(AItems) do
     ObjArray[i] := TObject(AItems[i]);
-  Load(ObjArray, T);
+  Load(ObjArray, LClass);
 end;
 
 procedure TEntityDataSet.Load<T>(const AItems: IList<T>; AOwns: Boolean);
+begin
+  Load<T>(AItems, TClass(Pointer(GetTypeData(TypeInfo(T))^.ClassType)), AOwns);
+end;
+
+procedure TEntityDataSet.Load<T>(const AItems: IList<T>; AClass: TClass; AOwns: Boolean);
 var
   i: Integer;
   ListObj: IList<TObject>;
 begin
-  ListObj := TCollections.CreateList<TObject>(AOwns);
+  ListObj := TCollections.CreateList<TObject>(False);
   for i := 0 to AItems.Count - 1 do
     ListObj.Add(TObject(AItems[i]));
-  Load(ListObj, T, AOwns);
+  Load(ListObj as IObjectList, AClass, AOwns);
 end;
 
 procedure TEntityDataSet.LoadFromJson(const AJson: string; AClass: TClass);
@@ -508,12 +533,12 @@ end;
 
 procedure TEntityDataSet.LoadFromJson<T>(const AJson: string);
 begin
-  LoadFromJson(AJson, T);
+  LoadFromJson(AJson, TClass(Pointer(GetTypeData(TypeInfo(T))^.ClassType)));
 end;
 
 procedure TEntityDataSet.LoadFromUtf8Json<T>(const ASpan: TByteSpan);
 begin
-  LoadFromUtf8Json(ASpan, T);
+  LoadFromUtf8Json(ASpan, TClass(Pointer(GetTypeData(TypeInfo(T))^.ClassType)));
 end;
 
 procedure TEntityDataSet.LoadFromUtf8Json(const ASpan: TByteSpan; AClass: TClass);
@@ -539,7 +564,7 @@ begin
 
   // Limpar itens anteriores
   if not Assigned(FItems) then
-    FItems := TCollections.CreateList<TObject>(True);
+    FItems := TCollections.CreateList<TObject>(True) as IObjectList;
 
   if FOwnsItems then
     FItems.Clear;
@@ -761,77 +786,128 @@ end;
 
 function TEntityDataSet.Locate(const KeyFields: string; const KeyValues: Variant; Options: TLocateOptions): Boolean;
 var
-  Context: TRttiContext;
-  CurVal: Variant;
-  I: Integer;
+  FieldNames: TArray<string>;
+  LFields: TArray<TField>;
   Match: Boolean;
+  I, J: Integer;
+  FieldVal: Variant;
+  SaveRec: Integer;
+  TempBuf: TRecordBuffer;
   PropMap: TPropertyMap;
-  RttiProp: TRttiProperty;
-  RttiType: TRttiType;
-  PValue: Pointer;
+
+  function CompareValues(const V1, V2: Variant): Boolean;
+  begin
+    if (loPartialKey in Options) and (VarIsStr(V1) and VarIsStr(V2)) then
+      Result := StartsText(V2, V1)
+    else if (loCaseInsensitive in Options) and (VarIsStr(V1) and VarIsStr(V2)) then
+      Result := SameText(V1, V2)
+    else
+      Result := (V1 = V2);
+  end;
+
 begin
   Result := False;
   if (KeyFields = '') or (FVirtualIndex.Count = 0) then Exit;
 
-  // Simplificado para 1 Campo por iteração clássica de Locate
-  if not FEntityMap.Properties.TryGetValue(KeyFields, PropMap) then Exit;
-
-  // Preparar RTTI se necessário (quando FieldValueOffset não está disponível)
-  RttiProp := nil;
-  if PropMap.FieldValueOffset <= 0 then
+  FieldNames := KeyFields.Split([';']);
+  SetLength(LFields, Length(FieldNames));
+  for I := 0 to High(FieldNames) do
   begin
-    Context := TRttiContext.Create;
-    RttiType := Context.GetType(FEntityClass);
-    if RttiType <> nil then
-      RttiProp := RttiType.GetProperty(KeyFields);
+    LFields[I] := FindField(FieldNames[I]);
+    if LFields[I] = nil then Exit(False);
   end;
 
-  for I := 0 to FVirtualIndex.Count - 1 do
-  begin
-    // Ler o valor do campo usando offset direto ou RTTI
-    if (PropMap.FieldValueOffset > 0) or (PropMap.FieldOffset > 0) then
+  SaveRec := FCurrentRec;
+  TempBuf := AllocRecordBuffer;
+  try
+    for I := 0 to FVirtualIndex.Count - 1 do
     begin
-      // Use smart types null flag check only for SmartProps that have a null flag
-      if (PropMap.FieldValueOffset > 0) and (PropMap.FieldOffset > 0) and
-         not PBoolean(Pointer(PByte(FItems[FVirtualIndex[I]]) + PropMap.FieldOffset))^ then
-        CurVal := Null
-      else
-      begin
-        if PropMap.FieldValueOffset > 0 then
-          PValue := Pointer(PByte(FItems[FVirtualIndex[I]]) + PropMap.FieldValueOffset)
-        else
-          PValue := Pointer(PByte(FItems[FVirtualIndex[I]]) + PropMap.FieldOffset);
-
-        case PropMap.DataType of
-          ftInteger, ftSmallint, ftAutoInc: CurVal := PInteger(PValue)^;
-          ftLargeint: CurVal := PInt64(PValue)^;
-          ftString, ftWideString: CurVal := PString(PValue)^;
-          ftFloat: CurVal := PDouble(PValue)^;
-          ftCurrency: CurVal := PCurrency(PValue)^;
-          ftBoolean: CurVal := PBoolean(PValue)^;
-        else
-          Continue;
-        end;
-      end;
-    end
-    else if RttiProp <> nil then
-      CurVal := RttiProp.GetValue(FItems[FVirtualIndex[I]]).AsVariant
-    else
-      Continue;
-
-    if Options = [] then Match := CurVal = KeyValues
-    else Match := SameText(VarToStr(CurVal), VarToStr(KeyValues));
-
-    if Match then
-    begin
-      // Posicionar o cursor diretamente no registro encontrado
       FCurrentRec := I;
-      Resync([]);
-      Result := True;
-      Break;
+      Match := True;
+
+      for J := 0 to High(LFields) do
+      begin
+        FieldVal := Unassigned;
+        
+        // 1. Tentar Fast Path se for um campo físico com offset
+        if FEntityMap.Properties.TryGetValue(LFields[J].FieldName, PropMap) and (PropMap.FieldValueOffset > 0) then
+        begin
+          // Check for Null flag first
+          if (PropMap.FieldOffset > 0) and not PBoolean(Pointer(PByte(FItems[FVirtualIndex[I]]) + PropMap.FieldOffset))^ then
+            FieldVal := Null
+          else
+          begin
+            var PValue := Pointer(PByte(FItems[FVirtualIndex[I]]) + PropMap.FieldValueOffset);
+            case PropMap.DataType of
+              ftInteger, ftSmallint, ftAutoInc: FieldVal := PInteger(PValue)^;
+              ftLargeint: FieldVal := PInt64(PValue)^;
+              ftString, ftWideString: FieldVal := PString(PValue)^;
+              ftFloat: FieldVal := PDouble(PValue)^;
+              ftCurrency: FieldVal := PCurrency(PValue)^;
+              ftBoolean: FieldVal := PBoolean(PValue)^;
+              ftDateTime, ftDate, ftTime: FieldVal := PDateTime(PValue)^;
+            end;
+          end;
+        end;
+
+        // 2. Fallback para campos calculados ou sem offset (lê do objeto via RTTI ou evento OnCalcFields)
+        if VarIsEmpty(FieldVal) then
+        begin
+          if LFields[J].FieldKind in [fkCalculated, fkLookup, fkInternalCalc] then
+          begin
+            // Recalcular campos para este registro no buffer temporário
+            PEntityRecordHeader(TempBuf).BookmarkIndex := I;
+            CalculateFields(TRecBuf(TempBuf));
+            
+            // Extrair valor do buffer de calculados
+            var Offset: Integer;
+            if FCalcOffsets.TryGetValue(LFields[J].FieldName, Offset) then
+            begin
+              var P := PByte(TempBuf);
+              Inc(P, Offset - 1);
+              if P^ = 0 then // Null Flag
+                FieldVal := Null
+              else
+              begin
+                Inc(P);
+                // Usamos um buffer de valor genérico para extrair
+                var LValBuf: TValueBuffer;
+                SetLength(LValBuf, LFields[J].DataSize);
+                Move(P^, LValBuf[0], LFields[J].DataSize);
+                FieldVal := TValueBufferToValue(LValBuf, LFields[J].DataType).AsVariant;
+              end;
+            end;
+          end
+          else
+          begin
+            // RTTI Fallback (via ReadFieldValue que já usa FCurrentRec)
+            ReadFieldValue(LFields[J], TRecBuf(TempBuf), FieldVal);
+          end;
+        end;
+
+        if Length(LFields) = 1 then
+          Match := CompareValues(FieldVal, KeyValues)
+        else
+          Match := CompareValues(FieldVal, KeyValues[J]);
+
+        if not Match then Break;
+      end;
+
+      if Match then
+      begin
+        FCurrentRec := I;
+        Resync([]);
+        Result := True;
+        Break;
+      end;
     end;
+  finally
+    FreeRecordBuffer(TempBuf);
+    if not Result then
+      FCurrentRec := SaveRec;
   end;
 end;
+
 
 function TEntityDataSet.CompareObjectsInternal(A, B: TObject; const APropNames: TArray<string>; RttiType: TRttiType): Integer;
 var
@@ -980,7 +1056,7 @@ begin
   end;
 end;
 
-procedure TEntityDataSet.SetItems(const Value: IList<TObject>);
+procedure TEntityDataSet.SetItems(const Value: IObjectList);
 begin
   if FItems <> Value then
   begin
@@ -1362,7 +1438,10 @@ begin
 
     for PropMap in FEntityMap.Properties.Values do
     begin
-      if PropMap.IsIgnored or PropMap.IsNavigation then Continue;
+      Prop := nil;
+      RttiField := nil;
+      if PropMap.IsIgnored then Continue;
+      if PropMap.IsNavigation and (not (PropMap.Relationship in [rtOneToMany, rtManyToMany])) then Continue;
       
       // Shadow property check
       if PropMap.IsShadow and (not FIncludeShadowProperties) then Continue;
@@ -1370,18 +1449,19 @@ begin
       // Calcular resolved type dinamicamente
       ResolvedType := PropMap.DataType;
 
-      // Se tivermos Shadow mapping, ler do RTTI da Classe estática (Prop ou Field)
-      if (ResolvedType = ftUnknown) and (RttiType <> nil) then
+      // Always try to resolve RTTI Prop/Field for attribute discovery and type fallback
+      if (RttiType <> nil) then
       begin
         Prop := RttiType.GetProperty(PropMap.PropertyName);
-        if Prop <> nil then
+        if (Prop <> nil) and (ResolvedType = ftUnknown) then
         begin
           if IsTBytesType(Prop.PropertyType.Handle) then
             ResolvedType := ftBlob
           else
             ResolvedType := MapTypeToFieldType(Prop.PropertyType.Handle);
-        end
-        else
+        end;
+
+        if (Prop = nil) or (ResolvedType = ftUnknown) then
         begin
            // Search for field directly, then with F prefix, then normalized, then normalized with F
            RttiField := RttiType.GetField(PropMap.PropertyName);
@@ -1395,10 +1475,13 @@ begin
 
            if RttiField <> nil then
            begin
-              if IsTBytesType(RttiField.FieldType.Handle) then
-                ResolvedType := ftBlob
-              else
-                ResolvedType := MapTypeToFieldType(RttiField.FieldType.Handle);
+              if ResolvedType = ftUnknown then
+              begin
+                if IsTBytesType(RttiField.FieldType.Handle) then
+                  ResolvedType := ftBlob
+                else
+                  ResolvedType := MapTypeToFieldType(RttiField.FieldType.Handle);
+              end;
 
               // Update FieldOffset if not yet set
               if PropMap.FieldValueOffset <= 0 then
@@ -1417,6 +1500,10 @@ begin
 
       if (PropMap.DataType = ftUnknown) and (ResolvedType <> ftUnknown) then
         PropMap.DataType := ResolvedType;
+
+      // Habilita suporte a ftDataSet para coleções de navegação
+      if PropMap.IsNavigation and (PropMap.Relationship in [rtOneToMany, rtManyToMany]) then
+        ResolvedType := ftDataSet;
 
       // Ensure shadow property has a type if unknown (default to string)
       if (PropMap.IsShadow) and (ResolvedType = ftUnknown) then
@@ -1459,12 +1546,12 @@ begin
           ftTime: NewField := TTimeField.Create(Self);
           ftBlob: NewField := TBlobField.Create(Self);
           ftMemo: NewField := TMemoField.Create(Self);
+          ftDataSet: NewField := TDataSetField.Create(Self);
         end;
 
         if NewField <> nil then
         begin
           NewField.FieldName := PropMap.PropertyName;
-          NewField.DataSet := Self;  // Ensure dataset is linked before setting other props
           
           if (NewField is TFloatField) and (not (NewField is TCurrencyField)) then
             TFloatField(NewField).Precision := PropMap.Precision;
@@ -1491,12 +1578,44 @@ begin
 
           NewField.Required := PropMap.IsRequired and (not PropMap.IsAutoInc);
           NewField.ReadOnly := PropMap.IsAutoInc;
+
+          // Apply UI Overrides (Attributes have precedence over defaults)
+          ApplyAttributesToField(NewField, Prop);
+          ApplyAttributesToField(NewField, RttiField);
+
+          // User-defined preparation (highest precedence)
+          if Assigned(FOnPrepareField) then
+            FOnPrepareField(Self, NewField);
+
           NewField.DataSet := Self;
         end;
       end;
     end;
   finally
     Context.Free;
+  end;
+end;
+
+procedure TEntityDataSet.ApplyAttributesToField(AField: TField; AContainer: TRttiObject);
+var
+  Attr: TCustomAttribute;
+begin
+  if (AField = nil) or (AContainer = nil) then Exit;
+  for Attr in AContainer.GetAttributes do
+  begin
+    if Attr is CaptionAttribute then
+      AField.DisplayLabel := CaptionAttribute(Attr).Value
+    else if Attr is DisplayFormatAttribute then
+    begin
+      if AField is TNumericField then TNumericField(AField).DisplayFormat := DisplayFormatAttribute(Attr).Value
+      else if AField is TDateTimeField then TDateTimeField(AField).DisplayFormat := DisplayFormatAttribute(Attr).Value;
+    end
+    else if Attr is AlignmentAttribute then
+      AField.Alignment := AlignmentAttribute(Attr).Alignment
+    else if Attr is EditMaskAttribute then
+      AField.EditMask := EditMaskAttribute(Attr).Value
+    else if Attr is DisplayWidthAttribute then
+      AField.DisplayWidth := DisplayWidthAttribute(Attr).Value;
   end;
 end;
 
@@ -1710,6 +1829,11 @@ end;
 //  ReadFieldValue - Core universal method: reads a property from the entity
 // ---------------------------------------------------------------------------
 function TEntityDataSet.ReadFieldValue(Field: TField; out Value: Variant): Boolean;
+begin
+  Result := ReadFieldValue(Field, ActiveBuffer, Value);
+end;
+
+function TEntityDataSet.ReadFieldValue(Field: TField; ABuffer: TRecBuf; out Value: Variant): Boolean;
 var
   BlobData: TArray<Byte>;
   CurrentObj: TObject;
@@ -1723,9 +1847,9 @@ begin
   Value := Unassigned;
 
   if not Active then Exit;
-  Header := PEntityRecordHeader(ActiveBuffer);
+  Header := PEntityRecordHeader(Pointer(ABuffer));
 
-  // 1. Identify target object - ABSOLUTE PRIORITY to active buffer painting (Grid)
+  // 1. Identify target object
   CurrentObj := nil;
   
   if (Header <> nil) then
@@ -1865,6 +1989,11 @@ begin
       Value := PInteger(PValue)^;
     ftLargeint:
       Value := PInt64(PValue)^;
+    ftDataSet:
+    begin
+       // Para TDataSetField, o valor é o próprio objeto coleção
+       Value := TValue.From<TObject>(PObject(PValue)^).AsVariant;
+    end;
     ftFloat, ftCurrency:
     begin
       // CRITICAL: We must use TValue.Make with the original PropertyType (PTypeInfo)
@@ -1917,6 +2046,8 @@ end;
 //  GetFieldData — Override with TValueBuffer (TArray<Byte>) for modern Delphi
 //  This is the method TField.GetData actually calls (XE3+).
 // ---------------------------------------------------------------------------
+
+
 function TEntityDataSet.GetFieldData(Field: TField; Buffer: Pointer): Boolean;
 var
   V: Variant;

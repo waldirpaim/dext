@@ -30,6 +30,7 @@ interface
 uses
   System.Rtti,
   System.Variants,
+  System.Classes,
   Data.DB;
 
 type
@@ -380,6 +381,66 @@ type
   end;
 
   /// <summary>
+  ///   Specifies the display name (caption) for a property.
+  /// </summary>
+  CaptionAttribute = class(TCustomAttribute)
+  private
+    FValue: string;
+  public
+    constructor Create(const AValue: string);
+    property Value: string read FValue;
+  end;
+
+  /// <summary>
+  ///   Alias for CaptionAttribute
+  /// </summary>
+  DisplayLabelAttribute = CaptionAttribute;
+
+  /// <summary>
+  ///   Specifies the display format (e.g., #,##0.00) for a numeric or date property.
+  /// </summary>
+  DisplayFormatAttribute = class(TCustomAttribute)
+  private
+    FValue: string;
+  public
+    constructor Create(const AValue: string);
+    property Value: string read FValue;
+  end;
+
+  /// <summary>
+  ///   Specifies the horizontal alignment for the field's data in UI.
+  /// </summary>
+  AlignmentAttribute = class(TCustomAttribute)
+  private
+    FAlignment: TAlignment;
+  public
+    constructor Create(AAlignment: TAlignment);
+    property Alignment: TAlignment read FAlignment;
+  end;
+
+  /// <summary>
+  ///   Specifies an edit mask for the property.
+  /// </summary>
+  EditMaskAttribute = class(TCustomAttribute)
+  private
+    FValue: string;
+  public
+    constructor Create(const AValue: string);
+    property Value: string read FValue;
+  end;
+
+  /// <summary>
+  ///   Specifies the display width for the field in UI controls.
+  /// </summary>
+  DisplayWidthAttribute = class(TCustomAttribute)
+  private
+    FValue: Integer;
+  public
+    constructor Create(AValue: Integer);
+    property Value: Integer read FValue;
+  end;
+
+  /// <summary>
   ///   Specifies a custom type converter for the property.
   ///   The converter class must implement ITypeConverter.
   /// </summary>
@@ -586,6 +647,41 @@ constructor DbParamAttribute.Create(AParamType: TParamType; const AName: string)
 begin
   FParamType := AParamType;
   FName := AName;
+end;
+
+{ CaptionAttribute }
+
+constructor CaptionAttribute.Create(const AValue: string);
+begin
+  FValue := AValue;
+end;
+
+{ DisplayFormatAttribute }
+
+constructor DisplayFormatAttribute.Create(const AValue: string);
+begin
+  FValue := AValue;
+end;
+
+{ AlignmentAttribute }
+
+constructor AlignmentAttribute.Create(AAlignment: TAlignment);
+begin
+  FAlignment := AAlignment;
+end;
+
+{ EditMaskAttribute }
+
+constructor EditMaskAttribute.Create(const AValue: string);
+begin
+  FValue := AValue;
+end;
+
+{ DisplayWidthAttribute }
+
+constructor DisplayWidthAttribute.Create(AValue: Integer);
+begin
+  FValue := AValue;
 end;
 
 end.

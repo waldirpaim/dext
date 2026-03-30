@@ -112,6 +112,7 @@
         <DCCReference Include="Dext.Entity.SqlGenerator.Tests.pas"/>
         <DCCReference Include="Dext.Entity.FluentMapping.Tests.pas"/>
         <DCCReference Include="Dext.Entity.IdReturn.Tests.pas"/>
+        <DCCReference Include="Dext.Entity.DataSet.NewFeatures.Tests.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

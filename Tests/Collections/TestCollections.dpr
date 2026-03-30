@@ -70,6 +70,7 @@ begin
           TListOwnershipTests,
           TListEnumeratorTests,
           TListLinqTests,
+          TListIObjectListTests,
           TListManagedRecordTests,
           TDictionaryBasicTests,
           TDictionaryStringKeyTests,

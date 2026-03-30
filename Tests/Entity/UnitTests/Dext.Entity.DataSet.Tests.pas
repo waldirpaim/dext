@@ -671,9 +671,9 @@ begin
   var U := TUserTest.Create;
   U.Id := 10;
   U.Score := 20;
-  var Lst := TCollections.CreateList<TObject>(True);
+  var Lst: IList<TUserTest> := TCollections.CreateList<TUserTest>(True);
   Lst.Add(U);
-  FDataSet.Load(Lst, TUserTest, False);
+  FDataSet.Load(Lst as IObjectList, TUserTest, False);
   FDataSet.Close;
   
   // Add calculated field manually
@@ -773,7 +773,7 @@ begin
   FDataSet := TEntityDataSet.Create(nil);
   FSourceList := TCollections.CreateList<TObject>(True);
   var U1 := TUserTest.Create; U1.Id := 1; U1.Name := 'Cesar'; FSourceList.Add(U1);
-  FDataSet.Load(FSourceList, TUserTest, False);
+  FDataSet.Load(FSourceList as IObjectList, TUserTest, False);
 end;
 
 procedure TEntityDataSetCRUDTests.TearDown;
@@ -843,7 +843,7 @@ begin
     FUsers.Add(U);
   end;
   FDataSet := TEntityDataSet.Create(nil);
-  FDataSet.Load(FUsers, TUserTest, False);
+  FDataSet.Load(FUsers as IObjectList, TUserTest, False);
 end;
 
 procedure TEntityDataSetStressTests.TearDown;

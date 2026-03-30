@@ -109,7 +109,8 @@ Para trafegar dados entre camadas (API -> Client) com máxima eficiência.
 - [x] **Blob Support:** Suporte e testes exaustivos para campos "Blob" (Texto longo - CLOB e Imagens - BLOB).
 - [x] **Master-Detail:** Implementar e testar cenários de Mestre-Detalhe vinculados.
 - [x] **Performance & RTTI Fix:** Otimização do pipeline de RTTI (Context global) e correção de memory leaks.
-- [x] **Shadow Properties:** Validar leitura/escrita de propriedades persistentes que não possuem campo físico na classe (`TEntityMap`).
+- [x] **Locate em Calculados:** Corrigir `Locate` para suportar campos `fkCalculated` e `fkLookup` via fallback para `GetFieldData`.
+- [ ] **Master-Detail:** Implementar suporte nativo a coleções detalhe (`GetDetailDataSet`) para propriedades `IList<T>`.
 - [x] **Eventos de Modificação:** Garantir disparo de eventos (BeforePost, AfterPost, etc).
 - [x] **Tratamento de Exceções:** Lidar com comportamentos anômalos no ciclo de vida do DataSet e reportar adequadamente para a UI (DBGrid).
 - [x] **Calculated Fields:** Suporte nativo a campos calculados via evento `OnCalcFields` do `TDataSet`.
@@ -118,10 +119,11 @@ Para trafegar dados entre camadas (API -> Client) com máxima eficiência.
 
 *Objetivo: Facilitar a interoperabilidade entre listas, JSON e o engine do DataSet.*
 
-- [x] **IList<T> Integration:** Melhorar integração nativa com `IList<T>` e coleções fluentes.
+- [x] **IList<T> Integration:** Melhorar integração nativa com `IList<T>` e coleções fluentes (incluindo suporte a `IObjectList` para Win32).
 - [x] **Fluent Load:** Refinar método `.Load` para suportar diferentes origens de dados de forma transparente.
 - [x] **Entity to Json:** Bridge para exportar dados do DataSet/Entidade para JSON.
 - [x] **Json to Entity:** Bridge para importar dados de JSON diretamente para entidades via DataSet.
+- [ ] **Exportação Otimizada:** Refinar `.AsJsonArray` para respeitar filtros e ordenação ativos no dataset.
 
 ### 🎨 Fase 6: Experiência Design-Time & IDE
 
@@ -130,9 +132,10 @@ Para trafegar dados entre camadas (API -> Client) com máxima eficiência.
 - [ ] **Delphi AST Discovery:** Usar o parser AST para autocompletar e descobrir classes de entidades no projeto dentro da IDE. (Atualizar Delphi AST antes de executar esta tarefa)
 - [ ] **Auto Persistence:** Auto-criação de `TFields` (Persistent Fields) no Fields Editor em tempo de design.
 - [ ] **Design-time Data Viewer:** Implementar janela para execução e visualização de dados (estilo DataApi) em Design-time.
-- [ ] **Attribute Driven UI:**
-  - Configurar `Caption` / `DisplayLabel` do campo usando atributos da classe.
-  - Sincronizar `Constraints` (`Required`, `MaxLength`) via atributos de validação da entidade.
+- [x] **Attribute Driven UI:**
+  - [x] Sincronizar `Caption` / `DisplayLabel` usando atributos da classe (ex: `[Caption('Nome')]`).
+  - [x] Sincronizar `DisplayFormat`, `EditMask` e `Alignment` via metadados do `TEntityMap`.
+  - [x] Sincronizar `Constraints` (`Required`, `MaxLength`) via atributos de validação da entidade.
 
 ### 🚀 Fase 7: Performance & Quality Review
 

@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -48,6 +48,21 @@ type
     function GetOwnsObjects: Boolean;
     procedure SetOwnsObjects(Value: Boolean);
     property OwnsObjects: Boolean read GetOwnsObjects write SetOwnsObjects;
+  end;
+
+  {$M+}
+  IObjectList = interface
+    ['{B989C717-9B05-46D9-B589-3F4A5E6B7C8D}']
+    function GetCount: Integer;
+    function GetItem(Index: Integer): TObject;
+    procedure SetItem(Index: Integer; Value: TObject);
+    procedure Add(Value: TObject);
+    procedure Clear;
+    procedure Delete(Index: Integer);
+    procedure Insert(Index: Integer; Value: TObject);
+    function IndexOf(Value: TObject): Integer;
+    property Count: Integer read GetCount;
+    property Items[Index: Integer]: TObject read GetItem write SetItem; default;
   end;
 
 

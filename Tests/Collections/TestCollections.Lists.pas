@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework — Collections Unit Tests                         }
 {                                                                           }
@@ -217,6 +217,24 @@ type
 
     [Test]
     procedure ForEach_ShouldVisitAllItems;
+  end;
+
+  /// <summary>Tests for the non-generic IObjectList interface mapping</summary>
+  [TestFixture('List — IObjectList Interface')]
+  TListIObjectListTests = class
+  public
+    [Test]
+    procedure Cast_ToIObjectList_ShouldBeValid;
+    [Test]
+    procedure IObjectList_Add_ShouldWork;
+    [Test]
+    procedure IObjectList_GetItem_ShouldWork;
+    [Test]
+    procedure IObjectList_IndexOf_ShouldWork;
+    [Test]
+    procedure IObjectList_Insert_ShouldWork;
+    [Test]
+    procedure IObjectList_Delete_ShouldWork;
   end;
 
 implementation
@@ -865,6 +883,89 @@ begin
       Sum := Sum + V;
     end);
   Should(Sum).Be(60);
+end;
+
+{ TListIObjectListTests }
+
+procedure TListIObjectListTests.Cast_ToIObjectList_ShouldBeValid;
+var
+  L: IList<TDummyObject>;
+begin
+  L := TCollections.CreateList<TDummyObject>;
+  Should(Supports(L, IObjectList)).BeTrue;
+  Should(L as IObjectList).NotBeNil;
+end;
+
+procedure TListIObjectListTests.IObjectList_Add_ShouldWork;
+var
+  L: IList<TDummyObject>;
+  OI: IObjectList;
+  D: TDummyObject;
+begin
+  L := TCollections.CreateList<TDummyObject>(True);
+  OI := L as IObjectList;
+  D := TDummyObject.Create(10);
+  OI.Add(D);
+  Should(L.Count).Be(1);
+  Should(L[0].Value).Be(10);
+end;
+
+procedure TListIObjectListTests.IObjectList_GetItem_ShouldWork;
+var
+  L: IList<TDummyObject>;
+  OI: IObjectList;
+  D: TDummyObject;
+begin
+  L := TCollections.CreateList<TDummyObject>(True);
+  D := TDummyObject.Create(10);
+  L.Add(D);
+  OI := L as IObjectList;
+  Should(OI.GetItem(0)).BeEquivalentTo(D);
+end;
+
+procedure TListIObjectListTests.IObjectList_IndexOf_ShouldWork;
+var
+  L: IList<TDummyObject>;
+  OI: IObjectList;
+  D: TDummyObject;
+begin
+  L := TCollections.CreateList<TDummyObject>(True);
+  D := TDummyObject.Create(10);
+  L.Add(D);
+  OI := L as IObjectList;
+  Should(OI.IndexOf(D)).Be(0);
+end;
+
+procedure TListIObjectListTests.IObjectList_Insert_ShouldWork;
+var
+  L: IList<TDummyObject>;
+  OI: IObjectList;
+  D1, D2: TDummyObject;
+begin
+  L := TCollections.CreateList<TDummyObject>(True);
+  D1 := TDummyObject.Create(1);
+  D2 := TDummyObject.Create(2);
+  L.Add(D1);
+  OI := L as IObjectList;
+  OI.Insert(0, D2);
+  Should(L.Count).Be(2);
+  Should(L[0]).BeEquivalentTo(D2);
+  Should(L[1]).BeEquivalentTo(D1);
+end;
+
+procedure TListIObjectListTests.IObjectList_Delete_ShouldWork;
+var
+  L: IList<TDummyObject>;
+  OI: IObjectList;
+begin
+  L := TCollections.CreateList<TDummyObject>(True);
+  L.Add(TDummyObject.Create(1));
+  L.Add(TDummyObject.Create(2));
+  OI := L as IObjectList;
+  OI.Delete(0);
+  Should(L.Count).Be(1);
+  Should(OI.GetItem(0)).BeEquivalentTo(TDummyObject(OI.GetItem(0))); // Just check valid ref
+  Should(TDummyObject(OI.GetItem(0)).Value).Be(2);
 end;
 
 end.
