@@ -110,7 +110,7 @@ Para trafegar dados entre camadas (API -> Client) com máxima eficiência.
 - [x] **Master-Detail:** Implementar e testar cenários de Mestre-Detalhe vinculados.
 - [x] **Performance & RTTI Fix:** Otimização do pipeline de RTTI (Context global) e correção de memory leaks.
 - [x] **Locate em Calculados:** Corrigir `Locate` para suportar campos `fkCalculated` e `fkLookup` via fallback para `GetFieldData`.
-- [ ] **Master-Detail:** Implementar suporte nativo a coleções detalhe (`GetDetailDataSet`) para propriedades `IList<T>`.
+- [x] **Master-Detail:** Implementar suporte nativo a coleções detalhe (`GetDetailDataSet`) para propriedades `IList<T>`.
 - [x] **Eventos de Modificação:** Garantir disparo de eventos (BeforePost, AfterPost, etc).
 - [x] **Tratamento de Exceções:** Lidar com comportamentos anômalos no ciclo de vida do DataSet e reportar adequadamente para a UI (DBGrid).
 - [x] **Calculated Fields:** Suporte nativo a campos calculados via evento `OnCalcFields` do `TDataSet`.
@@ -123,7 +123,7 @@ Para trafegar dados entre camadas (API -> Client) com máxima eficiência.
 - [x] **Fluent Load:** Refinar método `.Load` para suportar diferentes origens de dados de forma transparente.
 - [x] **Entity to Json:** Bridge para exportar dados do DataSet/Entidade para JSON.
 - [x] **Json to Entity:** Bridge para importar dados de JSON diretamente para entidades via DataSet.
-- [ ] **Exportação Otimizada:** Refinar `.AsJsonArray` para respeitar filtros e ordenação ativos no dataset.
+- [x] **Exportação Otimizada:** Refinar `.AsJsonArray` para respeitar filtros e ordenação ativos no dataset. [2026-03-31]
 
 ### 🎨 Fase 6: Experiência Design-Time & IDE
 

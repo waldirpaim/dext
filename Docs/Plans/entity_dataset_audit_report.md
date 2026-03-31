@@ -1,6 +1,7 @@
 # Relatório de Auditoria: TEntityDataSet (Dext) vs Spring4D
 
 ## Visão Geral
+
 Este documento apresenta uma análise técnica profunda comparando o `TEntityDataSet` do framework Dext com o `TObjectDataSet` do framework Spring4D, focando em arquitetura de buffer, performance, consumo de memória e prontidão para Delphi 13.1 (Rad Studio 12 - Athens).
 
 ---
@@ -16,6 +17,7 @@ Este documento apresenta uma análise técnica profunda comparando o `TEntityDat
 | **Compatibilidade** | Delphi XE8 até 13.1 (Athens) | Delphi 2010 até 13.1 (Athens) |
 
 ### 1.1 O Diferencial do Dext (Fast Path)
+
 Diferente do Spring4D, que copia os dados do objeto para um buffer intermediário de `Variants`, o Dext utiliza o `Offset` das propriedades (obtido via RTTI ou Mapping) para ler/escrever diretamente na memória do objeto (`CurrentObj`). Isso elimina o "middle-man" e reduz a pressão sobre o Garbage Collector/Reference Counting em loops grandes (Grids).
 
 ---
@@ -23,11 +25,13 @@ Diferente do Spring4D, que copia os dados do objeto para um buffer intermediári
 ## 2. Auditoria de Prontidão (Delphi 13.1)
 
 ### 2.1 Buffer Management
+
 O Delphi 13.1 introduziu o `TValueBuffer` (um record que encapsula `TArray<Byte>`) para substituir o uso de ponteiros puros em várias partes do `TDataSet`.
 > [!NOTE]
 > O `TEntityDataSet` do Dext utiliza ponteiros `TRecBuf` e `Pointer` de forma segura. A assinatura do `GetFieldData` no Dext é compatível com o binário do Delphi 13.1, garantindo que não haja regressões de compatibilidade.
 
 ### 2.2 Suporte a Blobs
+
 A implementação do `TEntityBlobStream` no Dext foi auditada e verificou-se que ela lida corretamente com `TBytes` e fluxos de dados, suportando as novas otimizações de memória do compilador moderno do Delphi 13.1.
 
 ---

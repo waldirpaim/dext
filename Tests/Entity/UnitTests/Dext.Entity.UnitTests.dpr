@@ -4,6 +4,7 @@
 
 uses
   Dext.MM,
+  Dext.Core.Debug,
   System.SysUtils,
   Dext.Testing.Runner,
   Dext.Testing.Attributes,
@@ -17,7 +18,8 @@ uses
   Dext.Entity.FluentMapping.Tests in 'Dext.Entity.FluentMapping.Tests.pas',
   Dext.Entity.DataSet.NewFeatures.Tests in 'Dext.Entity.DataSet.NewFeatures.Tests.pas',
   Dext.Entity.IdReturn.Tests in 'Dext.Entity.IdReturn.Tests.pas',
-  Dext.Entity.NullableHydration.Tests in 'Dext.Entity.NullableHydration.Tests.pas';
+  Dext.Entity.NullableHydration.Tests in 'Dext.Entity.NullableHydration.Tests.pas',
+  Dext.Entity.DataSet.Export.Tests in 'Dext.Entity.DataSet.Export.Tests.pas';
 
 begin
   SetConsoleCharSet();
@@ -31,22 +33,24 @@ begin
       .Configure
       .VeryVerbose
       .RegisterFixtures([
-        TEntityDataSetCRUDTests,
-        TEntityDataSetTests,
-        TProductDataSetTests,
-        TMasterDetailDataSetTests,
-        TEntityDataSetStressTests,
-        TDataSetSmartTypesTests,
-        TShadowDataSetTests,
         TCalculatedFieldsTests,
-        TSmartTypesTests,
-        TSmartTypesMatrixTests,
-        TSmartPropertyDataSetTests,
-        TFloatingPointDataSetTests,
-        TEntityIdReturnTests,
-        TFloatingPointDataSetTests,
+        TDataSetSmartTypesTests,
+        TEntityDataSetAutomationTests,
+        TEntityDataSetCRUDTests,
+        TEntityDataSetExportTests,
         TEntityDataSetFeaturesTests,
+        TEntityDataSetStressTests,
+        TEntityDataSetTests,
+        TEntityIdReturnTests,
         TEntityNullableHydrationTests
+        TFloatingPointDataSetTests,
+        TMasterDetailDataSetTests,
+        TNativeMasterDetailTests,
+        TProductDataSetTests,
+        TShadowDataSetTests,
+        TSmartPropertyDataSetTests,
+        TSmartTypesMatrixTests,
+        TSmartTypesTests
       ]).Run;
 
     TTest.SetExitCode(TestResult);

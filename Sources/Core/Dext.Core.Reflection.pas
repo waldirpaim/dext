@@ -1,4 +1,4 @@
-unit Dext.Core.Reflection;
+﻿unit Dext.Core.Reflection;
 
 interface
 
@@ -62,6 +62,7 @@ type
     class function CreateInstance(AClass: TClass): TObject; static;
     class function GetFieldPtr(Instance: TObject; const FieldName: string): Pointer; static;
     class function NormalizeFieldName(const AFieldName: string): string; static;
+    class function GetCollectionItemType(AType: PTypeInfo): TClass; static;
     class property Context: TRttiContext read FContext;
   end;
 
@@ -524,6 +525,33 @@ begin
     Result := Result.Substring(5)
   else if Result.StartsWith('Nullable', True) and (Result.Length > 8) and (Char.IsUpper(Result, 8)) then
     Result := Result.Substring(8);
+end;
+
+class function TReflection.GetCollectionItemType(AType: PTypeInfo): TClass;
+var
+  LTypeName: string;
+  LInnerTypeName: string;
+  LTMark: Integer;
+begin
+  Result := nil;
+  if AType = nil then Exit;
+  
+  LTypeName := string(AType.Name);
+  
+  // Extract T from IList<T>, IEnumerable<T>, etc
+  LTMark := LTypeName.IndexOf('<');
+  if (LTMark > 0) and LTypeName.EndsWith('>') then
+  begin
+    LInnerTypeName := LTypeName.Substring(LTMark + 1, LTypeName.Length - LTMark - 2);
+    
+    // Find the type in RTTI context
+    var LInnerRtti := FContext.FindType(LInnerTypeName);
+    if LInnerRtti = nil then
+      LInnerRtti := FContext.FindType('System.' + LInnerTypeName);
+    
+    if (LInnerRtti <> nil) and (LInnerRtti.TypeKind = tkClass) then
+      Result := TRttiInstanceType(LInnerRtti).MetaclassType;
+  end;
 end;
 
 end.

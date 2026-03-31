@@ -1,4 +1,4 @@
-unit Dext.Entity.DataSet.Tests;
+﻿unit Dext.Entity.DataSet.Tests;
 
 interface
 
@@ -13,8 +13,10 @@ uses
   Dext.Types.Nullable,
   Dext.Types.Lazy,
   Dext.Entity.Attributes,
+  Dext.Entity,
   Dext.Collections,
-  Dext.Entity;
+  Dext.DI.Attributes,
+  Dext.Core.Activator;
 
 type
   // =========================================================================
@@ -113,6 +115,51 @@ type
     property Description: Lazy<string> read FLazyDescription write FLazyDescription;
     property Price: Prop<Double> read FPropPrice write FPropPrice;
     property Age: Nullable<Integer> read FNullableAge write FNullableAge;
+  end;
+
+  // =========================================================================
+  //  Order Entity for native master-detail tests
+  // =========================================================================
+  [Table('orders_native')]
+  TOrderTest = class
+  private
+    FId: Integer;
+    FItems: IList<TOrderItemTest>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    [PrimaryKey] property Id: Integer read FId write FId;
+    [HasMany] property Items: IList<TOrderItemTest> read FItems write FItems;
+  end;
+
+  [TestFixture('TEntityDataSet Automation and Stability')]
+  TEntityDataSetAutomationTests = class
+  private
+    FMasterDS: TEntityDataSet;
+  public
+    [Setup]
+    procedure Setup;
+    [TearDown]
+    procedure TearDown;
+
+    [Test]
+    procedure Test_AutoInstantiate_Collection_Via_Attribute;
+    [Test]
+    procedure Test_MasterDetail_ID_Sync_Nested;
+    [Test]
+    procedure Test_TActivator_Tip_Error_Message;
+  end;
+
+  TGhostEntity = class
+    Id: Integer;
+  end;
+
+  // Classe sem registro para testar falha do Activator
+  TUnregisteredEntity = class
+  private
+    FItems: IList<TGhostEntity>; // IList nao registrada no TActivator para o tipo TGhostEntity
+  public
+    [HasMany] property Items: IList<TGhostEntity> read FItems write FItems;
   end;
 
   [TestFixture('TEntityDataSet Smart Properties')]
@@ -257,6 +304,8 @@ type
     [Test]
     procedure Test_Field_DataTypes;
     [Test]
+    procedure Test_DateTime_Persistence;
+    [Test]
     procedure Test_Blob_FieldType;
     [Test]
     procedure Test_Blob_IsNull_When_Empty;
@@ -290,11 +339,33 @@ type
     procedure TearDown;
 
     [Test]
+    procedure Test_Detail_FieldValues;
+
+    [Test]
     procedure Test_Detail_Count;
+
     [Test]
     procedure Test_Detail_FilterByMaster;
+
     [Test]
-    procedure Test_Detail_FieldValues;
+    procedure Test_Real_MasterDetail_Link;
+  end;
+
+  [TestFixture('TEntityDataSet Native Master-Detail')]
+  TNativeMasterDetailTests = class
+  private
+    FDataSet: TEntityDataSet;
+    FOrder: TOrderTest;
+  public
+    [Setup]
+    procedure Setup;
+    [TearDown]
+    procedure TearDown;
+
+    [Test]
+    procedure Test_Access_Detail_DataSet;
+    [Test]
+    procedure Test_Detail_RecordCount;
   end;
 
   [TestFixture('TEntityDataSet CRUD Operations')]
@@ -462,14 +533,14 @@ var
   TypedList: IList<TUserTest>;
   U: TUserTest;
 begin
-  TypedList := TCollections.CreateList<TUserTest>(True);
+  TypedList := TCollections.CreateList<TUserTest>(False);
   U := TUserTest.Create;
   U.Name := 'Alex List';
   TypedList.Add(U);
   
   TypedDS := TEntityDataSet.Create(nil);
   try
-    TypedDS.Load<TUserTest>(TypedList);
+    TypedDS.Load<TUserTest>(TypedList, True);
     Should(TypedDS.RecordCount).Be(1);
     Should(TypedDS.FieldByName('Name').AsString).Be('Alex List');
   finally
@@ -525,6 +596,7 @@ begin
 
   var P3 := TProductTest.Create;
   P3.Id := 3; P3.Name := 'Tool Gamma'; P3.Price := 9.50; P3.Active := False;
+  P3.CreatedAt := Now;
   FProducts[2] := P3;
 
   FDataSet := TEntityDataSet.Create(nil);
@@ -560,6 +632,19 @@ begin
   Should(FDataSet.FieldByName('Price').DataType).Be(ftCurrency);
   Should(FDataSet.FieldByName('StockQty').DataType).Be(ftLargeint);
   Should(FDataSet.FieldByName('Photo').DataType).Be(ftBlob);
+  Should(FDataSet.FieldByName('CreatedAt').DataType).Be(ftDateTime);
+end;
+
+procedure TProductDataSetTests.Test_DateTime_Persistence;
+begin
+  FDataSet.Last; // Go to P3
+  var OriginalDate := TProductTest(FProducts[2]).CreatedAt;
+  var DataSetDate := FDataSet.FieldByName('CreatedAt').AsDateTime;
+  
+  // We compare formatted strings down to seconds cross-checked with raw double 
+  // to ensure our MSecs conversion doesn't lose data.
+  Should(FormatDateTime('yyyy-mm-dd hh:nn:ss', DataSetDate)).Be(FormatDateTime('yyyy-mm-dd hh:nn:ss', OriginalDate));
+  Should(Abs(DataSetDate - OriginalDate) < 0.00000001).BeTrue;
 end;
 
 procedure TProductDataSetTests.Test_Blob_FieldType;
@@ -673,7 +758,7 @@ begin
   U.Score := 20;
   var Lst: IList<TUserTest> := TCollections.CreateList<TUserTest>(True);
   Lst.Add(U);
-  FDataSet.Load(Lst as IObjectList, TUserTest, False);
+  FDataSet.Load(Lst as IObjectList, TUserTest, True);
   FDataSet.Close;
   
   // Add calculated field manually
@@ -764,6 +849,36 @@ end;
 procedure TMasterDetailDataSetTests.Test_Detail_FieldValues;
 begin
   Should(FDetailDS.FieldByName('OrderId').Required).BeTrue;
+end;
+
+procedure TMasterDetailDataSetTests.Test_Real_MasterDetail_Link;
+var
+  MasterDataSource: TDataSource;
+begin
+  MasterDataSource := TDataSource.Create(nil);
+  try
+    MasterDataSource.DataSet := FMasterDS;
+
+    // Configurar o vínculo clássico
+    FDetailDS.MasterSource := MasterDataSource;
+    FDetailDS.MasterFields := 'Id';
+    FDetailDS.IndexFieldNames := 'OrderId';
+    FDetailDS.Open;
+
+    // Master está no registro 100 (Setup posiciona First)
+    Should(FMasterDS.FieldByName('Id').AsInteger).Be(100);
+    Should(FDetailDS.RecordCount).Be(2);
+
+    // Mudar master para o registro 200
+    FMasterDS.Next;
+    Should(FMasterDS.FieldByName('Id').AsInteger).Be(200);
+
+    // O detalhe deve ter filtrado automaticamente
+    Should(FDetailDS.RecordCount).Be(1);
+    Should(FDetailDS.FieldByName('OrderId').AsInteger).Be(200);
+  finally
+    MasterDataSource.Free;
+  end;
 end;
 
 { TEntityDataSetCRUDTests }
@@ -1077,6 +1192,140 @@ begin
   // if not handled as ftCurrency.
   FDataSet.Open;
   Should(FDataSet.FieldByName('CurrencyVal').DataType).Be(ftCurrency);
+  
+  // Verify DisplayFormat to avoid 1E2 scientific notation regression
+  Should(TFloatField(FDataSet.FieldByName('DoubleVal')).DisplayFormat).Be('#,##0.00');
+  Should(TCurrencyField(FDataSet.FieldByName('CurrencyVal')).DisplayFormat).Be('#,##0.00');
 end;
+
+{ TOrderTest }
+
+constructor TOrderTest.Create;
+begin
+  FItems := TCollections.CreateList<TOrderItemTest>(True);
+end;
+
+destructor TOrderTest.Destroy;
+begin
+  FItems := nil;
+  inherited;
+end;
+
+{ TNativeMasterDetailTests }
+
+procedure TNativeMasterDetailTests.Setup;
+begin
+  FOrder := TOrderTest.Create;
+  FOrder.Id := 1;
+  
+  var Item := TOrderItemTest.Create;
+  Item.Id := 101;
+  Item.ProductName := 'Item 1';
+  FOrder.Items.Add(Item);
+
+  Item := TOrderItemTest.Create;
+  Item.Id := 102;
+  Item.ProductName := 'Item 2';
+  FOrder.Items.Add(Item);
+
+  FDataSet := TEntityDataSet.Create(nil);
+  FDataSet.Load([FOrder], TOrderTest);
+  FDataSet.Open;
+end;
+
+procedure TNativeMasterDetailTests.TearDown;
+begin
+  FDataSet.Free;
+  FOrder.Free;
+end;
+
+procedure TNativeMasterDetailTests.Test_Access_Detail_DataSet;
+var
+  DetailField: TDataSetField;
+begin
+  DetailField := FDataSet.FieldByName('Items') as TDataSetField;
+  Should(DetailField.NestedDataSet).NotBeNull;
+  
+  DetailField.NestedDataSet.Open;
+  Should(DetailField.NestedDataSet.FieldByName('ProductName').AsString).Be('Item 1');
+end;
+
+procedure TNativeMasterDetailTests.Test_Detail_RecordCount;
+var
+  DetailField: TDataSetField;
+begin
+  DetailField := FDataSet.FieldByName('Items') as TDataSetField;
+  DetailField.NestedDataSet.Open;
+  Should(DetailField.NestedDataSet.RecordCount).Be(2);
+end;
+
+{ TEntityDataSetAutomationTests }
+
+procedure TEntityDataSetAutomationTests.Setup;
+begin
+  FMasterDS := TEntityDataSet.Create(nil);
+  FMasterDS.Load<TOrderTest>(TCollections.CreateList<TOrderTest>(False), True);
+end;
+
+procedure TEntityDataSetAutomationTests.TearDown;
+begin
+  FMasterDS.Free;
+end;
+
+procedure TEntityDataSetAutomationTests.Test_AutoInstantiate_Collection_Via_Attribute;
+begin
+  // Nota: Renomeado mentalmente para "Via_Activator" ja que Inject eh instavel com o Linker em certos tipos
+  FMasterDS.Append;
+  var LObj := FMasterDS.GetCurrentObject as TOrderTest;
+  
+  // A lista Items deve ter sido instanciada internamente pelo InternalInsert
+  // via registro global no initialization desta unit
+  Should(LObj.Items).NotBeNil;
+  FMasterDS.Cancel;
+end;
+procedure TEntityDataSetAutomationTests.Test_MasterDetail_ID_Sync_Nested;
+begin
+  // 1. Carrega o mestre (Load ja cria os campos automaticamente via RTTI)
+  FMasterDS.Append;
+  FMasterDS.FieldByName('Id').AsInteger := 500;
+  FMasterDS.Post;
+  
+  // 2. Busca o campo aninhado gerado automaticamente pelo Load<TOrderTest>
+  var LItemsField := FMasterDS.FieldByName('Items') as TDataSetField;
+  var LDetailDS := LItemsField.NestedDataSet as TEntityDataSet;
+  
+  // 3. Configura a vinculacao (o TDataSetField ja os conhece mas o dataset detalhe precisa deles para o sync)
+  LDetailDS.MasterFields := 'Id';
+  LDetailDS.IndexFieldNames := 'OrderId';
+  
+  // 4. Insere no detalhe e valida a heranca automatica do ID
+  LDetailDS.Append;
+  Should(LDetailDS.FieldByName('OrderId').AsInteger).Be(500);
+  LDetailDS.Cancel;
+end;
+
+procedure TEntityDataSetAutomationTests.Test_TActivator_Tip_Error_Message;
+var
+  LDS: TEntityDataSet;
+begin
+  LDS := TEntityDataSet.Create(nil);
+  try
+    // Forcar erro via Append em uma classe com lista nao registrada
+    LDS.Load<TUnregisteredEntity>(TCollections.CreateList<TUnregisteredEntity>(False), True);
+    try
+      LDS.Append;
+      raise Exception.Create('Should have raised an exception with a Tip');
+    except
+      on E: Exception do
+        Should(E.Message).Contain('Tip: Register the implementation');
+    end;
+  finally
+    LDS.Free;
+  end;
+end;
+
+initialization
+  // Ensure we have some base registration for tests that need it
+  TActivator.RegisterDefault<IList<TOrderItemTest>, TList<TOrderItemTest>>;
 
 end.

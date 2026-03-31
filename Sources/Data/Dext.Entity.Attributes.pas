@@ -441,6 +441,17 @@ type
   end;
 
   /// <summary>
+  ///   Specifies if the field should be visible in UI controls.
+  /// </summary>
+  VisibleAttribute = class(TCustomAttribute)
+  private
+    FVisible: Boolean;
+  public
+    constructor Create(AVisible: Boolean = True);
+    property Visible: Boolean read FVisible;
+  end;
+
+  /// <summary>
   ///   Specifies a custom type converter for the property.
   ///   The converter class must implement ITypeConverter.
   /// </summary>
@@ -682,6 +693,13 @@ end;
 constructor DisplayWidthAttribute.Create(AValue: Integer);
 begin
   FValue := AValue;
+end;
+
+{ VisibleAttribute }
+
+constructor VisibleAttribute.Create(AVisible: Boolean);
+begin
+  FVisible := AVisible;
 end;
 
 end.
