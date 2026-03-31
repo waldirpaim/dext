@@ -402,6 +402,48 @@ Test-Endpoint -Name "Controller: Id from route, details from query" `
     $r.source -eq "controller-route" -and $r.id -eq 999 -and $r.details -eq "full"
 }
 
+# -----------------------------------------------------------------------------
+# TEST 16: Controller Header Binding - UpperCase
+# -----------------------------------------------------------------------------
+Write-TestHeader "16" "Controller: Header Binding"
+
+Test-Endpoint -Name "Controller: X-TENANT-ID from header - UpperCase" `
+    -Method "GET" `
+    -Url "$BaseUrl/api/controller/header" `
+    -Headers @{ "X-TENANT-ID" = "controller-tenant" } `
+    -Validate {
+    param($r)
+    $r.source -eq "controller-header" -and $r.tenantId -eq "controller-tenant"
+}
+
+# -----------------------------------------------------------------------------
+# TEST 17: Controller Header Binding - LowerCase
+# -----------------------------------------------------------------------------
+Write-TestHeader "17" "Controller: Header Binding"
+
+Test-Endpoint -Name "Controller: x-tenant-id from header - LowerCase" `
+    -Method "GET" `
+    -Url "$BaseUrl/api/controller/header" `
+    -Headers @{ "x-tenant-id" = "controller-tenant" } `
+    -Validate {
+    param($r)
+    $r.source -eq "controller-header" -and $r.tenantId -eq "controller-tenant"
+}
+
+# -----------------------------------------------------------------------------
+# TEST 18: Controller Header Binding - Misto Case
+# -----------------------------------------------------------------------------
+Write-TestHeader "18" "Controller: Header Binding"
+
+Test-Endpoint -Name "Controller: x-TeNanT-iD from header - Misto Case" `
+    -Method "GET" `
+    -Url "$BaseUrl/api/controller/header" `
+    -Headers @{ "x-TeNanT-iD" = "controller-tenant" } `
+    -Validate {
+    param($r)
+    $r.source -eq "controller-header" -and $r.tenantId -eq "controller-tenant"
+}
+
 # =============================================================================
 # SUMMARY
 # =============================================================================
