@@ -32,10 +32,22 @@ package Dext.EF.Design;
 requires
   rtl,
   dbrtl,
+  designide,
+  vcl,
+  vcldb,
+  FireDAC,
+  FireDACCommon,
+  FireDACCommonDriver,
   Dext.Core,
   Dext.EF.Core;
 
 contains
-  Dext.Entity.DataSet.Reg in 'Data\Dext.Entity.DataSet.Reg.pas';
+  Dext.Entity.DataSet.Reg in 'Data\Dext.Entity.DataSet.Reg.pas',
+  Dext.EF.Design.Metadata in 'Design\Dext.EF.Design.Metadata.pas',
+  Dext.EF.Design.DataProvider in 'Design\Dext.EF.Design.DataProvider.pas',
+  Dext.EF.Design.Editors in 'Design\Dext.EF.Design.Editors.pas',
+  Dext.EF.Design.Expert in 'Design\Dext.EF.Design.Expert.pas',
+  Dext.EF.Design.Preview in 'Design\Dext.EF.Design.Preview.pas',
+  Dext.EF.Design.Registration in 'Design\Dext.EF.Design.Registration.pas';
 
 end.

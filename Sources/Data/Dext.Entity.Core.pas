@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -45,7 +45,8 @@ uses
   Dext.Specifications.Types,
   Dext.MultiTenancy,
   Dext.Threading.Async,
-  Dext.Entity.Mapping;
+  Dext.Entity.Mapping,
+  System.Classes;
 
 type
   EOptimisticConcurrencyException = class(Exception);
@@ -224,6 +225,42 @@ type
     function Member(const APropName: string): IPropertyEntry;
   end;
 
+  TEntityMemberMetadata = class
+  public
+    Name: string;
+    MemberType: string;
+    IsPrimaryKey: Boolean;
+    IsRequired: Boolean;
+    IsAutoInc: Boolean;
+    IsReadOnly: Boolean;
+    MaxLength: Integer;
+    Precision: Integer;
+    Scale: Integer;
+    DisplayLabel: string;
+    DisplayFormat: string;
+    Alignment: TAlignment;
+    EditMask: string;
+    DisplayWidth: Integer;
+    Visible: Boolean;
+    DefaultValue: Variant;
+  end;
+
+  TEntityClassMetadata = class
+  public
+    ClassName: string;
+    TableName: string;
+    UnitName: string;
+    Members: IList<TEntityMemberMetadata>;
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
+  IEntityDataProvider = interface
+    ['{884D5514-6F29-4F58-BF76-2244EEF9452A}']
+    function GetEntities: TArray<string>;
+    function GetEntityMetadata(const AClassName: string): TEntityClassMetadata;
+  end;
+
   /// <summary>
   ///   Represents a session with the database.
   /// </summary>
@@ -387,6 +424,20 @@ begin
     Result := AValue.AsString <> ''
   else
     Result := True; // For other types like GUID, assume valid if not empty
+end;
+
+{ TEntityClassMetadata }
+
+constructor TEntityClassMetadata.Create;
+begin
+  inherited Create;
+  Members := TCollections.CreateList<TEntityMemberMetadata>(True);
+end;
+
+destructor TEntityClassMetadata.Destroy;
+begin
+  Members := nil;
+  inherited;
 end;
 
 end.

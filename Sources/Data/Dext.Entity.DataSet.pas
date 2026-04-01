@@ -86,6 +86,8 @@ type
     FInternalCalcStorage: TArray<TBytes>;
     FPropertyCache: TDictionary<string, TRttiProperty>;
     FOnPrepareField: TPrepareFieldEvent;
+    FDataProvider: TComponent;
+    FEntityClassName: string;
 
     function GetProperty(const APropName: string): TRttiProperty;
     procedure SetItems(const Value: IObjectList);
@@ -197,13 +199,15 @@ type
     procedure LoadFromUtf8Json(const ASpan: TByteSpan; AClass: TClass); overload;
     procedure LoadFromUtf8Json<T: class>(const ASpan: TByteSpan); overload;
     procedure Refresh;
-
+    procedure GenerateFields;
     function CreateBlobStream(Field: TField; Mode: TBlobStreamMode): TStream; override;
     function GetCurrentObject: TObject;
     property Items: IObjectList read FItems write SetItems;
     property DbContext: TDbContext read FDbContext write FDbContext;
   published
     property OnPrepareField: TPrepareFieldEvent read FOnPrepareField write FOnPrepareField;
+    property DataProvider: TComponent read FDataProvider write FDataProvider;
+    property EntityClassName: string read FEntityClassName write FEntityClassName;
     property Active;
     property Filter;
     property Filtered;
@@ -264,6 +268,7 @@ uses
   Dext.Specifications.Parser,
   Dext.Core.ValueConverters,
   Dext.Entity,
+  Dext.Entity.Core,
   Dext.Entity.Attributes,
   Dext.DI.Attributes,
   Dext.Json;
@@ -1487,6 +1492,19 @@ end;
 procedure TEntityDataSet.InternalInsert;
 var
   LNewObj: TObject;
+  LContext: TRttiContext;
+  LType: TRttiType;
+  LProp: TRttiProperty;
+  LVal: TValue;
+  LTargetType: PTypeInfo;
+  LAttr: TCustomAttribute;
+  LNewList: TValue;
+  LMasterDataSet: TDataSet;
+  MasterFieldsList: TArray<string>;
+  DetailFieldsList: TArray<string>;
+  i: Integer;
+  MasterField: TField;
+  DetailField: TField;
 begin
   inherited InternalInsert;
   if FInsertObj <> nil then
@@ -1505,19 +1523,19 @@ begin
       SetMasterInheritance(LNewObj);
 
     // 2. Garantir que listas internas estejam inicializadas para não quebrar o Nested DataSet
-    var LContext := TReflection.Context;
-    var LType := LContext.GetType(FEntityClass);
+    LContext := TReflection.Context;
+    LType := LContext.GetType(FEntityClass);
     if LType <> nil then
     begin
-      for var LProp in LType.GetProperties do
+      for LProp in LType.GetProperties do
       begin
         if TActivator.IsListType(LProp.PropertyType.Handle) then
         begin
-          var LVal := LProp.GetValue(LNewObj);
+          LVal := LProp.GetValue(LNewObj);
           if LVal.IsEmpty or (LVal.Kind = tkUnknown) then
           begin
-            var LTargetType := LProp.PropertyType.Handle;
-            for var LAttr in LProp.GetAttributes do
+            LTargetType := LProp.PropertyType.Handle;
+            for LAttr in LProp.GetAttributes do
               if LAttr is InjectAttribute then
               begin
                 if InjectAttribute(LAttr).TargetTypeInfo <> nil then
@@ -1526,7 +1544,7 @@ begin
               end;
             
             try
-              var LNewList := TActivator.CreateInstance(nil, LTargetType);
+              LNewList := TActivator.CreateInstance(nil, LTargetType);
               if not LNewList.IsEmpty then
                 LProp.SetValue(LNewObj, LNewList);
             except
@@ -1560,7 +1578,7 @@ begin
     PEntityRecordHeader(Pointer(ActiveBuffer)).BookmarkFlag := bfInserted;
 
     // NOVO: No mestre-detalhe (CLÁSSICO ou ANINHADO), herdar valores do mestre agora mesmo
-    var LMasterDataSet: TDataSet := nil;
+    LMasterDataSet := nil;
     if (FMasterLink <> nil) and (FMasterLink.DataSource <> nil) then
       LMasterDataSet := FMasterLink.DataSource.DataSet
     else if FMasterDataSet <> nil then
@@ -1569,13 +1587,13 @@ begin
     if (LMasterDataSet <> nil) and (LMasterDataSet.Active) and 
        (FMasterFields <> '') and (FIndexFieldNames <> '') then
     begin
-      var MasterFieldsList := FMasterFields.Split([';']);
-      var DetailFieldsList := FIndexFieldNames.Split([';']);
-      for var i := 0 to High(MasterFieldsList) do
+      MasterFieldsList := FMasterFields.Split([';']);
+      DetailFieldsList := FIndexFieldNames.Split([';']);
+      for i := 0 to High(MasterFieldsList) do
       begin
         if i > High(DetailFieldsList) then Break;
-        var MasterField := LMasterDataSet.FindField(MasterFieldsList[i].Trim);
-        var DetailField := FindField(DetailFieldsList[i].Trim);
+        MasterField := LMasterDataSet.FindField(MasterFieldsList[i].Trim);
+        DetailField := FindField(DetailFieldsList[i].Trim);
         if (MasterField <> nil) and (DetailField <> nil) then
           DetailField.Value := MasterField.Value;
       end;
@@ -1599,12 +1617,87 @@ begin
   FCurrentRec := FVirtualIndex.Count;
 end;
 
+procedure TEntityDataSet.GenerateFields;
+var
+  DP: IEntityDataProvider;
+  MD: TObject;
+  ClassMD: TEntityClassMetadata;
+  Member: TEntityMemberMetadata;
+  Field: TField;
+  LType: TFieldType;
+  LSize: Integer;
+  LT: string;
+begin
+  if not Assigned(FDataProvider) then Exit;
+  if not FDataProvider.GetInterface(IEntityDataProvider, DP) then Exit;
+  if FEntityClassName = '' then Exit;
+
+  MD := DP.GetEntityMetadata(FEntityClassName);
+  if MD = nil then Exit;
+
+  ClassMD := TEntityClassMetadata(MD);
+  
+  DisableControls;
+  try
+    if Active then Close;
+    
+    // Clear existing fields if any (optional, usually users manage this)
+    // FieldDefs.Clear; 
+    
+    for Member in ClassMD.Members do
+    begin
+      if FindField(Member.Name) <> nil then Continue;
+
+      // Simple mapping for design-time field creation
+      LType := ftWideString;
+      LSize := Member.MaxLength;
+      if LSize = 0 then LSize := 255;
+
+      LT := Member.MemberType.ToLower;
+      if (LT = 'integer') or (LT = 'int32') then LType := ftInteger
+      else if (LT = 'int64') then LType := ftLargeint
+      else if (LT = 'double') or (LT = 'extended') or (LT = 'single') then LType := ftFloat
+      else if (LT = 'tdatetime') or (LT = 'tdate') or (LT = 'ttime') then LType := ftDateTime
+      else if (LT = 'boolean') then LType := ftBoolean
+      else if (LT = 'currency') then LType := ftCurrency
+      else if (LT = 'tbytes') or (LT = 'blob') then LType := ftBlob;
+
+      Field := DefaultFieldClasses[LType].Create(Owner);
+      Field.FieldName := Member.Name;
+      Field.DataSet := Self;
+      Field.Name := Self.Name + Member.Name;
+      
+      Field.Visible := Member.Visible;
+      Field.ReadOnly := Member.IsReadOnly;
+      Field.Required := Member.IsRequired;
+      Field.Size := LSize;
+      
+      if Member.DisplayLabel <> '' then Field.DisplayLabel := Member.DisplayLabel;
+      if Member.DisplayWidth > 0 then Field.DisplayWidth := Member.DisplayWidth;
+      
+      if Field is TNumericField then
+        TNumericField(Field).DisplayFormat := Member.DisplayFormat;
+        
+      if Field is TDateTimeField then
+        TDateTimeField(Field).DisplayFormat := Member.DisplayFormat;
+
+      if Member.EditMask <> '' then
+         Field.EditMask := Member.EditMask;
+         
+      Field.Alignment := Member.Alignment;
+    end;
+  finally
+    EnableControls;
+  end;
+end;
+
 procedure TEntityDataSet.InternalInitFieldDefs;
 
   function MapTypeToFieldType(ATypeInfo: PTypeInfo): TFieldType;
   var
     TypeName: string;
     InnerInfo: PTypeInfo;
+    LTypeName: string;
   begin
     if ATypeInfo = nil then Exit(ftUnknown);
     
@@ -1616,10 +1709,10 @@ procedure TEntityDataSet.InternalInitFieldDefs;
         Exit(MapTypeToFieldType(InnerInfo));
     end;
 
-    case ATypeInfo.Kind of
+    case ATypeInfo^.Kind of
       tkInteger, tkEnumeration:
       begin
-        TypeName := string(ATypeInfo.Name);
+        TypeName := string(ATypeInfo^.Name);
         if (ATypeInfo = TypeInfo(Boolean)) or (TypeName = 'Boolean') or (TypeName = 'WordBool') or (TypeName = 'ByteBool') or (TypeName = 'LongBool') then
           Exit(ftBoolean)
         else
@@ -1627,7 +1720,7 @@ procedure TEntityDataSet.InternalInitFieldDefs;
       end;
       tkFloat:
       begin
-        TypeName := string(ATypeInfo.Name);
+        TypeName := string(ATypeInfo^.Name);
         if (ATypeInfo = TypeInfo(TDateTime)) or SameText(TypeName, 'TDateTime') or SameText(TypeName, 'TDate') or SameText(TypeName, 'TTime') then
           Exit(ftDateTime)
         else if (ATypeInfo = TypeInfo(Currency)) or SameText(TypeName, 'Currency') then
@@ -1650,7 +1743,7 @@ procedure TEntityDataSet.InternalInitFieldDefs;
           Exit(MapTypeToFieldType(InnerInfo))
         else
         begin
-          var LTypeName := string(ATypeInfo.Name);
+          LTypeName := string(ATypeInfo^.Name);
           if (LTypeName.StartsWith('IList<') or LTypeName.StartsWith('IEnumerable<')) then
             Exit(ftDataSet);
             
