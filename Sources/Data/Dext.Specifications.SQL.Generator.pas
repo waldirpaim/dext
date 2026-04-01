@@ -2386,8 +2386,13 @@ begin
       
       PropTypeHandle := Prop.PropertyType.Handle;
       
-      // Handle Explicit DbType (Attributes or Fluent)
-      if (PropMap <> nil) and (PropMap.DataType <> ftUnknown) then
+      // Handle Explicit DbType (Attributes or Fluent).
+      // Skip GetColumnTypeForField when AutoInc is True: DiscoverAttributes always fills
+      // PropMap.DataType from the property type (e.g. ftInteger), so we must NOT fall into
+      // GetColumnTypeForField for AutoInc columns — TBaseDialect returns plain 'INTEGER'
+      // from that path, losing the dialect-specific identity syntax (e.g. 'INTEGER GENERATED
+      // BY DEFAULT AS IDENTITY' for Firebird, 'SERIAL' for PostgreSQL).
+      if (PropMap <> nil) and (PropMap.DataType <> ftUnknown) and (not IsAutoInc) then
       begin
         ColType := FDialect.GetColumnTypeForField(PropMap.DataType, IsAutoInc);
       end

@@ -1072,6 +1072,10 @@ begin
       if AutoIncProp <> nil then Break;
     end;
 
+    // Mirror GenerateInsert: apply naming strategy when no explicit column name was mapped
+    if (AutoIncProp <> nil) and (AutoIncColumn = AutoIncProp.Name) and (Generator.NamingStrategy <> nil) then
+      AutoIncColumn := Generator.NamingStrategy.GetColumnName(AutoIncProp);
+
     UseReturning := (AutoIncColumn <> '') and FContext.Dialect.SupportsInsertReturning;
     if UseReturning then
     begin
