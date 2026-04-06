@@ -5,12 +5,17 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ExtCtrls, Vcl.DBCtrls, Vcl.Grids,
-  Vcl.DBGrids, Data.DB, Dext.Entity.DataSet, Dext.Entity.Attributes, Vcl.Buttons,
-  Dext.Collections, Dext.Core.Activator;
+  Vcl.DBGrids, Data.DB,Dext.Entity.Attributes, Vcl.Buttons,
+  Dext.Collections, Dext.Core.Activator,  Dext.Entity.DataSet,
+  FireDAC.Stan.Intf, FireDAC.Stan.Option, FireDAC.Stan.Error, FireDAC.UI.Intf, FireDAC.Phys.Intf,
+  FireDAC.Stan.Def, FireDAC.Stan.Pool, FireDAC.Stan.Async, FireDAC.Phys, FireDAC.VCLUI.Wait,
+  FireDAC.Comp.Client, FireDAC.Phys.SQLite, FireDAC.Phys.SQLiteDef,
+  FireDAC.Stan.ExprFuncs, FireDAC.Phys.SQLiteWrapper.Stat;
 
 type
 //  Money = Currency;
   Money = Double;
+  [Table('stock')]
   TStockItem = class
   private
     FId: Integer;
@@ -18,9 +23,11 @@ type
     FQuantity: Double;
   public
     constructor Create(Id: Integer; const Warehouse: string; Qty: Double);
-    [PK]
+    [PK, DisplayLabel('Código')]
     property Id: Integer read FId write FId;
+    [DisplayLabel('Depósito'), DisplayWidth(100)]
     property Warehouse: string read FWarehouse write FWarehouse;
+    [DisplayLabel('Quantidade')]
     property Quantity: Double read FQuantity write FQuantity;
   end;
 
@@ -34,26 +41,25 @@ type
   public
     constructor Create(Id: Integer; const Description: string; Price: Money);
     destructor Destroy; override;
-
-    [PK]
+    [PK, DisplayLabel('Código')]
     property Id: Integer read FId write FId;
-    [MaxLength(200), DisplayWidth(75)]
+    [DisplayLabel('Descrição'), DisplayWidth(75), MaxLength(200)]
     property Description: string read FDescription write FDescription;
+    [DisplayLabel('Valor'), Currency]
     property Price: Money read FPrice write FPrice;
     [Visible(False)]
     property Stock: IList<TStockItem> read FStock write FStock;
   end;
 
   TFormMain = class(TForm)
-    PanelTop: TPanel;
+    DataSource: TDataSource;
+    DataSourceDetail: TDataSource;
+    DBGridDetail: TDBGrid;
     DBGridProducts: TDBGrid;
     DBNavigator: TDBNavigator;
-    DataSource: TDataSource;
-    DBGridDetail: TDBGrid;
-    Splitter: TSplitter;
-    DataSourceDetail: TDataSource;
-    EntityDataSet1: TEntityDataSet;
+    PanelTop: TPanel;
     RealMasterDetailButton: TSpeedButton;
+    Splitter: TSplitter;
     procedure FormCreate(Sender: TObject);
     procedure RealMasterDetailButtonClick(Sender: TObject);
   private
@@ -67,6 +73,7 @@ var
 implementation
 
 uses
+  Dext.Entity.Core,
   MasterDetailForm;
 
 {$R *.dfm}

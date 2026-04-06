@@ -9,19 +9,23 @@ uses
   Vcl.Buttons;
 
 type
+  [Table('order')]
   TOrder = class
   private
     FId: Integer;
     FDate: TDateTime;
     FCustomer: string;
   public
-    [PK]
+    [PK, DisplayLabel('Código')]
     property Id: Integer read FId write FId;
+    [DisplayLabel('Data')]
     property Date: TDateTime read FDate write FDate;
+    [DisplayLabel('Cliente'), DisplayWidth(100)]
     property Customer: string read FCustomer write FCustomer;
     constructor Create(AId: Integer; ACustomer: string);
   end;
 
+  [Table('order_item')]
   TOrderItem = class
   private
     FId: Integer;
@@ -31,8 +35,11 @@ type
   public
     [PK]
     property Id: Integer read FId write FId;
+    [DisplayLabel('Pedido')]
     property OrderId: Integer read FOrderId write FOrderId;
+    [DisplayLabel('Nome do Produto'), DisplayWidth(100)]
     property Product: string read FProduct write FProduct;
+    [DisplayLabel('Quantidade')]
     property Qty: Integer read FQty write FQty;
     constructor Create(AId, AOrderId: Integer; AProduct: string; AQty: Integer);
   end;

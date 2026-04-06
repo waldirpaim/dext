@@ -45,7 +45,8 @@ uses
   Dext.Specifications.Types,
   Dext.MultiTenancy,
   Dext.Threading.Async,
-  Dext.Entity.Mapping;
+  Dext.Entity.Mapping,
+  System.Classes;
 
 type
   EOptimisticConcurrencyException = class(Exception);
@@ -226,6 +227,111 @@ type
     function Member(const APropName: string): IPropertyEntry;
   end;
 
+  TEntityMemberMetadata = class(TCollectionItem)
+  private
+    FName: string;
+    FMemberType: string;
+    FIsPrimaryKey: Boolean;
+    FIsRequired: Boolean;
+    FIsAutoInc: Boolean;
+    FIsReadOnly: Boolean;
+    FMaxLength: Integer;
+    FPrecision: Integer;
+    FScale: Integer;
+    FDisplayLabel: string;
+    FDisplayFormat: string;
+    FAlignment: TAlignment;
+    FEditMask: string;
+    FDisplayWidth: Integer;
+    FVisible: Boolean;
+    FIsCurrency: Boolean;
+    FDefaultValue: string;
+    procedure SetName(const Value: string);
+    procedure SetMemberType(const Value: string);
+  protected
+    function GetDisplayName: string; override;
+  public
+    constructor Create(Collection: TCollection); overload; override;
+    constructor Create; reintroduce; overload;
+    procedure Assign(Source: TPersistent); override;
+  published
+    property Name: string read FName write SetName;
+    property MemberType: string read FMemberType write SetMemberType;
+    property IsPrimaryKey: Boolean read FIsPrimaryKey write FIsPrimaryKey;
+    property IsRequired: Boolean read FIsRequired write FIsRequired;
+    property IsAutoInc: Boolean read FIsAutoInc write FIsAutoInc;
+    property IsReadOnly: Boolean read FIsReadOnly write FIsReadOnly;
+    property MaxLength: Integer read FMaxLength write FMaxLength;
+    property Precision: Integer read FPrecision write FPrecision;
+    property Scale: Integer read FScale write FScale;
+    property DisplayLabel: string read FDisplayLabel write FDisplayLabel;
+    property DisplayFormat: string read FDisplayFormat write FDisplayFormat;
+    property Alignment: TAlignment read FAlignment write FAlignment;
+    property EditMask: string read FEditMask write FEditMask;
+    property DisplayWidth: Integer read FDisplayWidth write FDisplayWidth;
+    property Visible: Boolean read FVisible write FVisible;
+    property IsCurrency: Boolean read FIsCurrency write FIsCurrency;
+    property DefaultValue: string read FDefaultValue write FDefaultValue;
+  end;
+
+  TEntityMemberCollection = class(TOwnedCollection)
+  private
+    function GetItem(Index: Integer): TEntityMemberMetadata;
+    procedure SetItem(Index: Integer; const Value: TEntityMemberMetadata);
+  public
+    constructor Create(AOwner: TPersistent);
+    function Add: TEntityMemberMetadata;
+    property Items[Index: Integer]: TEntityMemberMetadata read GetItem write SetItem; default;
+  end;
+
+  TEntityClassMetadata = class(TCollectionItem)
+  private
+    FEntityClassName: string;
+    FDisplayName: string;
+    FTableName: string;
+    FEntityUnitName: string;
+    FMembers: TEntityMemberCollection;
+    procedure SetMembers(const Value: TEntityMemberCollection);
+    procedure SetEntityClassName(const Value: string);
+    procedure SetTableName(const Value: string);
+  protected
+    function GetDisplayName: string; override;
+    procedure SetDisplayName(const Value: string); override;
+  public
+    constructor Create(Collection: TCollection); overload; override;
+    constructor Create; reintroduce; overload;
+    destructor Destroy; override;
+    procedure Assign(Source: TPersistent); override;
+  published
+    property EntityClassName: string read FEntityClassName write SetEntityClassName;
+    property DisplayName: string read FDisplayName write SetDisplayName;
+    property TableName: string read FTableName write SetTableName;
+    property EntityUnitName: string read FEntityUnitName write FEntityUnitName;
+    property Members: TEntityMemberCollection read FMembers write SetMembers;
+  end;
+
+  TEntityClassCollection = class(TOwnedCollection)
+  private
+    function GetItem(Index: Integer): TEntityClassMetadata;
+    procedure SetItem(Index: Integer; const Value: TEntityClassMetadata);
+  public
+    constructor Create(AOwner: TPersistent);
+    function Add: TEntityClassMetadata;
+    function FindByName(const AClassName: string): TEntityClassMetadata;
+    property Items[Index: Integer]: TEntityClassMetadata read GetItem write SetItem; default;
+  end;
+
+  IEntityDataProvider = interface
+    ['{884D5514-6F29-4F58-BF76-2244EEF9452A}']
+    function GetEntities: TArray<string>;
+    function GetEntityMetadata(const AClassName: string): TEntityClassMetadata;
+    function GetEntityUnitName(const AClassName: string): string;
+    function ResolveEntityClass(const AClassName: string): TClass;
+    function BuildPreviewSql(const AClassName: string; AMaxRows: Integer = 50): string;
+    function CreatePreviewItems(const AClassName: string; AMaxRows: Integer = 50): IObjectList;
+    procedure SyncMetadata(const AEntityClassName: string);
+  end;
+
   /// <summary>
   ///   Represents a session with the database.
   /// </summary>
@@ -389,6 +495,199 @@ begin
     Result := AValue.AsString <> ''
   else
     Result := True; // For other types like GUID, assume valid if not empty
+end;
+
+{ TEntityMemberMetadata }
+
+constructor TEntityMemberMetadata.Create(Collection: TCollection);
+begin
+  inherited Create(Collection);
+end;
+
+function TEntityMemberMetadata.GetDisplayName: string;
+begin
+  if FName <> '' then
+    Result := FName + ': ' + FMemberType
+  else
+    Result := inherited GetDisplayName;
+end;
+
+procedure TEntityMemberMetadata.SetName(const Value: string);
+begin
+  if FName <> Value then
+  begin
+    FName := Value;
+    Changed(False);
+  end;
+end;
+
+procedure TEntityMemberMetadata.SetMemberType(const Value: string);
+begin
+  if FMemberType <> Value then
+  begin
+    FMemberType := Value;
+    Changed(False);
+  end;
+end;
+
+constructor TEntityMemberMetadata.Create;
+begin
+  Create(nil);
+end;
+
+procedure TEntityMemberMetadata.Assign(Source: TPersistent);
+begin
+  if Source is TEntityMemberMetadata then
+  begin
+    FName := TEntityMemberMetadata(Source).Name;
+    FMemberType := TEntityMemberMetadata(Source).MemberType;
+    FIsPrimaryKey := TEntityMemberMetadata(Source).IsPrimaryKey;
+    FIsRequired := TEntityMemberMetadata(Source).IsRequired;
+    FIsAutoInc := TEntityMemberMetadata(Source).IsAutoInc;
+    FIsReadOnly := TEntityMemberMetadata(Source).IsReadOnly;
+    FMaxLength := TEntityMemberMetadata(Source).MaxLength;
+    FPrecision := TEntityMemberMetadata(Source).Precision;
+    FScale := TEntityMemberMetadata(Source).Scale;
+    FDisplayLabel := TEntityMemberMetadata(Source).DisplayLabel;
+    FDisplayFormat := TEntityMemberMetadata(Source).DisplayFormat;
+    FAlignment := TEntityMemberMetadata(Source).Alignment;
+    FEditMask := TEntityMemberMetadata(Source).EditMask;
+    FDisplayWidth := TEntityMemberMetadata(Source).DisplayWidth;
+    FVisible := TEntityMemberMetadata(Source).Visible;
+    FIsCurrency := TEntityMemberMetadata(Source).IsCurrency;
+    FDefaultValue := TEntityMemberMetadata(Source).DefaultValue; // Added this
+  end
+  else
+    inherited Assign(Source);
+end;
+
+{ TEntityMemberCollection }
+
+constructor TEntityMemberCollection.Create(AOwner: TPersistent);
+begin
+  inherited Create(AOwner, TEntityMemberMetadata);
+end;
+
+function TEntityMemberCollection.Add: TEntityMemberMetadata;
+begin
+  Result := TEntityMemberMetadata(inherited Add);
+end;
+
+function TEntityMemberCollection.GetItem(Index: Integer): TEntityMemberMetadata;
+begin
+  Result := TEntityMemberMetadata(inherited GetItem(Index));
+end;
+
+procedure TEntityMemberCollection.SetItem(Index: Integer; const Value: TEntityMemberMetadata);
+begin
+  inherited SetItem(Index, Value);
+end;
+
+{ TEntityClassMetadata }
+
+constructor TEntityClassMetadata.Create(Collection: TCollection);
+begin
+  inherited Create(Collection);
+  FMembers := TEntityMemberCollection.Create(Self);
+end;
+
+constructor TEntityClassMetadata.Create;
+begin
+  Create(nil);
+end;
+
+procedure TEntityClassMetadata.Assign(Source: TPersistent);
+begin
+  if Source is TEntityClassMetadata then
+  begin
+    FEntityClassName := TEntityClassMetadata(Source).EntityClassName;
+    FDisplayName := TEntityClassMetadata(Source).DisplayName;
+    FTableName := TEntityClassMetadata(Source).TableName;
+    FEntityUnitName := TEntityClassMetadata(Source).EntityUnitName;
+    FMembers.Assign(TEntityClassMetadata(Source).Members);
+  end
+  else
+    inherited Assign(Source);
+end;
+
+destructor TEntityClassMetadata.Destroy;
+begin
+  FMembers.Free;
+  inherited;
+end;
+
+procedure TEntityClassMetadata.SetMembers(const Value: TEntityMemberCollection);
+begin
+  FMembers.Assign(Value);
+end;
+
+function TEntityClassMetadata.GetDisplayName: string;
+begin
+  if FDisplayName <> '' then
+    Result := FDisplayName
+  else if FEntityClassName <> '' then
+    Result := FEntityClassName + ' (' + FTableName + ')'
+  else
+    Result := inherited GetDisplayName;
+end;
+
+procedure TEntityClassMetadata.SetDisplayName(const Value: string);
+begin
+  if FDisplayName <> Value then
+  begin
+    FDisplayName := Value;
+    Changed(False);
+  end;
+end;
+
+procedure TEntityClassMetadata.SetEntityClassName(const Value: string);
+begin
+  if FEntityClassName <> Value then
+  begin
+    FEntityClassName := Value;
+    Changed(False);
+  end;
+end;
+
+procedure TEntityClassMetadata.SetTableName(const Value: string);
+begin
+  if FTableName <> Value then
+  begin
+    FTableName := Value;
+    Changed(False);
+  end;
+end;
+
+{ TEntityClassCollection }
+
+constructor TEntityClassCollection.Create(AOwner: TPersistent);
+begin
+  inherited Create(AOwner, TEntityClassMetadata);
+end;
+
+function TEntityClassCollection.Add: TEntityClassMetadata;
+begin
+  Result := TEntityClassMetadata(inherited Add);
+end;
+
+function TEntityClassCollection.FindByName(const AClassName: string): TEntityClassMetadata;
+begin
+  for var i := 0 to Count - 1 do
+  begin
+    if SameText(Items[i].EntityClassName, AClassName) then
+      Exit(Items[i]);
+  end;
+  Result := nil;
+end;
+
+function TEntityClassCollection.GetItem(Index: Integer): TEntityClassMetadata;
+begin
+  Result := TEntityClassMetadata(inherited GetItem(Index));
+end;
+
+procedure TEntityClassCollection.SetItem(Index: Integer; const Value: TEntityClassMetadata);
+begin
+  inherited SetItem(Index, Value);
 end;
 
 end.

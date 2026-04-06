@@ -3,7 +3,7 @@ object FormMain: TFormMain
   Top = 0
   Caption = 'Dext Framework - Entity DataSet Demo'
   ClientHeight = 442
-  ClientWidth = 886
+  ClientWidth = 960
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
@@ -16,7 +16,7 @@ object FormMain: TFormMain
     AlignWithMargins = True
     Left = 3
     Top = 244
-    Width = 880
+    Width = 954
     Height = 3
     Cursor = crVSplit
     Align = alTop
@@ -27,7 +27,7 @@ object FormMain: TFormMain
   object DBGridProducts: TDBGrid
     Left = 0
     Top = 41
-    Width = 886
+    Width = 960
     Height = 200
     Align = alTop
     DataSource = DataSource
@@ -41,7 +41,7 @@ object FormMain: TFormMain
   object DBGridDetail: TDBGrid
     Left = 0
     Top = 250
-    Width = 886
+    Width = 960
     Height = 192
     Align = alClient
     DataSource = DataSourceDetail
@@ -55,7 +55,7 @@ object FormMain: TFormMain
   object PanelTop: TPanel
     Left = 0
     Top = 0
-    Width = 886
+    Width = 960
     Height = 41
     Align = alTop
     BevelOuter = bvNone
@@ -78,15 +78,11 @@ object FormMain: TFormMain
     end
   end
   object DataSource: TDataSource
-    Left = 320
-    Top = 184
+    Left = 40
+    Top = 160
   end
   object DataSourceDetail: TDataSource
-    Left = 400
-    Top = 300
-  end
-  object EntityDataSet1: TEntityDataSet
-    Left = 504
-    Top = 120
+    Left = 48
+    Top = 284
   end
 end
