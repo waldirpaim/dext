@@ -89,11 +89,8 @@ var
   LogStrings: TStringList;
   IsLogEnabled: Boolean;
 begin
-  {$IFDEF MSWINDOWS}
-  // Setup Console for UTF-8 to handle icons correctly
-  SetConsoleOutputCP(CP_UTF8);
-  {$ENDIF}
-
+  SetConsoleCharSet;
+  
   LogStrings := TStringList.Create;
   try
     IsLogEnabled := False;

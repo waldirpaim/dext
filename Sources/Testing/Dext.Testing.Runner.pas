@@ -465,6 +465,21 @@ const
   CONSOLE_COLOR_WHITE = 15;
   CONSOLE_COLOR_GRAY = 8;
 
+  // Unicode Emoji Constants (Hex to avoid source encoding issues)
+  ICON_ROCKET  = #$D83D#$DE80; // 🚀
+  ICON_LIGHT   = #$26A1;       // ⚡
+  ICON_PASS    = #$2705;       // ✅
+  ICON_FAIL    = #$274C;       // ❌
+  ICON_WARN    = #$26A0;       // ⚠️
+  ICON_INFO    = #$2139;       // ℹ️
+  ICON_CHART   = #$D83D#$DCCA; // 📊
+  ICON_TIMER   = #$23F1;       // ⏱️
+  ICON_PASS_RT = #$D83D#$DCC8; // 📈
+  ICON_CELEBRATE = #$D83C#$DF89; // 🎉
+  ICON_CRASH   = #$D83D#$DCA5; // 💥
+  ICON_TEST    = #$D83E#$DDEA; // 🧪
+  ICON_STOP    = #$26D4;       // ⛔
+
 { TTestSummary }
 
 procedure TTestSummary.Reset;
@@ -1150,8 +1165,8 @@ begin
   NotifyRunStart(TestCount);
   // Log.Info('Run Started: %d tests', [TestCount]);
 
-  TTestConsole.WriteHeader('🚀 DEXT TEST ENGINE - VERSION 2.0');
-  SafeWriteLn(Format('⚡ Discovered %d fixtures with %d tests', [FixtureCount, TestCount]));
+  TTestConsole.WriteHeader('DEXT TEST RUNNER');
+  TTestConsole.WriteInfo(Format(ICON_LIGHT + ' Discovered %d fixtures with %d tests', [FixtureCount, TestCount]));
   SafeWriteLn;
 
   // Execute global setup (if defined)
@@ -1549,11 +1564,11 @@ begin
     Exit;
 
   case Result of
-    trPassed:  TTestConsole.WritePass('●');
-    trFailed:  TTestConsole.WriteFail('✖');
-    trSkipped: TTestConsole.WriteSkip('○');
-    trTimeout: TTestConsole.WriteFail('⏱');
-    trError:   TTestConsole.WriteFail('⚠');
+    trPassed:  TTestConsole.WritePass(ICON_PASS);
+    trFailed:  TTestConsole.WriteFail(ICON_FAIL);
+    trSkipped: TTestConsole.WriteSkip(ICON_WARN);
+    trTimeout: TTestConsole.WriteFail(ICON_TIMER);
+    trError:   TTestConsole.WriteFail(ICON_STOP);
   end;
 end;
 
@@ -1565,17 +1580,17 @@ begin
   case Info.Result of
     trPassed:
       begin
-        SafeWrite('  ✅  ');
+        TTestConsole.WritePass('  ' + ICON_PASS + '  ');
         SafeWriteLn(Format('%s (%dms)', [Info.DisplayName, Round(Info.Duration.TotalMilliseconds)]));
         if Info.ErrorMessage <> '' then
         begin
-          SafeWrite('      ⚠️  Warning: ' + Info.ErrorMessage);
+          TTestConsole.WriteSkip('      ' + ICON_WARN + '   Warning: ' + Info.ErrorMessage);
           SafeWriteLn;
         end;
       end;
     trFailed:
       begin
-        SafeWrite('  ❌  ');
+        TTestConsole.WriteFail('  ' + ICON_FAIL + '  ');
         SafeWriteLn(Info.DisplayName);
         SafeWrite('      ');
         if Info.ExceptionName <> '' then
@@ -1593,7 +1608,7 @@ begin
       end;
     trSkipped:
       begin
-        SafeWrite('  ⚠️  ');
+        TTestConsole.WriteSkip('  ' + ICON_WARN + '   ');
         SafeWrite(Info.DisplayName);
         if Info.ErrorMessage <> '' then
           SafeWrite('  [' + Info.ErrorMessage + ']');
@@ -1601,12 +1616,12 @@ begin
       end;
     trTimeout:
       begin
-        SafeWrite('  ⏱️  ');
+        TTestConsole.WriteFail('  ' + ICON_TIMER + '   ');
         SafeWriteLn(Info.DisplayName + ' (TIMEOUT)');
       end;
     trError:
       begin
-        SafeWrite('  ⛔  ');
+        TTestConsole.WriteFail('  ' + ICON_STOP + '  ');
         SafeWriteLn(Info.DisplayName);
         SafeWrite('      ');
         if Info.ExceptionName <> '' then
@@ -1640,28 +1655,18 @@ begin
   else
     PassPercent := 100;
 
-  // Total
-  SafeWriteLn(Format('  📊  Total:     %d', [FSummary.TotalTests]));
-  
-  // Passed - with green emoji
-  SafeWriteLn(Format('  ✅  Passed:    %d', [FSummary.Passed]));
-  
-  // Failed - with red emoji
-  SafeWriteLn(Format('  ❌  Failed:    %d', [FSummary.Failed]));
-    
-  // Skipped - with warning emoji (yellow)
-  SafeWriteLn(Format('  ⚠️  Skipped:   %d', [FSummary.Skipped]));
-  
+  SafeWrite(Format('  ' + ICON_CHART + '  Total:     %d', [FSummary.TotalTests])); SafeWriteLn;
+  SafeWrite('  ' + ICON_PASS + '  Passed:    '); TTestConsole.WritePass(IntToStr(FSummary.Passed)); SafeWriteLn;
+  SafeWrite('  ' + ICON_FAIL + '  Failed:    '); TTestConsole.WriteFail(IntToStr(FSummary.Failed)); SafeWriteLn;
+  SafeWrite('  ' + ICON_WARN + '   Skipped:   '); TTestConsole.WriteSkip(IntToStr(FSummary.Skipped)); SafeWriteLn;
   SafeWriteLn;
   
-  // Duration - show ms if under 1 second, otherwise show seconds
   if FSummary.TotalDuration.TotalSeconds < 1 then
-    SafeWriteLn(Format('  ⏱️  Duration:  %dms', [Round(FSummary.TotalDuration.TotalMilliseconds)]))
+    SafeWriteLn(Format('  ' + ICON_TIMER + '   Duration:  %dms', [Round(FSummary.TotalDuration.TotalMilliseconds)]))
   else
-    SafeWriteLn(Format('  ⏱️  Duration:  %.3fs', [FSummary.TotalDuration.TotalSeconds]));
+    SafeWriteLn(Format('  ' + ICON_TIMER + '   Duration:  %.3fs', [FSummary.TotalDuration.TotalSeconds]));
   
-  // Pass rate - colored based on percentage
-  SafeWrite('  📈  Pass Rate: ');
+  SafeWrite('  ' + ICON_PASS_RT + '  Pass Rate: ');
   if PassPercent = 100 then
     TTestConsole.WritePass(Format('%.1f%%', [PassPercent]))
   else if PassPercent >= 80 then
@@ -1669,20 +1674,16 @@ begin
   else
     TTestConsole.WriteFail(Format('%.1f%%', [PassPercent]));
   SafeWriteLn;
-  
   SafeWriteLn;
 
-  // Final result banner
   if FSummary.Failed = 0 then
-  begin
-    SafeWriteLn('  🎉  All tests passed!');
-  end
+    TTestConsole.WritePass('  ' + ICON_CELEBRATE + '  All tests passed!')
   else
   begin
-    SafeWrite('  💥  ');
+    SafeWrite('  ' + ICON_CRASH + '  ');
     TTestConsole.WriteFail(Format('%d test(s) failed!', [FSummary.Failed]));
-    SafeWriteLn;
   end;
+  SafeWriteLn;
 end;
 
 class function TTestRunner.Summary: TTestSummary;
