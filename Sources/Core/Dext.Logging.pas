@@ -62,7 +62,7 @@ type
 
   /// <summary>Main interface for recording structured log messages.</summary>
   ILogger = interface
-    ['{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}']
+    ['{79A6305C-2D9A-483B-A746-56E08A6F1D9A}']
     /// <summary>Logs a message with the specified severity level.</summary>
     procedure Log(ALevel: TLogLevel; const AMessage: string; const AArgs: array of const); overload;
     /// <summary>Logs an exception and an explanatory message.</summary>

@@ -501,13 +501,14 @@ begin
           end
           else
           begin
-            if DriverName <> '' then
-              FDConn.DriverName := DriverName;
-              
             if ConnectionString <> '' then
-              FDConn.ConnectionString := ConnectionString;
-              
-            FDConn.Params.Text := ParamsText;
+              FDConn.ConnectionString := ConnectionString
+            else if DriverName <> '' then
+              FDConn.DriverName := DriverName;
+
+            if ParamsText <> '' then
+              FDConn.Params.Text := FDConn.Params.Text + ParamsText;
+
             TDextFireDACManager.Instance.ApplyResourceOptions(FDConn, Optimizations);
           end;
           

@@ -33,6 +33,7 @@ type
     FCustomConnection: IDbConnection;
     FNamingStrategy: INamingStrategy;
     FNaming: string;
+    FOnLog: TProc<string>;
     procedure SetConnectionString(const AValue: string);
   public
     constructor Create;
@@ -50,6 +51,7 @@ type
     property CustomConnection: IDbConnection read FCustomConnection write FCustomConnection;
     property NamingStrategy: INamingStrategy read FNamingStrategy write FNamingStrategy;
     property Naming: string read FNaming write FNaming;
+    property OnLog: TProc<string> read FOnLog write FOnLog;
 
     function BuildConnection: IDbConnection;
     function BuildDialect: ISQLDialect;
@@ -64,6 +66,7 @@ type
     function UseCustomDialect(const ADialect: ISQLDialect): TDbContextOptions;
     function UseNamingStrategy(const AStrategy: INamingStrategy): TDbContextOptions;
     function UseSnakeCaseNamingConvention: TDbContextOptions;
+    function LogTo(AProc: TProc<string>): TDbContextOptions;
   end;
 
   /// <summary>
@@ -141,6 +144,12 @@ begin
   Result := Self;
 end;
 
+function TDbContextOptions.LogTo(AProc: TProc<string>): TDbContextOptions;
+begin
+  FOnLog := AProc;
+  Result := Self;
+end;
+
 function TDbContextOptions.BuildConnection: IDbConnection;
 var
   FDConn: TFDConnection;
@@ -186,7 +195,9 @@ begin
     // Resource options (Applying configured optimizations)
     TDextFireDACManager.Instance.ApplyResourceOptions(FDConn, FOptimizations);
 
-    Result := TFireDACConnection.Create(FDConn, True);
+    var Conn := TFireDACConnection.Create(FDConn, True);
+    Conn.OnLog := FOnLog;
+    Result := Conn;
   except
     FDConn.Free;
     raise;

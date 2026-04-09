@@ -3,8 +3,9 @@
 {$APPTYPE CONSOLE}
 
 uses
-  Dext.MM, // Gerenciador de memória avançado (FastMM5)
+  Dext.MM,
   System.SysUtils,
+  Dext.Utils,
   Dext.Web,
   DextFood.Startup in 'DextFood.Startup.pas',
   DextFood.Domain in 'DextFood.Domain.pas',
@@ -12,6 +13,7 @@ uses
   DextFood.DbSeeder in 'DextFood.DbSeeder.pas';
 
 begin
+  SetConsoleCharSet;
   try
     Writeln('🚀 Iniciando DextFood Backend...');
     
@@ -42,5 +44,6 @@ begin
     on E: Exception do
       Writeln('❌ Erro crítico: ', E.ClassName, ': ', E.Message);
   end;
+  ConsolePause;
 end.
 

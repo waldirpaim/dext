@@ -1,4 +1,4 @@
-{***************************************************************************}
+﻿{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -124,113 +124,108 @@ begin
         var HasRouteMethods := False;
         var MethodsList: IList<TControllerMethod> := TCollections.CreateList<TControllerMethod>;
 
-        try
-          var Methods := RttiType.GetMethods;
+        var Methods := RttiType.GetMethods;
 
-          for Method in Methods do
+        for Method in Methods do
+        begin
+          // ONLY STATIC METHODS (for records) or PUBLIC METHODS (for classes)
+          if (RttiType.TypeKind = tkRecord) and (not Method.IsStatic) then
+            Continue;
+
+          // Para classes, aceitamos métodos de instância
+          if (RttiType.TypeKind = tkClass) and (Method.Visibility <> mvPublic) and (Method.Visibility <> mvPublished) then
+             Continue;
+
+          var Attributes := Method.GetAttributes;
+          var VerbAttrs: TArray<RouteAttribute>;
+          var PathAttrs: TArray<RouteAttribute>;
+          var VCount := 0;
+          var PCount := 0;
+          var J, K: Integer;
+
+          SetLength(VerbAttrs, Length(Attributes));
+          SetLength(PathAttrs, Length(Attributes));
+
+          // Separate Attributes without dynamic object allocation (TCollections.CreateList)
+          for Attr in Attributes do
           begin
-            // ONLY STATIC METHODS (for records) or PUBLIC METHODS (for classes)
-            if (RttiType.TypeKind = tkRecord) and (not Method.IsStatic) then
-              Continue;
+            if Attr is RouteAttribute then
+            begin
+              var R := RouteAttribute(Attr);
+              if R.Method <> '' then
+              begin
+                VerbAttrs[VCount] := R;
+                Inc(VCount);
+              end
+              else
+              begin
+                PathAttrs[PCount] := R;
+                Inc(PCount);
+              end;
+            end;
+          end;
 
-            // Para classes, aceitamos métodos de instância
-            if (RttiType.TypeKind = tkClass) and (Method.Visibility <> mvPublic) and (Method.Visibility <> mvPublished) then
-               Continue;
+          var Combined := False;
 
-            var Attributes := Method.GetAttributes;
-            var VerbAttrs: TArray<RouteAttribute>;
-            var PathAttrs: TArray<RouteAttribute>;
-            var VCount := 0;
-            var PCount := 0;
-            var J, K: Integer;
+          // COMBINE: HttpGet (Verb without Path) + Route (Path without Verb)
+          for J := 0 to VCount - 1 do
+          begin
+            var V := VerbAttrs[J];
+            for K := 0 to PCount - 1 do
+            begin
+              var P := PathAttrs[K];
+              if (V.Path = '') and (P.Method = '') then
+              begin
+                MethodInfo.Method := Method;
+                MethodInfo.Path := P.Path;
+                MethodInfo.HttpMethod := V.Method;
+                MethodInfo.RouteAttribute := V; // ou P
+                MethodsList.Add(MethodInfo);
+                HasRouteMethods := True;
+                Combined := True;
+              end;
+            end;
+          end;
 
-            SetLength(VerbAttrs, Length(Attributes));
-            SetLength(PathAttrs, Length(Attributes));
-
-            // Separate Attributes without dynamic object allocation (TCollections.CreateList)
+          // If nothing was combined (e.g. independent routes), add individually
+          if not Combined then
+          begin
             for Attr in Attributes do
             begin
               if Attr is RouteAttribute then
               begin
                 var R := RouteAttribute(Attr);
-                if R.Method <> '' then
-                begin
-                  VerbAttrs[VCount] := R;
-                  Inc(VCount);
-                end
-                else
-                begin
-                  PathAttrs[PCount] := R;
-                  Inc(PCount);
-                end;
-              end;
-            end;
-
-            var Combined := False;
-
-            // COMBINE: HttpGet (Verb without Path) + Route (Path without Verb)
-            for J := 0 to VCount - 1 do
-            begin
-              var V := VerbAttrs[J];
-              for K := 0 to PCount - 1 do
-              begin
-                var P := PathAttrs[K];
-                if (V.Path = '') and (P.Method = '') then
-                begin
-                  MethodInfo.Method := Method;
-                  MethodInfo.Path := P.Path;
-                  MethodInfo.HttpMethod := V.Method;
-                  MethodInfo.RouteAttribute := V; // ou P
-                  MethodsList.Add(MethodInfo);
-                  HasRouteMethods := True;
-                  Combined := True;
-                end;
-              end;
-            end;
-
-            // If nothing was combined (e.g. independent routes), add individually
-            if not Combined then
-            begin
-              for Attr in Attributes do
-              begin
-                if Attr is RouteAttribute then
-                begin
-                  var R := RouteAttribute(Attr);
-                  MethodInfo.Method := Method;
-                  MethodInfo.Path := R.Path;
-                  MethodInfo.HttpMethod := R.Method;
-                  MethodInfo.RouteAttribute := R;
-                  MethodsList.Add(MethodInfo);
-                  HasRouteMethods := True;
-                end;
+                MethodInfo.Method := Method;
+                MethodInfo.Path := R.Path;
+                MethodInfo.HttpMethod := R.Method;
+                MethodInfo.RouteAttribute := R;
+                MethodsList.Add(MethodInfo);
+                HasRouteMethods := True;
               end;
             end;
           end;
+        end;
 
-          // IF ROUTE METHODS EXIST, ADD AS CONTROLLER
-          if HasRouteMethods then
+        // IF ROUTE METHODS EXIST, ADD AS CONTROLLER
+        if HasRouteMethods then
+        begin
+          SafeWriteLn('    🎉 ADDING CONTROLLER: ' + RttiType.Name);
+          ControllerInfo.RttiType := RttiType;
+          ControllerInfo.Methods := MethodsList.ToArray;
+
+          // CHECK [ApiController] ATTRIBUTE FOR PREFIX
+          ControllerInfo.ControllerAttribute := nil;
+          var TypeAttributes := RttiType.GetAttributes;
+          for Attr in TypeAttributes do
           begin
-            SafeWriteLn('    🎉 ADDING CONTROLLER: ' + RttiType.Name);
-            ControllerInfo.RttiType := RttiType;
-            ControllerInfo.Methods := MethodsList.ToArray;
-
-            // CHECK [ApiController] ATTRIBUTE FOR PREFIX
-            ControllerInfo.ControllerAttribute := nil;
-            var TypeAttributes := RttiType.GetAttributes;
-            for Attr in TypeAttributes do
+            if Attr is ApiControllerAttribute then
             begin
-              if Attr is ApiControllerAttribute then
-              begin
-                ControllerInfo.ControllerAttribute := ApiControllerAttribute(Attr);
-                Break;
-              end;
+              ControllerInfo.ControllerAttribute := ApiControllerAttribute(Attr);
+              Break;
             end;
-
-            Controllers.Add(ControllerInfo);
           end;
 
-        finally
-          // MethodsList is ARC
+          Controllers.Add(ControllerInfo);
         end;
       end;
     end;

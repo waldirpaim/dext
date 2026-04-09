@@ -100,6 +100,7 @@ type
     FConnection: TFDConnection;
     FDialect: TDatabaseDialect;
     FOnLog: TProc<string>;
+    procedure LogSqlCommand(const ASQL: string; AParams: TFDParams = nil);
     procedure SetParamValue(Param: TFDParam; const AValue: TValue);
     procedure SetParamValueWithType(Param: TFDParam; const AValue: TValue; ADataType: TFieldType);
     function GetDialect: TDatabaseDialect;
@@ -783,10 +784,37 @@ begin
   ExecuteNonQuery;
 end;
 
+procedure TFireDACCommand.LogSqlCommand(const ASQL: string; AParams: TFDParams);
+var
+  i: Integer;
+begin
+  if not Assigned(FOnLog) then Exit;
+
+  FOnLog('SQL: ' + ASQL);
+  if (AParams <> nil) and (AParams.Count > 0) then
+  begin
+    for i := 0 to AParams.Count - 1 do
+    begin
+      FOnLog(Format('  Param[%s]: Type=%s, Value=%s',
+        [AParams[i].Name, GetEnumName(TypeInfo(TFieldType), Integer(AParams[i].DataType)), VarToStr(AParams[i].Value)]));
+    end;
+  end;
+end;
+
 function TFireDACCommand.ExecuteNonQuery: Integer;
 begin
-  FQuery.ExecSQL;
-  Result := FQuery.RowsAffected;
+  LogSqlCommand(FQuery.SQL.Text, FQuery.Params);
+  try
+    FQuery.ExecSQL;
+    Result := FQuery.RowsAffected;
+  except
+    on E: Exception do
+    begin
+      if Assigned(FOnLog) then
+        FOnLog('  ❌ Error: ' + E.Message);
+      raise;
+    end;
+  end;
 end;
 
 function TFireDACCommand.ExecuteQuery: IDbReader;
@@ -800,8 +828,8 @@ begin
   try
     Q.Connection := FConnection;
     Q.SQL.Text := FQuery.SQL.Text;
-    if Assigned(FOnLog) then
-        FOnLog(Format('SQL: %s', [Q.SQL.Text]));
+    
+    LogSqlCommand(Q.SQL.Text, FQuery.Params);
 
     // Copy params
     for i := 0 to FQuery.Params.Count - 1 do
@@ -812,10 +840,6 @@ begin
       begin
         Dest.DataType := Src.DataType;
         Dest.Value := Src.Value;
-        
-        if Assigned(FOnLog) then
-           FOnLog(Format('Param[%s]: Type=%s, Value=%s',
-             [Src.Name, GetEnumName(TypeInfo(TFieldType), Integer(Src.DataType)), VarToStr(Src.Value)]));
       end;
     end;
     
@@ -834,14 +858,24 @@ end;
 
 function TFireDACCommand.ExecuteScalar: TValue;
 begin
-  FQuery.Open;
+  LogSqlCommand(FQuery.SQL.Text, FQuery.Params);
   try
-    if not FQuery.Eof then
-      Result := FireDACFieldToTValue(FQuery.Fields[0])
-    else
-      Result := TValue.Empty;
-  finally
-    FQuery.Close;
+    FQuery.Open;
+    try
+      if not FQuery.Eof then
+        Result := FireDACFieldToTValue(FQuery.Fields[0])
+      else
+        Result := TValue.Empty;
+    finally
+      FQuery.Close;
+    end;
+  except
+    on E: Exception do
+    begin
+      if Assigned(FOnLog) then
+        FOnLog('  ❌ Error: ' + E.Message);
+      raise;
+    end;
   end;
 end;
 
@@ -1048,7 +1082,17 @@ end;
 
 procedure TFireDACCommand.ExecuteBatch(const ATimes: Integer; const AOffset: Integer);
 begin
-  FQuery.Execute(ATimes, AOffset);
+  LogSqlCommand(FQuery.SQL.Text + Format(' (Batch size: %d, Offset: %d)', [ATimes, AOffset]), FQuery.Params);
+  try
+    FQuery.Execute(ATimes, AOffset);
+  except
+    on E: Exception do
+    begin
+      if Assigned(FOnLog) then
+        FOnLog('  ❌ Error in batch execution: ' + E.Message);
+      raise;
+    end;
+  end;
 end;
 
 { TFireDACConnection }

@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -35,17 +35,20 @@ uses
   Dext.Entity.Migrations,
   Dext.Entity.Migrations.Builder,
   Dext.Entity.Migrations.Operations,
+  Dext.Logging,
   Dext.Entity.Drivers.Interfaces;
 
 type
   TMigrator = class
   private
     FContext: IDbContext;
+    FLogger: ILogger;
     procedure EnsureHistoryTable;
     procedure ApplyMigration(AMigration: IMigration);
     procedure DownMigration(AMigration: IMigration);
+    procedure LogInfo(const AMsg: string);
   public
-    constructor Create(AContext: IDbContext);
+    constructor Create(AContext: IDbContext; ALogger: ILogger = nil);
     function GetAppliedMigrations: IList<string>;
     procedure Migrate;
     procedure Rollback(const ATargetId: string = '');
@@ -65,10 +68,20 @@ uses
 
 { TMigrator }
 
-constructor TMigrator.Create(AContext: IDbContext);
+constructor TMigrator.Create(AContext: IDbContext; ALogger: ILogger);
 begin
   FContext := AContext;
+  FLogger := ALogger;
 end;
+
+procedure TMigrator.LogInfo(const AMsg: string);
+begin
+  if FLogger <> nil then
+    FLogger.LogInformation(AMsg)
+  else
+    SafeWriteLn(AMsg);
+end;
+
 
 procedure TMigrator.EnsureHistoryTable;
 var
@@ -138,7 +151,7 @@ var
   CmdIntf: IInterface;
   Cmd: IDbCommand;
 begin
-  SafeWriteLn('   → Applying migration: ' + AMigration.GetId);
+  LogInfo('   → Applying migration: ' + AMigration.GetId);
 
   FContext.BeginTransaction;
   try
@@ -188,7 +201,7 @@ var
   CmdIntf: IInterface;
   Cmd: IDbCommand;
 begin
-  SafeWriteLn('   ↩ Rolling back migration: ' + AMigration.GetId);
+  LogInfo('   ↩ Rolling back migration: ' + AMigration.GetId);
 
   FContext.BeginTransaction;
   try
@@ -271,9 +284,9 @@ begin
     Available := TMigrationRegistry.Instance.GetMigrations;
 
     if Length(Available) = 0 then
-      SafeWriteLn('   ℹ No migrations found in registry.')
+      LogInfo('   ℹ No migrations found in registry.')
     else
-      SafeWriteLn('   🔍 Found ' + Length(Available).ToString + ' migrations in registry.');
+      LogInfo('   🔍 Found ' + Length(Available).ToString + ' migrations in registry.');
 
     for Migration in Available do
     begin

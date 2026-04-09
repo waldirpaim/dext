@@ -429,6 +429,7 @@ begin
   OnConfiguring(AOptions);
   
   Self.Create(AOptions.BuildConnection, AOptions.BuildDialect, AOptions.BuildNamingStrategy, ATenantProvider);
+  Self.OnLog := AOptions.OnLog;
 end;
 
 procedure TDbContext.OnConfiguring(Options: TDbContextOptions);

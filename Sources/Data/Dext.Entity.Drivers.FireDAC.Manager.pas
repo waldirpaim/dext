@@ -136,12 +136,10 @@ begin
   FManager.SilentMode := True;
   FManager.Active := True;
   FDefinitions := TCollections.CreateDictionary<string, string>;
-  FCriticalSection := TCriticalSection.Create;
 end;
 
 destructor TDextFireDACManager.Destroy;
 begin
-  FCriticalSection.Free;
   FDefinitions := nil;
   inherited;
 end;

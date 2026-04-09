@@ -32,6 +32,7 @@ uses
   System.Classes,
   Dext.Collections,
   Dext.DI.Interfaces,
+  Dext.Logging,
   Dext.Threading.CancellationToken; // ✅ Added
 
 type
@@ -62,10 +63,11 @@ type
   private
     FService: TBackgroundService;
     FToken: ICancellationToken;
+    FLogger: ILogger;
   protected
     procedure Execute; override;
   public
-    constructor Create(Service: TBackgroundService; Token: ICancellationToken);
+    constructor Create(Service: TBackgroundService; Token: ICancellationToken; Logger: ILogger = nil);
   end;
 
   /// <summary>
@@ -83,6 +85,7 @@ type
     /// </summary>
     procedure Execute(Token: ICancellationToken); virtual; abstract;
   public
+    FLogger: ILogger; // Used by thread if assigned
     /// <summary>Starts the background thread and cancellation management.</summary>
     procedure Start; virtual;
     /// <summary>Triggers the cancellation signal and waits for the thread to terminate (Graceful Shutdown).</summary>
@@ -95,8 +98,11 @@ type
   THostedServiceManager = class(TInterfacedObject, IHostedServiceManager)
   private
     FServices: IList<IHostedService>;
+    FLogger: ILogger;
+    procedure LogInfo(const AMsg: string);
+    procedure LogError(const AMsg: string);
   public
-    constructor Create;
+    constructor Create(ALogger: ILogger = nil);
     destructor Destroy; override;
     
     procedure RegisterService(Service: IHostedService);
@@ -124,11 +130,12 @@ uses
 
 { TBackgroundServiceThread }
 
-constructor TBackgroundServiceThread.Create(Service: TBackgroundService; Token: ICancellationToken);
+constructor TBackgroundServiceThread.Create(Service: TBackgroundService; Token: ICancellationToken; Logger: ILogger);
 begin
   inherited Create(True); // Create suspended
   FService := Service;
   FToken := Token;
+  FLogger := Logger;
   FreeOnTerminate := False;
 end;
 
@@ -138,7 +145,12 @@ begin
     FService.Execute(FToken);
   except
     on E: Exception do
-      SafeWriteLn(Format('❌ Error in BackgroundService thread: %s', [E.Message]));
+    begin
+      if FLogger <> nil then
+        FLogger.LogError('BackgroundService thread error: {0}', [E.Message])
+      else
+        SafeWriteLn(Format('❌ Error in BackgroundService thread: %s', [E.Message]));
+    end;
   end;
 end;
 
@@ -147,7 +159,7 @@ end;
 procedure TBackgroundService.Start;
 begin
   FCancellationTokenSource := TCancellationTokenSource.Create;
-  FThread := TBackgroundServiceThread.Create(Self, FCancellationTokenSource.Token);
+  FThread := TBackgroundServiceThread.Create(Self, FCancellationTokenSource.Token, FLogger);
   FThread.Start;
 end;
 
@@ -176,10 +188,27 @@ end;
 
 { THostedServiceManager }
 
-constructor THostedServiceManager.Create;
+constructor THostedServiceManager.Create(ALogger: ILogger);
 begin
   inherited Create;
   FServices := TCollections.CreateList<IHostedService>;
+  FLogger := ALogger;
+end;
+
+procedure THostedServiceManager.LogInfo(const AMsg: string);
+begin
+  if FLogger <> nil then
+    FLogger.LogInformation(AMsg)
+  else
+    SafeWriteLn(AMsg);
+end;
+
+procedure THostedServiceManager.LogError(const AMsg: string);
+begin
+  if FLogger <> nil then
+    FLogger.LogError(AMsg)
+  else
+    SafeWriteLn('❌ ' + AMsg);
 end;
 
 destructor THostedServiceManager.Destroy;
@@ -199,15 +228,19 @@ procedure THostedServiceManager.StartAsync(Token: ICancellationToken);
 var
   Service: IHostedService;
 begin
-  SafeWriteLn('🚀 Starting Hosted Services...');
+  LogInfo('🚀 Starting Hosted Services...');
   for Service in FServices do
   begin
     try
+      // If the service is TBackgroundService, we can inject our logger into it
+      if Service is TBackgroundService then
+        TBackgroundService(Service).FLogger := FLogger;
+        
       Service.Start;
-      SafeWriteLn(Format('  ✅ Started %s', [(Service as TObject).ClassName]));
+      LogInfo(Format('  ✅ Started %s', [(Service as TObject).ClassName]));
     except
       on E: Exception do
-        SafeWriteLn(Format('  ❌ Failed to start %s: %s', [(Service as TObject).ClassName, E.Message]));
+        LogError(Format('Failed to start %s: %s', [(Service as TObject).ClassName, E.Message]));
     end;
   end;
 end;
@@ -216,15 +249,15 @@ procedure THostedServiceManager.StopAsync(Token: ICancellationToken);
 var
   Service: IHostedService;
 begin
-  SafeWriteLn('🛑 Stopping Hosted Services...');
+  LogInfo('🛑 Stopping Hosted Services...');
   for Service in FServices do
   begin
     try
       Service.Stop;
-      SafeWriteLn(Format('  ✅ Stopped %s', [(Service as TObject).ClassName]));
+      LogInfo(Format('  ✅ Stopped %s', [(Service as TObject).ClassName]));
     except
       on E: Exception do
-        SafeWriteLn(Format('  ❌ Failed to stop %s: %s', [(Service as TObject).ClassName, E.Message]));
+        LogError(Format('Failed to stop %s: %s', [(Service as TObject).ClassName, E.Message]));
     end;
   end;
 end;
@@ -266,8 +299,10 @@ begin
       ServiceClass: TClass;
       ServiceObj: TObject;
       HostedService: IHostedService;
+      Logger: ILogger;
     begin
-      Manager := THostedServiceManager.Create;
+      Logger := Provider.GetServiceAsInterface(TypeInfo(ILogger)) as ILogger;
+      Manager := THostedServiceManager.Create(Logger);
       
       for ServiceClass in CapturedServices do
       begin

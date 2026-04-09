@@ -78,7 +78,7 @@ type
 
   // Service Interface
   IGreetingService = interface
-    ['{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}']
+    ['{DB3E3901-B63E-4337-BA53-E062446E1FB6}']
     function GetGreeting(const Name: string): string;
   end;
 

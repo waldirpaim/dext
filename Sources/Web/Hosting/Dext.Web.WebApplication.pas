@@ -29,10 +29,11 @@ unit Dext.Web.WebApplication;
 interface
 
 uses
-  Dext.Web.ControllerScanner,
+  Dext.Configuration.Interfaces,
   Dext.DI.Interfaces,
-  Dext.Web.Interfaces,
-  Dext.Configuration.Interfaces;
+  Dext.Logging,
+  Dext.Web.ControllerScanner,
+  Dext.Web.Interfaces;
 
 type
   /// <summary>
@@ -53,6 +54,10 @@ type
 
     procedure Setup(Port: Integer);
     procedure Teardown;
+    procedure LogInfo(const AMsg: string);
+    procedure LogWarn(const AMsg: string);
+    procedure LogError(const AMsg: string);
+    function ResolveLogger: ILogger;
   public
     constructor Create;
     destructor Destroy; override;
@@ -258,11 +263,49 @@ begin
   RouteCount := FScanner.RegisterRoutes(GetApplicationBuilder);
 
   if RouteCount = 0 then
-  begin
-    SafeWriteLn('No routes found!')
-  end;
+    LogWarn('No routes found!');
 
   Result := Self;
+end;
+
+function TWebApplication.ResolveLogger: ILogger;
+begin
+  Result := nil;
+  if FServiceProvider <> nil then
+    Result := FServiceProvider.GetServiceAsInterface(TypeInfo(ILogger)) as ILogger;
+end;
+
+procedure TWebApplication.LogInfo(const AMsg: string);
+var
+  LLogger: ILogger;
+begin
+  LLogger := ResolveLogger;
+  if LLogger <> nil then
+    LLogger.LogInformation(AMsg)
+  else
+    SafeWriteLn(AMsg);
+end;
+
+procedure TWebApplication.LogWarn(const AMsg: string);
+var
+  LLogger: ILogger;
+begin
+  LLogger := ResolveLogger;
+  if LLogger <> nil then
+    LLogger.LogWarning(AMsg)
+  else
+    SafeWriteLn('[WARN] ' + AMsg);
+end;
+
+procedure TWebApplication.LogError(const AMsg: string);
+var
+  LLogger: ILogger;
+begin
+  LLogger := ResolveLogger;
+  if LLogger <> nil then
+    LLogger.LogError(AMsg)
+  else
+    SafeWriteLn('❌ ' + AMsg);
 end;
 
 procedure TWebApplication.Setup(Port: Integer);
@@ -270,7 +313,7 @@ var
   RequestHandler: TRequestDelegate;
   HostedManager: IHostedServiceManager;
   SSLHandler: IIndySSLHandler;
-  Lifetime: THostApplicationLifetime;
+  Lifetime: IHostApplicationLifetime;
   StateControl: IAppStateControl;
 begin
   FDefaultPort := Port;
@@ -283,13 +326,13 @@ begin
   GetApplicationBuilder.SetServiceProvider(FServiceProvider);
   
   // Get Lifetime & State Service
-  var LifetimeIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IHostApplicationLifetime));
+  var LifetimeIntf := FServiceProvider.GetServiceAsInterface(TypeInfo(IHostApplicationLifetime));
   if LifetimeIntf <> nil then
-    Lifetime := LifetimeIntf as THostApplicationLifetime
+    Lifetime := LifetimeIntf as IHostApplicationLifetime
   else
     Lifetime := nil;
 
-  var StateIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IAppStateControl));
+  var StateIntf := FServiceProvider.GetServiceAsInterface(TypeInfo(IAppStateControl));
   if StateIntf <> nil then
     StateControl := StateIntf as IAppStateControl
   else
@@ -304,13 +347,13 @@ begin
   var DbConfig := FConfiguration.GetSection('Database');
   if (DbConfig <> nil) and (SameText(DbConfig['AutoMigrate'], 'true')) then
   begin
-    SafeWriteLn('⚙️ AutoMigrate enabled. Checking database schema...');
+    LogInfo('⚙️ AutoMigrate enabled. Checking database schema...');
     
     // Resolve DbContext
     var DbContextIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IDbContext));
     if DbContextIntf <> nil then
     begin
-      var Migrator := TMigrator.Create(DbContextIntf as IDbContext);
+      var Migrator := TMigrator.Create(DbContextIntf as IDbContext, ResolveLogger);
       try
         Migrator.Migrate;
       finally
@@ -333,21 +376,21 @@ begin
   // Start Hosted Services
   HostedManager := nil;
   try
-    // ? Resolve as INTERFACE (enables ARC management)
+    // ⚠️ Resolve as INTERFACE (enables ARC management)
     var ManagerIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IHostedServiceManager));
     if ManagerIntf <> nil then
     begin
-      HostedManager := ManagerIntf as THostedServiceManager;
+      HostedManager := ManagerIntf as IHostedServiceManager;
       HostedManager.StartAsync;
     end;
   except
     on E: Exception do
-      SafeWriteLn('Error starting hosted services: ' + E.Message);
+      LogError('Error starting hosted services: ' + E.Message);
   end;
 
   // Notify Started
-  if Lifetime <> nil then
-    Lifetime.NotifyStarted;
+  if (Lifetime <> nil) and (Lifetime is THostApplicationLifetime) then
+    THostApplicationLifetime(Lifetime).NotifyStarted;
 
   // Build pipeline
   RequestHandler := GetApplicationBuilder.Build;
@@ -372,7 +415,7 @@ begin
         SSLHandler := TDextIndyOpenSSLHandler.Create(CertFile, KeyFile, RootFile);
     end
     else if (CertFile <> '') or (KeyFile <> '') then
-      SafeWriteLn('[WARN] HTTPS configured but certificate files not found. Using HTTP.');
+      LogWarn('HTTPS configured but certificate files not found. Using HTTP.');
   end;
 
   // Store active host
@@ -384,10 +427,10 @@ end;
 
 procedure TWebApplication.Teardown;
 var
-  Lifetime: THostApplicationLifetime;
   StateControl: IAppStateControl;
   StateObserver: IAppStateObserver;
   HostedManager: IHostedServiceManager;
+  Lifetime: IHostApplicationLifetime;
 begin
   if FServiceProvider = nil then Exit;
 
@@ -409,13 +452,13 @@ begin
 
   var LifetimeIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IHostApplicationLifetime));
   if LifetimeIntf <> nil then
-    Lifetime := LifetimeIntf as THostApplicationLifetime
+    Lifetime := LifetimeIntf as IHostApplicationLifetime
   else
     Lifetime := nil;
     
   var ManagerIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IHostedServiceManager));
   if ManagerIntf <> nil then
-    HostedManager := ManagerIntf as THostedServiceManager
+    HostedManager := ManagerIntf as IHostedServiceManager
   else
     HostedManager := nil;
     
@@ -429,8 +472,8 @@ begin
     StateControl.SetState(asStopping);
 
   // Notify Stopping
-  if Lifetime <> nil then
-    Lifetime.NotifyStopping;
+  if (Lifetime <> nil) and (Lifetime is THostApplicationLifetime) then
+    THostApplicationLifetime(Lifetime).NotifyStopping;
 
   // Stop Hosted Services
   if HostedManager <> nil then
@@ -443,8 +486,8 @@ begin
     StateControl.SetState(asStopped);
 
   // Notify Stopped
-  if Lifetime <> nil then
-    Lifetime.NotifyStopped;
+  if (Lifetime <> nil) and (Lifetime is THostApplicationLifetime) then
+    THostApplicationLifetime(Lifetime).NotifyStopped;
     
   // Explicitly release provider reference to ensure cleanup
   FServiceProvider := nil;
@@ -515,7 +558,7 @@ begin
 
   if FActiveHost <> nil then
   begin
-    SafeWriteLn('Stopping active host...');
+    LogInfo('Stopping active host...');
     FActiveHost.Stop;
   end;
   
