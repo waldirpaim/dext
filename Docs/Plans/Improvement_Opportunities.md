@@ -69,23 +69,21 @@
 > Itens com **impacto direto na percepção de qualidade** ou **confiabilidade da integração**.
 > Recomendados para inclusão no RC 1.0 se o cronograma permitir.
 
-### 5. Logging de Startup — Inconsistência Visível
+### 5. Logging de Startup — Concluído ✅
 
 | | |
 | :--- | :--- |
 | **Unit** | `Dext.Hosting.BackgroundService` |
 | **Área** | Hosting & Lifecycle |
-| **Problema** | `TBackgroundService` usa `SafeWriteLn` para reportar falhas iniciais enquanto todo o restante do framework utiliza `ILogger`. Essa inconsistência é visível ao usuário logo no startup. |
-| **Ação** | Unificar com `ILogger` oficial. Correção rápida, alto impacto na percepção de qualidade. |
+| **Status** | Unificado com `ILogger` oficial. |
 
-### 6. Robustez IDE — Sincronização Frágil
+### 6. Robustez IDE — Concluído ✅
 
 | | |
 | :--- | :--- |
 | **Unit** | `Dext.Testing.Host` |
 | **Área** | Testing & QA |
-| **Problema** | `Sleep(50)` como mecanismo de sincronização com o TestInsight é frágil por natureza. Em máquinas lentas ou sob carga, causa falhas intermitentes. |
-| **Ação** | Substituir por handshake explícito com o TestInsight. |
+| **Status** | Handshake explícito implementado, eliminando dependência de Sleep. |
 
 ---
 ---
@@ -111,6 +109,10 @@
 - E.2 **Validation in Config**: 🟡 Implementado
 - G.3 **HTML Reporter Templates**: ✅ Concluído
 - C.2 **Unificação de Escapes**: ✅ Concluído
+- D.2 **Lazy Loading Interceptors**: ✅ Concluído
+- D.3 **Metadata Parser (AST)**: ✅ Concluído
+- H.1 **Filtro de Entidades**: ✅ Concluído
+- H.2 **SQL Tab no Preview**: ✅ Concluído
 
 ---
 
@@ -152,8 +154,8 @@ Melhorias na fundação de baixo nível que impactam **todos os módulos** do fr
 | # | Melhoria | Unit Afetada | Descrição |
 | :---: | :--- | :--- | :--- |
 | D.1 | **DbSet Cache Lock** | `Dext.Entity.Context` | Avaliar substituição da `TCriticalSection` em `CreateDynamicDbSet` por lock mais leve para cenários de altíssima pressão paralela. |
-| D.2 | **Lazy Loading Interceptors** | `Dext.Entity.Core` / `Dext.Entity.Query` | Criar abstração `ILazyLoader` desvinculada para mover geração de proxies para fora do pipeline físico. |
-| D.3 | **Metadata Parser (AST)** | `Dext.Entity.Metadata` | Expandir `TEntityMetadataParser` para identificar automaticamente relações complexas (`Join`/`Include` hints) diretamente dos `.pas`. |
+| D.2 | **Lazy Loading Interceptors** | `Dext.Entity.Core` / `Dext.Entity.Query` | ✅ Concluído. Criar abstração `ILazyLoader` desvinculada para mover geração de proxies para fora do pipeline físico. |
+| D.3 | **Metadata Parser (AST)** | `Dext.Entity.Metadata` | ✅ Concluído. Expandir `TEntityMetadataParser` para identificar automaticamente relações complexas (`Join`/`Include` hints) diretamente dos `.pas`. |
 
 ---
 
@@ -188,8 +190,8 @@ Melhorias na fundação de baixo nível que impactam **todos os módulos** do fr
 
 | # | Melhoria | Unit Afetada | Descrição |
 | :---: | :--- | :--- | :--- |
-| H.1 | **Filtro de Entidades** | `Dext.EF.Design.Editors` | Implementar SearchBox no editor de classes de entidade para projetos com centenas de modelos. |
-| H.2 | **SQL Tab no Preview** | `Dext.EF.Design.Preview` | Adicionar aba "SQL" no `TPreviewForm` para visualizar o comando SQL gerado. |
+| H.1 | **Filtro de Entidades** | `Dext.EF.Design.Editors` | ✅ Concluído. Implementar SearchBox no editor de classes de entidade para projetos com centenas de modelos. |
+| H.2 | **SQL Tab no Preview** | `Dext.EF.Design.Preview` | ✅ Concluído. Adicionar aba "SQL" no `TPreviewForm` para visualizar o comando SQL gerado. |
 | H.3 | **Visualização de Tipos** | `Dext.EF.Design.Preview` | Exibir detalhes de metadados (tipo real, tamanho, precisão) no cabeçalho ou hint das colunas do grid de preview. |
 
 ---
@@ -203,7 +205,7 @@ Melhorias na fundação de baixo nível que impactam **todos os módulos** do fr
 2. ~~Implementar OAuth2 Client Credentials (item 2)~~ ✅
 3. ~~Implementar `TPathApiVersionReader` (item 3)~~ ✅
 4. ~~Corrigir Object Tracking no `THandlerInvoker` (item 4)~~ ✅
-5. *(Se possível)* Unificar Logging de Startup (item 5) e Robustez IDE (item 6)
+5. Unificar Logging de Startup (item 5) e Robustez IDE (item 6) ✅
 
 ### Pós-1.0 — Sprint 1 (Performance)
 
@@ -213,15 +215,15 @@ Melhorias na fundação de baixo nível que impactam **todos os módulos** do fr
 
 ### Pós-1.0 — Sprint 2 (Extensibilidade)
 
-- Configuration Watchers e Validation (E.1, E.2) 🟡 (Faltam Testes)
-- Multipart/Form-Data (C.1) 🟡 (Faltam Testes)
-- MIME extensível (B.1) 🟡 (Faltam Testes)
+- ~~Configuration Watchers e Validation (E.1, E.2)~~ ✅
+- ~~Multipart/Form-Data (C.1)~~ ✅
+- ~~MIME extensível (B.1)~~ ✅
 
 ### Pós-1.0 — Sprint 3 (Refinamento)
 
-- ORM: Lazy Loading e AST Parser (D.2, D.3)
+- ORM: Lazy Loading e AST Parser (D.2, D.3) ✅ Concluído
 - ~~Testing: Snapshots e Templates (G.2, G.3)~~ ✅
-- Design-Time: SQL Tab e SearchBox (H.1, H.2)
+- Design-Time: SQL Tab e SearchBox (H.1, H.2) ✅ Concluído
 
 ---
 

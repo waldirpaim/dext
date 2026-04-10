@@ -147,6 +147,7 @@
         <DCCReference Include="Design\Dext.EF.Design.Expert.pas"/>
         <DCCReference Include="Design\Dext.EF.Design.Preview.pas"/>
         <DCCReference Include="Design\Dext.EF.Design.Registration.pas"/>
+        <DCCReference Include="Design\Dext.EF.Design.EntitySelection.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

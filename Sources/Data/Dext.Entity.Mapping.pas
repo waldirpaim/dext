@@ -212,6 +212,7 @@ type
     FDiscriminatorValue: Variant;
     // Global Query Filters
     FQueryFilters: IList<IExpression>;
+    FIsProxy: Boolean;
 
   public
     constructor Create(AEntityType: PTypeInfo);
@@ -232,6 +233,7 @@ type
     property InheritanceStrategy: TInheritanceStrategy read FInheritanceStrategy write FInheritanceStrategy;
     property DiscriminatorColumn: string read FDiscriminatorColumn write FDiscriminatorColumn;
     property DiscriminatorValue: Variant read FDiscriminatorValue write FDiscriminatorValue;
+    property IsProxy: Boolean read FIsProxy write FIsProxy;
 
     procedure DiscoverAttributes;
     procedure ProcessAttribute(APropMap: TPropertyMap; AAttr: TCustomAttribute);
@@ -432,6 +434,7 @@ begin
   FSoftDeleteNotDeletedValue := 0; // Default (0 = Not Deleted)
   FDiscriminatorColumn := '';
   FDiscriminatorValue := Null;
+  FIsProxy := False;
 
   DiscoverAttributes;
 end;
@@ -463,7 +466,7 @@ end;
 
 procedure TEntityMap.ProcessAttribute(APropMap: TPropertyMap; AAttr: TCustomAttribute);
 begin
-  if (AAttr is ColumnAttribute) or (AAttr is PrimaryKeyAttribute) or (AAttr is AutoIncAttribute) or 
+  if  (AAttr is ColumnAttribute) or (AAttr is PrimaryKeyAttribute) or (AAttr is AutoIncAttribute) or 
       (AAttr is ForeignKeyAttribute) or (AAttr is NotMappedAttribute) or (AAttr is FieldAttribute) or
       (AAttr is RequiredAttribute) or (AAttr is MaxLengthAttribute) or (AAttr is MinLengthAttribute) or (AAttr is PrecisionAttribute) or
       (AAttr is TypeConverterAttribute) or (AAttr is HasManyAttribute) or (AAttr is BelongsToAttribute) or
@@ -471,8 +474,10 @@ begin
       (AAttr is ManyToManyAttribute) or (AAttr is VersionAttribute) or (AAttr is CreatedAtAttribute) or
       (AAttr is UpdatedAtAttribute) or (AAttr is JsonColumnAttribute) or (AAttr is DbTypeAttribute) or
       (AAttr is CaptionAttribute) or (AAttr is DisplayFormatAttribute) or (AAttr is DisplayWidthAttribute) or
-      (AAttr is EditMaskAttribute) or (AAttr is AlignmentAttribute) or (AAttr is DefaultValueAttribute) then
+      (AAttr is EditMaskAttribute) or (AAttr is AlignmentAttribute) or (AAttr is DefaultValueAttribute) or
+      (AAttr is LazyAttribute) then
   begin
+    if AAttr is LazyAttribute then APropMap.IsLazy := True;
     if AAttr is ColumnAttribute then APropMap.ColumnName := ColumnAttribute(AAttr).Name;
     if AAttr is FieldAttribute then 
     begin
@@ -586,6 +591,7 @@ begin
       if Attr is InheritanceAttribute then FInheritanceStrategy := InheritanceAttribute(Attr).Strategy;
       if Attr is DiscriminatorColumnAttribute then FDiscriminatorColumn := DiscriminatorColumnAttribute(Attr).Name;
       if Attr is DiscriminatorValueAttribute then FDiscriminatorValue := DiscriminatorValueAttribute(Attr).Value;
+      if Attr is ProxyAttribute then FIsProxy := True;
     end;
     
     for var Fld in Typ.GetFields do

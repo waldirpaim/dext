@@ -20,7 +20,8 @@ uses
   Dext.Entity.Core,
   Dext.Entity.Metadata,
   Dext.EF.Design.Metadata,
-  Dext.EF.Design.Preview;
+  Dext.EF.Design.Preview,
+  Dext.EF.Design.EntitySelection;
 
 type
   /// <summary>Property editor for selecting a TEntityDataProvider in the Object Inspector.</summary>
@@ -37,6 +38,7 @@ type
     function GetAttributes: TPropertyAttributes; override;
     procedure GetValues(Proc: TGetStrProc); override;
     procedure SetValue(const Value: string); override;
+    procedure Edit; override;
   end;
 
   TEntityDataProviderEditor = class(TComponentEditor)
@@ -487,6 +489,26 @@ begin
   end;
 end;
 
+procedure TEntityClassNameProperty.Edit;
+var
+  DataSet: TEntityDataSet;
+  DP: IEntityDataProvider;
+  Entities: TArray<string>;
+  Selected: string;
+begin
+  DataSet := GetComponent(0) as TEntityDataSet;
+  if Assigned(DataSet.DataProvider) and DataSet.DataProvider.GetInterface(IEntityDataProvider, DP) then
+  begin
+    Entities := DP.GetEntities;
+    Selected := GetValue;
+    
+    if SelectEntity(Entities, Selected) then
+    begin
+      SetValue(Selected);
+    end;
+  end;
+end;
+
 { TEntityDataProviderEditor }
 
 procedure TEntityDataProviderEditor.ExecuteVerb(Index: Integer);
@@ -655,6 +677,21 @@ begin
         if Designer <> nil then
           Designer.Modified;
       end;
+    5: // Dext: Search Entity Class...
+      begin
+        var DP: IEntityDataProvider;
+        if Assigned(DataSet.DataProvider) and DataSet.DataProvider.GetInterface(IEntityDataProvider, DP) then
+        begin
+          var Entities := DP.GetEntities;
+          var Selected := DataSet.EntityClassName;
+          if SelectEntity(Entities, Selected) then
+          begin
+            DataSet.EntityClassName := Selected;
+            if Designer <> nil then
+              Designer.Modified;
+          end;
+        end;
+      end;
   end;
 end;
 
@@ -666,12 +703,13 @@ begin
     2: Result := 'Dext: Toggle Design-Time Preview';
     3: Result := 'Dext: Refresh Entity (Scan + Rebuild Fields)';
     4: Result := 'Dext: Sync Fields (Keep Customizations)';
+    5: Result := 'Dext: Search Entity Class...';
   end;
 end;
 
 function TEntityDataSetSelectionEditor.GetVerbCount: Integer;
 begin
-  Result := 5;
+  Result := 6;
 end;
 
 procedure RegisterEditors;

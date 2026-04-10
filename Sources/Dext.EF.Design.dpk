@@ -47,6 +47,7 @@ contains
   Dext.EF.Design.Editors in 'Design\Dext.EF.Design.Editors.pas',
   Dext.EF.Design.Expert in 'Design\Dext.EF.Design.Expert.pas',
   Dext.EF.Design.Preview in 'Design\Dext.EF.Design.Preview.pas',
-  Dext.EF.Design.Registration in 'Design\Dext.EF.Design.Registration.pas';
+  Dext.EF.Design.Registration in 'Design\Dext.EF.Design.Registration.pas',
+  Dext.EF.Design.EntitySelection in 'Design\Dext.EF.Design.EntitySelection.pas';
 
 end.

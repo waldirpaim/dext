@@ -12,6 +12,7 @@ uses
   Vcl.DBGrids,
   Vcl.ExtCtrls,
   Vcl.StdCtrls,
+  Vcl.ComCtrls,
   Data.DB,
   FireDAC.Comp.Client,
   FireDAC.Stan.Intf,
@@ -31,7 +32,11 @@ type
   /// <summary>Data preview window for entities.</summary>
   TPreviewForm = class(TForm)
   private
+    FPageControl: TPageControl;
+    FTabData: TTabSheet;
+    FTabSQL: TTabSheet;
     FGrid: TDBGrid;
+    FSqlMemo: TMemo;
     FDataSource: TDataSource;
     FQuery: TFDQuery;
     FPanel: TPanel;
@@ -75,19 +80,44 @@ begin
   FPanel.Parent := Self;
   FPanel.Align := alBottom;
   FPanel.Height := 50;
+  FPanel.BevelOuter := bvNone;
   
   FCloseBtn := TButton.Create(Self);
   FCloseBtn.Parent := FPanel;
   FCloseBtn.Caption := 'Close';
   FCloseBtn.ModalResult := mrOk;
-  FCloseBtn.Left := Width - 100;
-  FCloseBtn.Top := 15;
+  FCloseBtn.Width := 90;
+  FCloseBtn.Height := 30;
+  FCloseBtn.Top := 10;
+  FCloseBtn.Left := FPanel.Width - FCloseBtn.Width - 10;
+  FCloseBtn.Anchors := [akRight, akTop];
   
+  FPageControl := TPageControl.Create(Self);
+  FPageControl.Parent := Self;
+  FPageControl.Align := alClient;
+  FPageControl.AlignWithMargins := True;
+  
+  FTabData := TTabSheet.Create(Self);
+  FTabData.PageControl := FPageControl;
+  FTabData.Caption := 'Data Preview';
+  
+  FTabSQL := TTabSheet.Create(Self);
+  FTabSQL.PageControl := FPageControl;
+  FTabSQL.Caption := 'SQL Command';
+
   FGrid := TDBGrid.Create(Self);
-  FGrid.Parent := Self;
+  FGrid.Parent := FTabData;
   FGrid.Align := alClient;
   FGrid.ReadOnly := True;
   
+  FSqlMemo := TMemo.Create(Self);
+  FSqlMemo.Parent := FTabSQL;
+  FSqlMemo.Align := alClient;
+  FSqlMemo.ReadOnly := True;
+  FSqlMemo.ScrollBars := ssBoth;
+  FSqlMemo.Font.Name := 'Consolas';
+  FSqlMemo.Font.Size := 10;
+
   FDataSource := TDataSource.Create(Self);
   FGrid.DataSource := FDataSource;
   
@@ -122,6 +152,7 @@ begin
   if SQL = '' then
     SQL := 'SELECT * FROM ' + MD.TableName;
 
+  FSqlMemo.Lines.Text := SQL;
   FQuery.SQL.Text := SQL;
   FQuery.Open;
   
@@ -129,6 +160,18 @@ begin
   begin
     if (FQuery.Fields[I].DataType = ftMemo) or (FQuery.Fields[I].DataType = ftWideMemo) then
       FQuery.Fields[I].OnGetText := MemoFieldGetText;
+  end;
+
+  // Auto-ajuste básico de larguras de colunas
+  for var I := 0 to FGrid.Columns.Count - 1 do
+  begin
+    var Col := FGrid.Columns[I];
+    if Col.Field.DataType in [ftString, ftWideString, ftWideMemo, ftMemo] then
+      Col.Width := 250
+    else if Col.Field.DataType in [ftInteger, ftLargeint, ftFloat, ftCurrency] then
+      Col.Width := 80
+    else
+      Col.Width := 120;
   end;
   
   Caption := 'Previewing: ' + MD.EntityClassName + ' (Table: ' + MD.TableName + ')';

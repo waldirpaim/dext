@@ -38,6 +38,18 @@ type
 
 type
   /// <summary>
+  ///   Marks a class to be proxied by the ORM for lazy loading or other interceptions.
+  /// </summary>
+  ProxyAttribute = class(TCustomAttribute)
+  end;
+
+  /// <summary>
+  ///   Marks a property for lazy loading.
+  /// </summary>
+  LazyAttribute = class(TCustomAttribute)
+  end;
+
+  /// <summary>
   ///   Specifies the table name and schema in the database for the entity.
   /// </summary>
   TableAttribute = class(TCustomAttribute)
