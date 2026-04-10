@@ -73,6 +73,4 @@ begin
       ExitCode := 1;
     end;
   end;
-
-  ConsolePause;
 end.

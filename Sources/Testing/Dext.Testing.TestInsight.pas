@@ -60,7 +60,6 @@ type
     procedure OnFixtureComplete(const FixtureName: string);
     procedure OnTestStart(const UnitName, Fixture, Test: string);
     procedure OnTestComplete(const Info: TTestInfo);
-    procedure OnTestsComplete(const InfoArray: TArray<TTestInfo>);
     
     function GetSelectedTests: TArray<string>;
     function GetOptions: TTestInsightOptions;
@@ -72,6 +71,7 @@ type
 implementation
 
 uses
+  Winapi.Windows,
   Dext.Utils;
 
 constructor TTestInsightListener.Create(const ABaseUrl: string);
@@ -85,7 +85,6 @@ begin
                            
   if (not IsManualActivation) and (ParentProcess <> 'bds.exe') then
   begin
-     DiagnosticLog('TTestInsightListener: Suppression! Parent is ' + ParentProcess + '. Hardware handshake skipped.');
      FEnabled := False;
      FFinishedEvent := TEvent.Create(nil, True, False, ''); // Needs to exist for WaitForCompletion even if disabled
      Exit;
@@ -105,16 +104,13 @@ begin
   if FEnabled then
   begin
     try
-       DiagnosticLog('TTestInsightListener: Parent is ' + ParentProcess + '. Attempting IDE handshake...');
        FClient.Options; 
        FEnabled := True;
        TTestRunner.SetTestInsightActive(True);
-       DiagnosticLog('TTestInsightListener: Handshake SUCCESS.');
     except
        on E: Exception do
        begin
          FEnabled := False;
-         DiagnosticLog('TTestInsightListener: Handshake FAILED: ' + E.Message);
          TTestRunner.SetTestInsightActive(False);
        end;
     end;
@@ -208,20 +204,18 @@ begin
   // Removed suppression to ensure TotalTests count matches reported results
   // if (Info.Result = trSkipped) and (Info.ErrorMessage = 'Not in selection') then
   //   Exit;
-
   case Info.Result of
+    trNone:    ResultType := TResultType.Skipped;
     trPassed:  ResultType := TResultType.Passed;
     trFailed:  ResultType := TResultType.Failed;
     trError:   ResultType := TResultType.Error;
     trSkipped: ResultType := TResultType.Skipped;
     trTimeout: ResultType := TResultType.Error;
   else
-    ResultType := TResultType.Error;
+    ResultType := TResultType.Skipped;
   end;
 
   LPath := Info.UnitName + '.' + Info.FixtureName;
-
-  DiagnosticLog(Format('TTestInsightListener.OnTestComplete: %s | Result: %d | Path: %s', [Info.DisplayName, Ord(Info.Result), LPath]));
 
   TestResult := TTestInsightResult.Create(ResultType, Info.DisplayName, Info.ClassName);
   TestResult.Duration := Trunc(Info.Duration.TotalMilliseconds);
@@ -247,31 +241,6 @@ begin
   if FEnabled then
   begin
     TryPost(TestResult);
-  end;
-end;
-
-procedure TTestInsightListener.OnTestsComplete(const InfoArray: TArray<TTestInfo>);
-var
-  Results: TList<TTestInsightResult>;
-  Info: TTestInfo;
-begin
-  if (not FEnabled) or (Length(InfoArray) = 0) then Exit;
-  
-  Results := TList<TTestInsightResult>.Create;
-  try
-    for Info in InfoArray do
-    begin
-       var TestResult := TTestInsightResult.Create(TResultType.Skipped, Info.DisplayName, Info.ClassName);
-       TestResult.ClassName := Info.ClassName;
-       TestResult.UnitName := Info.UnitName;
-       TestResult.Path := Info.UnitName + '.' + Info.FixtureName;
-       Results.Add(TestResult);
-    end;
-    
-    DiagnosticLog(Format('TTestInsightListener.OnTestsComplete: Sending batch of %d results.', [Results.Count]));
-    FClient.PostResults(Results.ToArray, False);
-  finally
-    Results.Free;
   end;
 end;
 

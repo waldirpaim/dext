@@ -36,7 +36,6 @@ type
     procedure OnFixtureComplete(const FixtureName: string);
     procedure OnTestStart(const UnitName, Fixture, Test: string);
     procedure OnTestComplete(const Info: TTestInfo);
-    procedure OnTestsComplete(const InfoArray: TArray<TTestInfo>);
     
     // Helper
     procedure BroadcastEvent(const EventType: string; const DataJson: string);
@@ -272,22 +271,17 @@ var
   Status: string;
   ErrMsg: string;
 begin
-  if Info.Result = trPassed then Status := 'passed'
-  else if Info.Result = trSkipped then Status := 'skipped'
-  else Status := 'failed';
+  if Info.Result = trPassed then
+    Status := 'Passed'
+  else if Info.Result = trSkipped then
+    Status := 'Skipped'
+  else
+    Status := 'Failed';
 
-  ErrMsg := Info.ErrorMessage.Replace('"', '\"').Replace(#13#10, '\n').Replace(#10, '\n').Replace(#13, '');
-  
-  BroadcastEvent('test_complete', Format('{"fixture": "%s", "test": "%s", "status": "%s", "passed": %s, "duration": %d, "error": "%s"}', 
+  ErrMsg := Info.ErrorMessage.Replace('"', '\"').Replace(#13, '\r').Replace(#10, '\n');
+
+  BroadcastEvent('TestComplete', Format('{"fixture": "%s", "test": "%s", "status": "%s", "passed": %s, "duration": %d, "error": "%s"}',
     [Info.FixtureName, Info.DisplayName, Status, BoolToStr(Info.Result = trPassed, True).ToLower, Round(Info.Duration.TotalMilliseconds), ErrMsg]));
-end;
-
-procedure TDashboardListener.OnTestsComplete(const InfoArray: TArray<TTestInfo>);
-var
-  Info: TTestInfo;
-begin
-  for Info in InfoArray do
-    OnTestComplete(Info);
 end;
 
 end.

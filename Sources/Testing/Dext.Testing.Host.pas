@@ -134,28 +134,22 @@ begin
       SafeWriteLn('--- DEXT TEST HOST LOG STARTED: ' + DateTimeToStr(Now) + ' ---');
       SafeWriteLn('CmdLine: ' + GetCommandLine);
     end;
-
-    DiagnosticLog('Execute: Start. Parent=' + ParentProcess);
     
     {$IFDEF MSWINDOWS}
     if IsUI then
     begin
-      DiagnosticLog('Execute: Testing UI/TestInsight Mode. IsUI=' + BoolToStr(IsUI, True));
-      
       var ListenerObj := TTestInsightListener.Create;
       var Listener: ITestListener := ListenerObj; 
       TTestRunner.RegisterListener(Listener);
       
       if not ListenerObj.Enabled then
       begin
-        DiagnosticLog('Execute: TestInsight Listener NOT enabled. Falling back to console.');
         SafeAttachConsole;
         SafeWriteLn('Dext Test Host - Console Fallback Mode');
         Config.Run;
       end
       else
       begin
-        DiagnosticLog('Execute: TestInsight Active.');
         var InsightOptions := ListenerObj.GetOptions;
         if not InsightOptions.ExecuteTests then
         begin
@@ -185,7 +179,6 @@ begin
     else
     {$ENDIF}
     begin
-      DiagnosticLog('Execute: Native Console Mode.');
       SafeWriteLn('Dext Test Host - Console Mode');
       Config.Run;
     end;

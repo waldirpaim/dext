@@ -48,7 +48,7 @@ type
   /// <summary>
   ///   Result of a single test execution.
   /// </summary>
-  TTestResult = (trPassed, trFailed, trSkipped, trTimeout, trError);
+  TTestResult = (trNone, trPassed, trFailed, trSkipped, trTimeout, trError);
 
   /// <summary>
   ///   Output verbosity levels for test execution.
@@ -130,7 +130,6 @@ type
     procedure OnFixtureComplete(const FixtureName: string);
     procedure OnTestStart(const UnitName, Fixture, Test: string);
     procedure OnTestComplete(const Info: TTestInfo);
-    procedure OnTestsComplete(const InfoArray: TArray<TTestInfo>);
   end;
 
   /// <summary>
@@ -240,7 +239,6 @@ type
     class procedure NotifyFixtureComplete(const FixtureName: string);
     class procedure NotifyTestStart(const UnitName, Fixture, Test: string);
     class procedure NotifyTestComplete(const Info: TTestInfo);
-    class procedure NotifyTestsComplete(const TestInfos: TArray<TTestInfo>);
 
     class procedure DiscoverFixtures;
     class procedure DiscoverTestMethods(Fixture: TTestFixtureInfo);
@@ -454,11 +452,11 @@ uses
   System.StrUtils,
   System.RegularExpressions,
   System.IOUtils,
-  Dext.Utils,
-  Dext.Testing.Report,
   Dext.Logging,
   Dext.Logging.Global,
-  Dext.Types.UUID;
+  Dext.Testing.Report,
+  Dext.Types.UUID,
+  Dext.Utils;
 
 const
   CONSOLE_COLOR_GREEN = 10;
@@ -518,11 +516,12 @@ begin
       if ParenIdx > 0 then
         CleanSelected := CleanSelected.Substring(0, ParenIdx);
 
-      if (TTestRunner.Verbosity > ovDefault) then
-         SafeWriteLn(Format('[TestFilter] Checking: "%s" (Cleaned: "%s") against "%s" or "%s"', [Selected, CleanSelected, FullName, FullNameAlt]));
-
-      if SameText(FullName, CleanSelected) or SameText(FullNameAlt, CleanSelected) then
+      if SameText(FullName, CleanSelected) or 
+         SameText(FullNameAlt, CleanSelected) or
+         CleanSelected.EndsWith('.' + ATestName, True) and CleanSelected.Contains(AClassName) then
+      begin
         Exit(True);
+      end;
     end;
     Exit(False);
   end;
@@ -1163,11 +1162,10 @@ begin
   FFilter := Default(TTestFilter);
   FFilter.IncludeExplicit := False;
 
-  Stopwatch := TStopwatch.StartNew;
-  
-  NotifyRunStart(TestCount);
+  var ActiveCount := GetActiveTestCount;
+  NotifyRunStart(ActiveCount);
   TTestConsole.WriteHeader('DEXT TEST RUNNER');
-  TTestConsole.WriteInfo(Format('Discovered %d fixtures with %d tests', [FixtureCount, TestCount]));
+  TTestConsole.WriteInfo(Format('Discovered %d fixtures with %d tests (Running %d)', [FixtureCount, TestCount, ActiveCount]));
   SafeWriteLn;
 
   // Execute global setup (if defined)
@@ -1206,53 +1204,15 @@ begin
   FSummary.Reset;
   FFilter := AFilter;
 
-  Stopwatch := TStopwatch.StartNew;
+  var ActiveCount := GetActiveTestCount;
+  DiagnosticLog(Format('[Runner.RunFiltered] ActiveCount=%d, SelectedTests=%d', 
+    [ActiveCount, Length(FSelectedTests)]));
 
-  if FIsTestInsightActive then
-    NotifyRunStart(TestCount)
-  else
-    NotifyRunStart(GetActiveTestCount);
+  NotifyRunStart(ActiveCount);
   
-  { Fast Pre-Skip reporting for TestInsight to improve UI responsiveness }
-  if FIsTestInsightActive and (Length(FSelectedTests) > 0) then
-  begin
-    var Skips := TList<TTestInfo>.Create;
-    try
-      for Fixture in FFixtures do
-      begin
-        var Method: TRttiMethod;
-        for Method in Fixture.TestMethods do
-        begin
-          if not FFilter.Matches(Fixture.FixtureClass.UnitName, Fixture.FixtureClass.ClassName, 
-             Fixture.Name, Method.Name, GetCategories(Method), IsExplicit(Method), FSelectedTests) then
-          begin
-            var Info: TTestInfo;
-            // Initialize record
-            Info.TestName := Method.Name;
-            Info.DisplayName := Method.Name;
-            Info.FixtureName := Fixture.Name;
-            Info.UnitName := Fixture.FixtureClass.UnitName;
-            Info.ClassName := Fixture.FixtureClass.ClassName;
-            Info.Result := trSkipped;
-            Info.ErrorMessage := 'Not in selection';
-            Info.Duration := TTimeSpan.Zero;
-            Info.CodeAddress := nil;
-            Info.Categories := [];
-            Skips.Add(Info);
-          end;
-        end;
-      end;
-      if Skips.Count > 0 then
-      begin
-        Log.Info('Pre-reporting %d skipped tests to IDE', [Skips.Count]);
-        NotifyTestsComplete(Skips.ToArray);
-      end;
-    finally
-      Skips.Free;
-    end;
-  end;
+  { Unselected tests are not pre-reported to keep the IDE tree clean and sessions fast. }
 
-  Log.Info('Run Started (Filtered)');
+  DiagnosticLog('[Runner.RunFiltered] Execution Started');
   if FVerbosity > ovSilent then
   begin
     TTestConsole.WriteHeader('Dext Test Runner (Filtered)');
@@ -1448,14 +1408,7 @@ begin
     // Check if test matches filter
     if not FFilter.Matches(Fixture.FixtureClass.UnitName, Fixture.FixtureClass.ClassName, Fixture.Name, Method.Name, Categories, IsExplicit(Method), FSelectedTests) then
     begin
-      { In TestInsight mode, we already reported these in a batch at the start, 
-        so we don't need to report them again one-by-one which is slow. }
-      if (not FIsTestInsightActive) and (FVerbosity > ovSilent) then
-      begin
-        Info.Result := trSkipped;
-        Info.ErrorMessage := 'Not in selection';
-        NotifyTestComplete(Info);
-      end;
+      // Skip reporting for speed. The IDE will count these as 'not run' or 'skipped' based on NotifyRunStart(ActiveCount).
       Exit;
     end;
 
@@ -1479,7 +1432,7 @@ begin
     // Handle Discovery Mode
     if FDiscoveryMode then
     begin
-      Info.Result := trSkipped;
+      Info.Result := trNone;
       Info.ErrorMessage := 'Discovery Mode';
       FSummary.Skipped := FSummary.Skipped + 1;
 
@@ -2184,15 +2137,6 @@ begin
   if FListeners <> nil then
     for Listener in FListeners do
       Listener.OnTestComplete(Info);
-end;
-
-class procedure TTestRunner.NotifyTestsComplete(const TestInfos: TArray<TTestInfo>);
-var
-  Listener: ITestListener;
-begin
-  if FListeners <> nil then
-    for Listener in FListeners do
-      Listener.OnTestsComplete(TestInfos);
 end;
 
 class procedure TTestRunner.SetDiscoveryMode(Value: Boolean);

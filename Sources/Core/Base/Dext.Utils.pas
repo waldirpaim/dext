@@ -193,9 +193,6 @@ end;
 
 procedure DebugLog(const AMessage: string);
 begin
-  {$IFDEF MSWINDOWS}
-  OutputDebugString(PChar(AMessage + sLineBreak));
-  {$ENDIF}
   SafeWriteLn(AMessage);
 end;
 
@@ -344,11 +341,6 @@ begin
   else
   if IsConsoleAvailable then
     CurrentDextWriter := TConsoleWriter.create
-  {$IFDEF MSWINDOWS}{$WARN SYMBOL_PLATFORM OFF}
-  else
-  if (DebugHook <> 0) then
-    CurrentDextWriter := TWindowsDebugWriter.create
-  {$WARN SYMBOL_PLATFORM ON}{$ENDIF}
   else
     CurrentDextWriter := TNullWriter.create;
 end;

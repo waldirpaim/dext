@@ -56,6 +56,7 @@ contains
   Dext.Testing.Listeners.Telemetry in 'Testing\Dext.Testing.Listeners.Telemetry.pas',
   Dext.Testing in 'Testing\Dext.Testing.pas',
   Dext.Testing.TestInsight in 'Testing\Dext.Testing.TestInsight.pas',
-  Dext.Testing.Host in 'Testing\Dext.Testing.Host.pas';
+  Dext.Testing.Host in 'Testing\Dext.Testing.Host.pas',
+  TestInsight.Client;
 
 end.
