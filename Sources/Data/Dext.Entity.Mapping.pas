@@ -33,6 +33,7 @@ uses
   System.Classes,
   System.UITypes,
   Dext.Collections.Dict,
+  System.SyncObjs,
   System.TypInfo,
   System.Rtti,
   System.Variants,
@@ -375,6 +376,7 @@ type
     FMaps: IDictionary<PTypeInfo, TEntityMap>;
     FDiscoveryNames: IDictionary<PTypeInfo, string>;
     FFactories: IDictionary<PTypeInfo, IDynamicDbSetFactory>;
+    FLock: TLightweightMREW; // For thread safety (D.1)
     class constructor Create;
 
     class destructor Destroy;
@@ -1448,6 +1450,7 @@ begin
   FMaps := TCollections.CreateDictionary<PTypeInfo, TEntityMap>(True);
   FDiscoveryNames := TCollections.CreateDictionary<PTypeInfo, string>;
   FFactories := TCollections.CreateDictionary<PTypeInfo, IDynamicDbSetFactory>;
+  // TLightweightMREW is a record and doesn't need explicit allocation
 end;
 
 destructor TModelBuilder.Destroy;
@@ -1460,29 +1463,47 @@ end;
 
 procedure TModelBuilder.Clear;
 begin
-  if Assigned(FMaps) then
-    FMaps.Clear;
-  if Assigned(FDiscoveryNames) then
-    FDiscoveryNames.Clear;
-  if Assigned(FFactories) then
-    FFactories.Clear;
+  FLock.BeginWrite;
+  try
+    if Assigned(FMaps) then
+      FMaps.Clear;
+    if Assigned(FDiscoveryNames) then
+      FDiscoveryNames.Clear;
+    if Assigned(FFactories) then
+      FFactories.Clear;
+  finally
+    FLock.EndWrite;
+  end;
 end;
 
 procedure TModelBuilder.RegisterFactory(AType: PTypeInfo; const AFactory: IDynamicDbSetFactory);
 begin
-  if not FFactories.ContainsKey(AType) then
-    FFactories.Add(AType, AFactory);
+  FLock.BeginWrite;
+  try
+    if not FFactories.ContainsKey(AType) then
+      FFactories.Add(AType, AFactory);
+  finally
+    FLock.EndWrite;
+  end;
 end;
 
 function TModelBuilder.GetFactory(AType: PTypeInfo): IDynamicDbSetFactory;
 begin
-  if not FFactories.TryGetValue(AType, Result) then
-  begin
-    // Fallback to global instance if this is a local/context builder (common in tests)
-    if (Self <> FInstance) and (FInstance <> nil) then
-      Result := FInstance.GetFactory(AType)
-    else
-      Result := nil;
+  FLock.BeginRead;
+  try
+    if not FFactories.TryGetValue(AType, Result) then
+    begin
+      // Fallback to global instance if this is a local/context builder (common in tests)
+      if (Self <> FInstance) and (FInstance <> nil) then
+      begin
+        // Note: FInstance has its own lock which will be called recursively
+        Result := FInstance.GetFactory(AType);
+      end
+      else
+        Result := nil;
+    end;
+  finally
+    FLock.EndRead;
   end;
 end;
 
@@ -1498,13 +1519,23 @@ end;
 
 procedure TModelBuilder.RegisterDiscoveryName(AType: PTypeInfo; const AName: string);
 begin
-  FDiscoveryNames.AddOrSetValue(AType, AName);
+  FLock.BeginWrite;
+  try
+    FDiscoveryNames.AddOrSetValue(AType, AName);
+  finally
+    FLock.EndWrite;
+  end;
 end;
 
 function TModelBuilder.GetDiscoveryName(AType: PTypeInfo): string;
 begin
-  if not FDiscoveryNames.TryGetValue(AType, Result) then
-    Result := '';
+  FLock.BeginRead;
+  try
+    if not FDiscoveryNames.TryGetValue(AType, Result) then
+      Result := '';
+  finally
+    FLock.EndRead;
+  end;
 end;
 
 procedure TModelBuilder.ApplyConfiguration<T>(AConfig: IEntityTypeConfiguration<T>);
@@ -1512,10 +1543,15 @@ var
   Map: TEntityMap;
   Builder: IEntityTypeBuilder<T>;
 begin
-  if not FMaps.TryGetValue(TypeInfo(T), Map) then
-  begin
-    Map := TEntityMap.Create(TypeInfo(T));
-    FMaps.Add(TypeInfo(T), Map);
+  FLock.BeginWrite;
+  try
+    if not FMaps.TryGetValue(TypeInfo(T), Map) then
+    begin
+      Map := TEntityMap.Create(TypeInfo(T));
+      FMaps.Add(TypeInfo(T), Map);
+    end;
+  finally
+    FLock.EndWrite;
   end;
   
   Builder := TEntityTypeBuilder<T>.Create(Map);
@@ -1526,10 +1562,15 @@ function TModelBuilder.Entity<T>: TEntityBuilder<T>;
 var
   Map: TEntityMap;
 begin
-  if not FMaps.TryGetValue(TypeInfo(T), Map) then
-  begin
-    Map := TEntityMap.Create(TypeInfo(T));
-    FMaps.Add(TypeInfo(T), Map);
+  FLock.BeginWrite;
+  try
+    if not FMaps.TryGetValue(TypeInfo(T), Map) then
+    begin
+      Map := TEntityMap.Create(TypeInfo(T));
+      FMaps.Add(TypeInfo(T), Map);
+    end;
+  finally
+    FLock.EndWrite;
   end;
   
   Result := TEntityBuilder<T>.Create(Map);
@@ -1537,22 +1578,46 @@ end;
 
 function TModelBuilder.GetMap(AType: PTypeInfo): TEntityMap;
 begin
-  if not FMaps.TryGetValue(AType, Result) then
-  begin
-    // Auto-Discovery: Create and cache the map if it doesn't exist
-    Result := TEntityMap.Create(AType);
-    FMaps.Add(AType, Result);
+  FLock.BeginRead;
+  try
+    if FMaps.TryGetValue(AType, Result) then
+      Exit;
+  finally
+    FLock.EndRead;
+  end;
+
+  // Double-check lock pattern
+  FLock.BeginWrite;
+  try
+    if not FMaps.TryGetValue(AType, Result) then
+    begin
+      // Auto-Discovery: Create and cache the map if it doesn't exist
+      Result := TEntityMap.Create(AType);
+      FMaps.Add(AType, Result);
+    end;
+  finally
+    FLock.EndWrite;
   end;
 end;
 
 function TModelBuilder.HasMap(AType: PTypeInfo): Boolean;
 begin
-  Result := FMaps.ContainsKey(AType);
+  FLock.BeginRead;
+  try
+    Result := FMaps.ContainsKey(AType);
+  finally
+    FLock.EndRead;
+  end;
 end;
 
 function TModelBuilder.GetMaps: TArray<TEntityMap>;
 begin
-  Result := FMaps.Values;
+  FLock.BeginRead;
+  try
+    Result := FMaps.Values;
+  finally
+    FLock.EndRead;
+  end;
 end;
 
 function TModelBuilder.FindMapByDiscriminator(ABaseType: PTypeInfo; const AValue: Variant): TEntityMap;
@@ -1560,14 +1625,17 @@ var
   Map: TEntityMap;
   Ctx: TRttiContext;
   Typ, BaseTyp: TRttiType;
+  LList: TArray<TEntityMap>;
 begin
   Result := nil;
+  LList := GetMaps; // Thread-safe snapshot
+  
   Ctx := TRttiContext.Create;
   try
     BaseTyp := Ctx.GetType(ABaseType);
     if BaseTyp = nil then Exit;
     
-    for Map in FMaps.Values do
+    for Map in LList do
     begin
       if (Map.DiscriminatorValue <> Null) and (Map.DiscriminatorValue = AValue) then
       begin

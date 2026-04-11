@@ -108,12 +108,14 @@
 - B.3 **Otimização JWT**: ✅ Concluído
 - C.1 **Multipart/Form-Data**: ✅ Concluído
 - C.2 **Unificação de Escapes**: ✅ Concluído
+- D.1 **DbSet Cache Lock**: ✅ Concluído
 - D.2 **Lazy Loading Interceptors**: ✅ Concluído
 - D.3 **Metadata Parser (AST)**: ✅ Concluído
 - E.1 **Configuration Watchers**: ✅ Concluído
 - E.2 **Validation in Config**: ✅ Concluído
 - F.1 **Eventos de Estado**: ✅ Concluído
 - G.1 **Soft Assertions Thread-Safety**: ✅ Concluído
+- G.2 **Snapshots Inteligentes**: ✅ Concluído
 - G.3 **HTML Reporter Templates**: ✅ Concluído
 - H.1 **Filtro de Entidades**: ✅ Concluído
 - H.2 **SQL Tab no Preview**: ✅ Concluído
@@ -121,7 +123,7 @@
 
 ---
 
-## A. Core & Performance
+## A. Core & Performance ✅ Concluído
 
 Melhorias na fundação de baixo nível que impactam **todos os módulos** do framework.
 
@@ -135,7 +137,7 @@ Melhorias na fundação de baixo nível que impactam **todos os módulos** do fr
 
 ---
 
-## B. Web Framework & Pipeline
+## B. Web Framework & Pipeline ✅ Concluído
 
 | # | Melhoria | Unit Afetada | Descrição |
 | :---: | :--- | :--- | :--- |
@@ -145,7 +147,7 @@ Melhorias na fundação de baixo nível que impactam **todos os módulos** do fr
 
 ---
 
-## C. Networking (RestClient)
+## C. Networking (RestClient) ✅ Concluído
 
 | # | Melhoria | Unit Afetada | Descrição |
 | :---: | :--- | :--- | :--- |
@@ -158,7 +160,7 @@ Melhorias na fundação de baixo nível que impactam **todos os módulos** do fr
 
 | # | Melhoria | Unit Afetada | Descrição |
 | :---: | :--- | :--- | :--- |
-| D.1 | **DbSet Cache Lock** | `Dext.Entity.Context` | Avaliar substituição da `TCriticalSection` em `CreateDynamicDbSet` por lock mais leve para cenários de altíssima pressão paralela. |
+| D.1 | **DbSet Cache Lock** | `Dext.Entity.Context` | ✅ Concluído. Substituído bloqueio exclusivo por `TLightweightMREW` em `TDbContext` e `TModelBuilder`, otimizando cold-starts sob carga paralela. |
 | D.2 | **Lazy Loading Interceptors** | `Dext.Entity.Core` / `Dext.Entity.Query` | ✅ Concluído. Criar abstração `ILazyLoader` desvinculada para mover geração de proxies para fora do pipeline físico. |
 | D.3 | **Metadata Parser (AST)** | `Dext.Entity.Metadata` | ✅ Concluído. Expandir `TEntityMetadataParser` para identificar automaticamente relações complexas (`Join`/`Include` hints) diretamente dos `.pas`. |
 
@@ -235,6 +237,7 @@ Melhorias na fundação de baixo nível que impactam **todos os módulos** do fr
 - Core: Config Key Hashing (A.4) ✅ Concluído
 - Web: DataApi Metadata (B.2) ✅ Concluído
 - Web: JWT Optimization (B.3) ✅ Concluído
+- Core: DbSet Cache Lock (D.1) ✅ Concluído
 - Hosting: Lifecycle Events (F.1) ✅ Concluído
 - Testing: Fix Runner Duration & Logs ✅ Concluído
 

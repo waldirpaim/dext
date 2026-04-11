@@ -99,6 +99,7 @@ type
   private
     FServices: IList<IHostedService>;
     FLogger: ILogger;
+  protected
     procedure LogInfo(const AMsg: string);
     procedure LogError(const AMsg: string);
   public
@@ -271,7 +272,6 @@ end;
 procedure THostedServiceManager.StopAsync(Token: ICancellationToken);
 var
   Service: IHostedService;
-  LObj: TObject;
 begin
   // Stop services in reverse order
   for var I := FServices.Count - 1 downto 0 do
@@ -280,7 +280,6 @@ begin
     if not Assigned(Service) then Continue;
 
     try
-      LObj := Service as TObject;
       Service.Stop;
     except
       on E: Exception do
