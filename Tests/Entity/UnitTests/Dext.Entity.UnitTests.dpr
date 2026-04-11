@@ -25,6 +25,7 @@ uses
   Dext.Entity.DataSet.Export.Tests in 'Dext.Entity.DataSet.Export.Tests.pas',
   Dext.Entity.DefaultValue.Tests in 'Dext.Entity.DefaultValue.Tests.pas',
   Dext.Entity.Design.Metadata.Tests in 'Dext.Entity.Design.Metadata.Tests.pas',
+  Dext.Entity.Architecture.Tests in 'Dext.Entity.Architecture.Tests.pas',
   Dext.Entity.ReportedIssues.Tests in 'Dext.Entity.ReportedIssues.Tests.pas';
 
 begin
@@ -64,7 +65,8 @@ begin
         TSmartPropertyDataSetTests,
         TSmartTypesMatrixTests,
         TSmartTypesTests,
-        TEntityReportedIssuesTests
+        TEntityReportedIssuesTests,
+        TEntityArchitectureTests
       ]));
   except
     on E: Exception do

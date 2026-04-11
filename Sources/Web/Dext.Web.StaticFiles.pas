@@ -1,4 +1,4 @@
-{***************************************************************************}
+﻿{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -43,9 +43,13 @@ type
   TContentTypeProvider = class
   private
     FMimeTypes: IDictionary<string, string>;
+    class function NormalizeExtension(const AExtension: string): string; static;
+    procedure RegisterDefaults;
   public
     constructor Create;
     destructor Destroy; override;
+    procedure AddOrUpdate(const AExtension, AContentType: string);
+    function LoadFromFile(const AFilePath: string): Integer;
     function TryGetContentType(const AFileName: string; out AContentType: string): Boolean;
   end;
 
@@ -57,6 +61,7 @@ type
     DefaultFile: string;
     ServeUnknownFileTypes: Boolean;
     ContentTypeProvider: TContentTypeProvider;
+    MimeTypesFile: string;
     
     class function Create: TStaticFileOptions; static;
   end;
@@ -88,41 +93,137 @@ type
 implementation
 
 uses
-  System.Rtti;
+  System.Rtti,
+  Dext.Json,
+  Dext.Json.Types;
 
 { TContentTypeProvider }
 
 constructor TContentTypeProvider.Create;
 begin
-  FMimeTypes := TCollections.CreateDictionary<string, string>;
+  FMimeTypes := TCollections.CreateDictionaryIgnoreCase<string, string>;
+  RegisterDefaults;
+end;
+
+class function TContentTypeProvider.NormalizeExtension(const AExtension: string): string;
+begin
+  Result := AExtension.Trim.ToLower;
+  if Result = '' then
+    Exit('');
+  if not Result.StartsWith('.') then
+    Result := '.' + Result;
+end;
+
+procedure TContentTypeProvider.RegisterDefaults;
+begin
   // Common Web Types
-  FMimeTypes.Add('.html', 'text/html');
-  FMimeTypes.Add('.htm', 'text/html');
-  FMimeTypes.Add('.css', 'text/css');
-  FMimeTypes.Add('.js', 'application/javascript');
-  FMimeTypes.Add('.json', 'application/json');
-  FMimeTypes.Add('.xml', 'text/xml');
-  FMimeTypes.Add('.txt', 'text/plain');
+  AddOrUpdate('.html', 'text/html');
+  AddOrUpdate('.htm', 'text/html');
+  AddOrUpdate('.css', 'text/css');
+  AddOrUpdate('.js', 'application/javascript');
+  AddOrUpdate('.json', 'application/json');
+  AddOrUpdate('.xml', 'text/xml');
+  AddOrUpdate('.txt', 'text/plain');
   
   // Images
-  FMimeTypes.Add('.png', 'image/png');
-  FMimeTypes.Add('.jpg', 'image/jpeg');
-  FMimeTypes.Add('.jpeg', 'image/jpeg');
-  FMimeTypes.Add('.gif', 'image/gif');
-  FMimeTypes.Add('.svg', 'image/svg+xml');
-  FMimeTypes.Add('.ico', 'image/x-icon');
-  FMimeTypes.Add('.webp', 'image/webp');
+  AddOrUpdate('.png', 'image/png');
+  AddOrUpdate('.jpg', 'image/jpeg');
+  AddOrUpdate('.jpeg', 'image/jpeg');
+  AddOrUpdate('.gif', 'image/gif');
+  AddOrUpdate('.svg', 'image/svg+xml');
+  AddOrUpdate('.ico', 'image/x-icon');
+  AddOrUpdate('.webp', 'image/webp');
   
   // Fonts
-  FMimeTypes.Add('.woff', 'font/woff');
-  FMimeTypes.Add('.woff2', 'font/woff2');
-  FMimeTypes.Add('.ttf', 'font/ttf');
-  FMimeTypes.Add('.eot', 'application/vnd.ms-fontobject');
+  AddOrUpdate('.woff', 'font/woff');
+  AddOrUpdate('.woff2', 'font/woff2');
+  AddOrUpdate('.ttf', 'font/ttf');
+  AddOrUpdate('.eot', 'application/vnd.ms-fontobject');
   
   // Others
-  FMimeTypes.Add('.pdf', 'application/pdf');
-  FMimeTypes.Add('.zip', 'application/zip');
-  FMimeTypes.Add('.map', 'application/json'); // Source maps
+  AddOrUpdate('.pdf', 'application/pdf');
+  AddOrUpdate('.zip', 'application/zip');
+  AddOrUpdate('.map', 'application/json'); // Source maps
+end;
+
+procedure TContentTypeProvider.AddOrUpdate(const AExtension, AContentType: string);
+var
+  Ext: string;
+begin
+  Ext := NormalizeExtension(AExtension);
+  if (Ext = '') or (AContentType.Trim = '') then
+    Exit;
+  FMimeTypes.AddOrSetValue(Ext, AContentType.Trim);
+end;
+
+function TContentTypeProvider.LoadFromFile(const AFilePath: string): Integer;
+var
+  FullPath: string;
+  Content: string;
+  Lines: TArray<string>;
+  Line: string;
+  EqPos: Integer;
+  Ext: string;
+  Mime: string;
+  Node: IDextJsonNode;
+  Obj: IDextJsonObject;
+begin
+  Result := 0;
+
+  if AFilePath.Trim = '' then
+    Exit;
+
+  FullPath := AFilePath;
+  if not TPath.IsPathRooted(FullPath) then
+    FullPath := TPath.Combine(ExtractFilePath(ParamStr(0)), FullPath);
+
+  if not FileExists(FullPath) then
+    Exit;
+
+  Content := TFile.ReadAllText(FullPath, TEncoding.UTF8).Trim;
+  if Content = '' then
+    Exit;
+
+  // JSON object format: { ".md": "text/markdown", ".csv": "text/csv" }
+  if Content.StartsWith('{') then
+  begin
+    Node := TDextJson.Provider.Parse(Content);
+    if (Node <> nil) and (Node.GetNodeType = jntObject) then
+    begin
+      Obj := Node as IDextJsonObject;
+      for var I := 0 to Obj.GetCount - 1 do
+      begin
+        Ext := Obj.GetName(I);
+        Mime := Obj.GetString(Ext);
+        AddOrUpdate(Ext, Mime);
+        Inc(Result);
+      end;
+    end;
+    Exit;
+  end;
+
+  // Line format:
+  // .md=text/markdown
+  // csv=text/csv
+  Lines := Content.Split([sLineBreak]);
+  for var LineItem in Lines do
+  begin
+    Line := LineItem.Trim;
+    if (Line = '') or Line.StartsWith('#') or Line.StartsWith('//') then
+      Continue;
+
+    EqPos := Line.IndexOf('=');
+    if EqPos < 1 then
+      Continue;
+
+    Ext := Line.Substring(0, EqPos).Trim;
+    Mime := Line.Substring(EqPos + 1).Trim;
+    if (Ext <> '') and (Mime <> '') then
+    begin
+      AddOrUpdate(Ext, Mime);
+      Inc(Result);
+    end;
+  end;
 end;
 
 destructor TContentTypeProvider.Destroy;
@@ -147,6 +248,7 @@ begin
   Result.DefaultFile := 'index.html';
   Result.ServeUnknownFileTypes := False;
   Result.ContentTypeProvider := nil; // Will be created if nil
+  Result.MimeTypesFile := '';
 end;
 
 { TStaticFileMiddleware }
@@ -169,6 +271,9 @@ begin
     
   if not DirectoryExists(FOptions.RootPath) then
     ForceDirectories(FOptions.RootPath);
+
+  if FOptions.MimeTypesFile <> '' then
+    FOptions.ContentTypeProvider.LoadFromFile(FOptions.MimeTypesFile);
 end;
 
 destructor TStaticFileMiddleware.Destroy;

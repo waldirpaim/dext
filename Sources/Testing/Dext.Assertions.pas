@@ -40,6 +40,7 @@ uses
   System.IOUtils,
   System.Rtti,
   System.SysUtils,
+  System.Character,
   System.TypInfo,
   System.Variants,
   Dext,
@@ -492,7 +493,9 @@ uses
   System.Generics.Defaults,
   System.Generics.Collections,
   Dext.Collections,
-  Dext.Collections.Comparers;
+  Dext.Collections.Comparers,
+  Dext.Json,
+  Dext.Json.Types;
 
 threadvar
   GSoftAssertMode: Boolean;
@@ -589,40 +592,202 @@ begin
   end;
 end;
 
+/// <summary>
+///   Normalizes a JSON string for comparison: strips insignificant whitespace
+///   (spaces, tabs, CR, LF between tokens) while preserving whitespace inside
+///   quoted strings. This makes snapshots resilient to formatting changes and
+///   pretty-print differences.
+/// </summary>
+function NormalizeJsonWhitespace(const S: string): string;
+var
+  SB: TStringBuilder;
+  InString, Escaped: Boolean;
+  I: Integer;
+  C: Char;
+begin
+  SB := TStringBuilder.Create(Length(S));
+  try
+    InString := False;
+    Escaped := False;
+    for I := 1 to Length(S) do
+    begin
+      C := S[I];
+      if Escaped then
+      begin
+        SB.Append(C);
+        Escaped := False;
+        Continue;
+      end;
+      if C = '\' then
+      begin
+        Escaped := InString; // Only treat as escape inside strings
+        SB.Append(C);
+        Continue;
+      end;
+      if C = '"' then
+      begin
+        InString := not InString;
+        SB.Append(C);
+        Continue;
+      end;
+      if InString then
+        SB.Append(C)
+      else if not C.IsWhiteSpace then
+        SB.Append(C);
+      // Outside strings, skip all whitespace
+    end;
+    Result := SB.ToString;
+  finally
+    SB.Free;
+  end;
+end;
+
+/// <summary>
+///   Checks if a string looks like a JSON document (starts with { or [).
+/// </summary>
+function LooksLikeJson(const S: string): Boolean;
+var
+  Trimmed: string;
+begin
+  Trimmed := TrimLeft(S);
+  Result := (Trimmed <> '') and ((Trimmed[1] = '{') or (Trimmed[1] = '['));
+end;
+
+function AreJsonNodesEqual(const Node1, Node2: IDextJsonNode): Boolean;
+var
+  I: Integer;
+  Key: string;
+begin
+  if (Node1 = nil) or (Node2 = nil) then
+  begin
+    Result := Node1 = Node2;
+    Exit;
+  end;
+
+  if Node1.NodeType <> Node2.NodeType then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  case Node1.NodeType of
+    jntNull: Result := True;
+    jntString: Result := Node1.AsString = Node2.AsString;
+    jntNumber: Result := Node1.AsDouble = Node2.AsDouble;
+    jntBoolean: Result := Node1.AsBoolean = Node2.AsBoolean;
+    jntArray:
+      begin
+        var Arr1 := IDextJsonArray(Node1);
+        var Arr2 := IDextJsonArray(Node2);
+        if Arr1.Count <> Arr2.Count then
+        begin
+          Result := False;
+          Exit;
+        end;
+        for I := 0 to Arr1.Count - 1 do
+          if not AreJsonNodesEqual(Arr1.GetNode(I), Arr2.GetNode(I)) then
+          begin
+            Result := False;
+            Exit;
+          end;
+        Result := True;
+      end;
+    jntObject:
+      begin
+        var Obj1 := IDextJsonObject(Node1);
+        var Obj2 := IDextJsonObject(Node2);
+        if Obj1.Count <> Obj2.Count then
+        begin
+          Result := False;
+          Exit;
+        end;
+        for I := 0 to Obj1.Count - 1 do
+        begin
+          Key := Obj1.GetName(I);
+          if not Obj2.Contains(Key) then
+          begin
+            Result := False;
+            Exit;
+          end;
+          if not AreJsonNodesEqual(Obj1.GetNode(Key), Obj2.GetNode(Key)) then
+          begin
+            Result := False;
+            Exit;
+          end;
+        end;
+        Result := True;
+      end;
+  else
+    Result := False;
+  end;
+end;
+
+function AreJsonEqual(const Json1, Json2: string): Boolean;
+begin
+  try
+    var Node1 := TDextJson.Provider.Parse(Json1);
+    var Node2 := TDextJson.Provider.Parse(Json2);
+    Result := AreJsonNodesEqual(Node1, Node2);
+  except
+    Result := False;
+  end;
+end;
+
 procedure VerifySnapshot(const Content, SnapshotName: string);
 var
   SnapshotPath: string;
   VerifyPath: string;
   ExistingContent: string;
   BaseDir: string;
+  IsMatch: Boolean;
+  NormalizedContent, NormalizedExisting: string;
 begin
   if SnapshotName = '' then
     raise Exception.Create('Snapshot name cannot be empty');
 
   // Directory: .\Snapshots relative to EXE
-  BaseDir := TPath.Combine(ExtractFilePath(ParamStr(0)), 'Snapshots');
-  if not TDirectory.Exists(BaseDir) then
-    TDirectory.CreateDirectory(BaseDir);
+  BaseDir := System.IOUtils.TPath.Combine(ExtractFilePath(ParamStr(0)), 'Snapshots');
+  if not System.IOUtils.TDirectory.Exists(BaseDir) then
+    System.IOUtils.TDirectory.CreateDirectory(BaseDir);
 
-  SnapshotPath := TPath.Combine(BaseDir, SnapshotName + '.json');
-  VerifyPath := TPath.Combine(BaseDir, SnapshotName + '.received.json');
+  SnapshotPath := System.IOUtils.TPath.Combine(BaseDir, SnapshotName + '.json');
+  VerifyPath := System.IOUtils.TPath.Combine(BaseDir, SnapshotName + '.received.json');
 
   // UPDATE SNAPSHOT mode (env var or missing file)
-  if (GetEnvironmentVariable('SNAPSHOT_UPDATE') = '1') or (not TFile.Exists(SnapshotPath)) then
+  if (GetEnvironmentVariable('SNAPSHOT_UPDATE') = '1') or (not System.IOUtils.TFile.Exists(SnapshotPath)) then
   begin
-    TFile.WriteAllText(SnapshotPath, Content, TEncoding.UTF8);
+    System.IOUtils.TFile.WriteAllText(SnapshotPath, Content);
     // Delete received file if exists
-    if TFile.Exists(VerifyPath) then
-      TFile.Delete(VerifyPath);
+    if System.IOUtils.TFile.Exists(VerifyPath) then
+      System.IOUtils.TFile.Delete(VerifyPath);
     Exit;
   end;
 
   // Compare
-  ExistingContent := TFile.ReadAllText(SnapshotPath, TEncoding.UTF8);
-  if Content <> ExistingContent then
+  ExistingContent := System.IOUtils.TFile.ReadAllText(SnapshotPath);
+
+  // First try exact match (fast path)
+  IsMatch := (Content = ExistingContent);
+
+  // If not exact, try smart comparison for JSON-like content
+  if (not IsMatch) and LooksLikeJson(Content) and LooksLikeJson(ExistingContent) then
+  begin
+    // Normalize: strip insignificant whitespace (formatting differences)
+    // AND check for structural equality (order independent)
+    IsMatch := AreJsonEqual(Content, ExistingContent);
+    // If structured compare failed or not possible, fallback to whitespace normalization
+    if not IsMatch then
+    begin
+      NormalizedContent := NormalizeJsonWhitespace(Content);
+      NormalizedExisting := NormalizeJsonWhitespace(ExistingContent);
+      IsMatch := (NormalizedContent = NormalizedExisting);
+    end;
+  end;
+
+  if not IsMatch then
   begin
     // Write received
-    TFile.WriteAllText(VerifyPath, Content, TEncoding.UTF8);
+    System.IOUtils.TFile.WriteAllText(VerifyPath, Content);
     Assert.RegisterFailure(Format(
       'Snapshot mismatch for "%s"!' + sLineBreak +
       'Expected location: %s' + sLineBreak +
@@ -631,10 +796,19 @@ begin
   end
   else
   begin
-      // Cleanup previous failures
-      if TFile.Exists(VerifyPath) then
-        TFile.Delete(VerifyPath);
+    // Cleanup previous failures
+    if System.IOUtils.TFile.Exists(VerifyPath) then
+      System.IOUtils.TFile.Delete(VerifyPath);
   end;
+end;
+
+function EscapeJsonString(const S: string): string;
+begin
+  Result := S.Replace('\', '\\', [rfReplaceAll])
+             .Replace('"', '\"', [rfReplaceAll])
+             .Replace(#13, '\r', [rfReplaceAll])
+             .Replace(#10, '\n', [rfReplaceAll])
+             .Replace(#9, '\t', [rfReplaceAll]);
 end;
 
 { ShouldString }

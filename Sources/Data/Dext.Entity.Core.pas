@@ -233,6 +233,23 @@ type
     function Member(const APropName: string): IPropertyEntry;
   end;
 
+  /// <summary>
+  ///   Abstract contract for lazy loading functionality, moving proxy generation out of the core pipeline.
+  /// </summary>
+  ILazyLoader = interface
+    ['{482A3A6E-DF29-45B1-817E-12A4BF01CD33}']
+    procedure Load(AEntity: TObject; const APropertyName: string);
+    procedure LoadCollection(AEntity: TObject; const APropertyName: string);
+  end;
+
+  /// <summary>
+  ///   Indicates that an entity is proxy-capable and can receive a lazy loader instance.
+  /// </summary>
+  ILazyLoaderAware = interface
+    ['{E3A201C1-8B41-450F-A924-E84DE19C3BB8}']
+    procedure SetLazyLoader(const ALazyLoader: ILazyLoader);
+  end;
+
   TEntityMemberMetadata = class(TCollectionItem)
   private
     FName: string;
@@ -252,6 +269,11 @@ type
     FVisible: Boolean;
     FIsCurrency: Boolean;
     FDefaultValue: string;
+    FHasJoin: Boolean;
+    FHasInclude: Boolean;
+    FRelationType: string;
+    FJoinColumn: string;
+    FJoinTargetColumn: string;
     procedure SetName(const Value: string);
     procedure SetMemberType(const Value: string);
   protected
@@ -278,6 +300,11 @@ type
     property Visible: Boolean read FVisible write FVisible;
     property IsCurrency: Boolean read FIsCurrency write FIsCurrency;
     property DefaultValue: string read FDefaultValue write FDefaultValue;
+    property HasJoin: Boolean read FHasJoin write FHasJoin;
+    property HasInclude: Boolean read FHasInclude write FHasInclude;
+    property RelationType: string read FRelationType write FRelationType;
+    property JoinColumn: string read FJoinColumn write FJoinColumn;
+    property JoinTargetColumn: string read FJoinTargetColumn write FJoinTargetColumn;
   end;
 
   TEntityMemberCollection = class(TOwnedCollection)
@@ -562,6 +589,9 @@ begin
     FVisible := TEntityMemberMetadata(Source).Visible;
     FIsCurrency := TEntityMemberMetadata(Source).IsCurrency;
     FDefaultValue := TEntityMemberMetadata(Source).DefaultValue; // Added this
+    FHasJoin := TEntityMemberMetadata(Source).HasJoin;
+    FHasInclude := TEntityMemberMetadata(Source).HasInclude;
+    FRelationType := TEntityMemberMetadata(Source).RelationType;
   end
   else
     inherited Assign(Source);

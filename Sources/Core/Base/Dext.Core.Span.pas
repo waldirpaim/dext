@@ -28,7 +28,8 @@ unit Dext.Core.Span;
 interface
 
 uses
-  System.SysUtils;
+  System.SysUtils,
+  Dext.Collections.Simd;
 
 type
   /// <summary>
@@ -339,7 +340,7 @@ begin
     Exit(False);
   if FData = AOther.FData then
     Exit(True);
-  Result := CompareMem(FData, AOther.FData, FLength);
+  Result := TDextSimd.EqualsBytes(FData, AOther.FData, FLength);
 end;
 
 function TByteSpan.EqualsString(const AValue: string): Boolean;

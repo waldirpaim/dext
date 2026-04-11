@@ -23,6 +23,7 @@ type
     function GetNodeText(Node: TSyntaxNode): string;
     function HasAttribute(Nodes: TList<TSyntaxNode>; const AttrName: string; Node: TSyntaxNode = nil): Boolean;
     function GetAttributeValue(Nodes: TList<TSyntaxNode>; const AttrName: string; Node: TSyntaxNode = nil): string;
+    function GetAttributeArguments(Nodes: TList<TSyntaxNode>; const AttrName: string; Node: TSyntaxNode = nil): TArray<string>;
     procedure ExtractMembers(AMetadata: TEntityClassMetadata; AClassNode: TSyntaxNode);
   public
     constructor Create;
@@ -111,6 +112,53 @@ begin
       if Check(Child) then Exit(True);
 end;
 
+function TEntityMetadataParser.GetAttributeArguments(Nodes: TList<TSyntaxNode>; const AttrName: string; Node: TSyntaxNode): TArray<string>;
+  function GetArgsFromAttr(AnAttr: TSyntaxNode): TArray<string>;
+  var
+    Args, Arg, ValNode: TSyntaxNode;
+  begin
+    Result := [];
+    Args := AnAttr.FindNode(ntArguments);
+    if Args <> nil then
+      for Arg in Args.ChildNodes do
+      begin
+        ValNode := Arg.FindNode(ntValue);
+        if ValNode <> nil then
+        begin
+          SetLength(Result, Length(Result) + 1);
+          Result[High(Result)] := GetNodeText(ValNode).DeQuotedString('''');
+        end;
+      end;
+  end;
+
+  function GetArgs(ANode: TSyntaxNode): TArray<string>;
+  var
+    Attr, NameNode: TSyntaxNode;
+  begin
+    Result := [];
+    if ANode = nil then Exit;
+    for Attr in ANode.ChildNodes do
+      if Attr.Typ = ntAttribute then
+      begin
+        NameNode := Attr.FindNode(ntName);
+        if (NameNode <> nil) and SameText(GetNodeText(NameNode), AttrName) then
+          Exit(GetArgsFromAttr(Attr));
+      end;
+  end;
+var
+  Child: TSyntaxNode;
+begin
+  Result := [];
+  if Node <> nil then
+  begin
+    if Node.Typ = ntAttributes then begin Result := GetArgs(Node); if Length(Result) > 0 then Exit; end;
+    for Child in Node.ChildNodes do
+      if Child.Typ = ntAttributes then begin Result := GetArgs(Child); if Length(Result) > 0 then Exit; end;
+  end;
+  if Nodes <> nil then
+    for Child in Nodes do begin Result := GetArgs(Child); if Length(Result) > 0 then Exit; end;
+end;
+
 function TEntityMetadataParser.GetAttributeValue(Nodes: TList<TSyntaxNode>; const AttrName: string; Node: TSyntaxNode): string;
   function GetValFromAttr(AnAttr: TSyntaxNode): string;
   var
@@ -184,7 +232,7 @@ procedure TEntityMetadataParser.ExtractMembers(AMetadata: TEntityClassMetadata; 
     CChild, Sub: TSyntaxNode;
     MName, MType, AlignAttr: string;
     Member: TEntityMemberMetadata;
-    LTemp: string;
+    TempValue: string;
   begin
     for CChild in ContextNode.ChildNodes do
     begin
@@ -224,35 +272,50 @@ procedure TEntityMetadataParser.ExtractMembers(AMetadata: TEntityClassMetadata; 
         Member.IsReadOnly := HasAttribute(FMemberAttributes, 'NotMapped', CChild);
         Member.IsCurrency := HasAttribute(FMemberAttributes, 'Currency', CChild);
         
+        Member.HasJoin := HasAttribute(FMemberAttributes, 'Join', CChild);
+        if Member.HasJoin then
+        begin
+          var JoinArgs := GetAttributeArguments(FMemberAttributes, 'Join', CChild);
+          if Length(JoinArgs) >= 1 then Member.JoinColumn := JoinArgs[0];
+          if Length(JoinArgs) >= 2 then Member.JoinTargetColumn := JoinArgs[1];
+        end;
+        
+        Member.HasInclude := HasAttribute(FMemberAttributes, 'Include', CChild);
+        
+        // Relation Type detection (Independence of Join/Include)
+        if HasAttribute(FMemberAttributes, 'HasMany', CChild) then Member.RelationType := 'HasMany'
+        else if HasAttribute(FMemberAttributes, 'HasOne', CChild) then Member.RelationType := 'HasOne'
+        else if HasAttribute(FMemberAttributes, 'BelongsTo', CChild) then Member.RelationType := 'BelongsTo';
+        
         Member.DefaultValue := GetAttributeValue(FMemberAttributes, 'DefaultValue', CChild);
 
         // DisplayLabel / Caption / DisplayName
-        LTemp := GetAttributeValue(FMemberAttributes, 'Caption', CChild);
-        if LTemp = '' then LTemp := GetAttributeValue(FMemberAttributes, 'DisplayLabel', CChild);
-        if LTemp = '' then LTemp := GetAttributeValue(FMemberAttributes, 'DisplayName', CChild);
-        if LTemp <> '' then Member.DisplayLabel := LTemp;
+        TempValue := GetAttributeValue(FMemberAttributes, 'Caption', CChild);
+        if TempValue = '' then TempValue := GetAttributeValue(FMemberAttributes, 'DisplayLabel', CChild);
+        if TempValue = '' then TempValue := GetAttributeValue(FMemberAttributes, 'DisplayName', CChild);
+        if TempValue <> '' then Member.DisplayLabel := TempValue;
 
         // DisplayFormat
-        LTemp := GetAttributeValue(FMemberAttributes, 'DisplayFormat', CChild);
-        if LTemp <> '' then Member.DisplayFormat := LTemp;
+        TempValue := GetAttributeValue(FMemberAttributes, 'DisplayFormat', CChild);
+        if TempValue <> '' then Member.DisplayFormat := TempValue;
 
         // EditMask
-        LTemp := GetAttributeValue(FMemberAttributes, 'EditMask', CChild);
-        if LTemp <> '' then Member.EditMask := LTemp;
+        TempValue := GetAttributeValue(FMemberAttributes, 'EditMask', CChild);
+        if TempValue <> '' then Member.EditMask := TempValue;
 
         // Visible
-        LTemp := GetAttributeValue(FMemberAttributes, 'Visible', CChild);
-        if LTemp <> '' then Member.Visible := SameText(LTemp, 'True');
+        TempValue := GetAttributeValue(FMemberAttributes, 'Visible', CChild);
+        if TempValue <> '' then Member.Visible := SameText(TempValue, 'True');
 
         // Integer Attributes (Only set if > 0)
-        LTemp := GetAttributeValue(FMemberAttributes, 'MaxLength', CChild);
-        if (LTemp <> '') and (StrToIntDef(LTemp, 0) > 0) then Member.MaxLength := StrToInt(LTemp);
+        TempValue := GetAttributeValue(FMemberAttributes, 'MaxLength', CChild);
+        if (TempValue <> '') and (StrToIntDef(TempValue, 0) > 0) then Member.MaxLength := StrToInt(TempValue);
 
-        LTemp := GetAttributeValue(FMemberAttributes, 'DisplayWidth', CChild);
-        if (LTemp <> '') and (StrToIntDef(LTemp, 0) > 0) then Member.DisplayWidth := StrToInt(LTemp);
+        TempValue := GetAttributeValue(FMemberAttributes, 'DisplayWidth', CChild);
+        if (TempValue <> '') and (StrToIntDef(TempValue, 0) > 0) then Member.DisplayWidth := StrToInt(TempValue);
 
-        LTemp := GetAttributeValue(FMemberAttributes, 'Precision', CChild);
-        if (LTemp <> '') and (StrToIntDef(LTemp, 0) > 0) then Member.Precision := StrToInt(LTemp);
+        TempValue := GetAttributeValue(FMemberAttributes, 'Precision', CChild);
+        if (TempValue <> '') and (StrToIntDef(TempValue, 0) > 0) then Member.Precision := StrToInt(TempValue);
 
         // Alignment
         AlignAttr := GetAttributeValue(FMemberAttributes, 'Alignment', CChild);

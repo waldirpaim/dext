@@ -30,19 +30,24 @@ interface
 uses
   System.SysUtils,
   System.Classes,
+  System.SyncObjs,
   Dext.Collections,
   Dext.Collections.Dict,
+  Dext.Collections.RawDict,
   Dext.Collections.Comparers,
   Dext.Collections.Algorithms,
   Dext.Configuration.Interfaces;
 
 type
+  TConfigurationValidator = reference to function(const Section: IConfigurationSection): string;
+
   /// <summary>
   ///   Base for the implementation of configuration providers (JSON, Env, CLI, etc.).
   /// </summary>
   TConfigurationProvider = class(TInterfacedObject, IConfigurationProvider)
   protected
     FData: IDictionary<string, string>;
+    procedure ClearData;
   public
     constructor Create;
     destructor Destroy; override;
@@ -80,12 +85,23 @@ type
   TConfigurationRoot = class(TInterfacedObject, IConfigurationRoot, IConfiguration)
   private
     FProviders: IList<IConfigurationProvider>;
+    FLock: TCriticalSection;
+    FReloadOnChange: Boolean;
+    FReloadIntervalMs: Integer;
+    FReloadThread: TThread;
+    FKeyCache: IDictionary<Cardinal, string>;
+    FCacheDirty: Boolean;
     
     function GetConfiguration(const Key: string): string;
     procedure SetConfiguration(const Key, Value: string);
+    procedure StartWatcher;
+    procedure StopWatcher;
+    procedure CheckForChanges;
+    procedure RebuildCache;
 
   public
-    constructor Create(const Providers: IList<IConfigurationProvider>);
+    constructor Create(const Providers: IList<IConfigurationProvider>;
+      AReloadOnChange: Boolean = False; AReloadIntervalMs: Integer = 1000);
     destructor Destroy; override;
     
     /// <summary>Forces a reload of all providers (e.g., re-reading JSON files or OS environment variables).</summary>
@@ -153,6 +169,15 @@ type
     function Add(const ASource: IConfigurationSource): TDextConfiguration;
     /// <summary>Adds static in-memory values to the configuration.</summary>
     function AddValues(const AValues: array of TPair<string, string>): TDextConfiguration;
+    /// <summary>Enables or disables validation execution during Build.</summary>
+    function ValidateOnBuild(AEnabled: Boolean = True): TDextConfiguration;
+    /// <summary>Adds a validator for a specific configuration section.</summary>
+    function AddSectionValidator(const ASectionPath: string;
+      const AValidator: TConfigurationValidator): TDextConfiguration;
+    /// <summary>
+    ///   Enables/disables automatic reload when change-trackable providers detect source changes.
+    /// </summary>
+    function ReloadOnChange(AEnabled: Boolean = True; AIntervalMs: Integer = 1000): TDextConfiguration;
     /// <summary>Builds and returns the finalized configuration root.</summary>
     function Build: IConfigurationRoot;
     /// <summary>Returns the underlying builder for advanced manual configurations.</summary>
@@ -172,12 +197,59 @@ type
 
 implementation
 
+const
+  CConfigValidateOnBuildKey = 'dext:config:validate_on_build';
+  CConfigValidatorRegistryKey = 'dext:config:validator_registry';
+  CConfigReloadOnChangeKey = 'dext:config:reload_on_change';
+  CConfigReloadIntervalKey = 'dext:config:reload_interval_ms';
+
+type
+  TBooleanBox = class
+  public
+    Value: Boolean;
+  end;
+
+  TIntBox = class
+  public
+    Value: Integer;
+  end;
+
+  TConfigurationReloadThread = class(TThread)
+  private
+    FRoot: TConfigurationRoot;
+    FIntervalMs: Integer;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(ARoot: TConfigurationRoot; AIntervalMs: Integer);
+  end;
+
+  TConfigurationValidationRule = class
+  public
+    SectionPath: string;
+    Validator: TConfigurationValidator;
+  end;
+
+  TConfigurationValidationRegistry = class
+  private
+    FRules: IList<TConfigurationValidationRule>;
+  public
+    constructor Create;
+    function GetRules: IList<TConfigurationValidationRule>;
+    procedure Add(const ASectionPath: string; const AValidator: TConfigurationValidator);
+  end;
+
 { TConfigurationProvider }
+
+procedure TConfigurationProvider.ClearData;
+begin
+  if Assigned(FData) then
+    FData.Clear;
+end;
 
 constructor TConfigurationProvider.Create;
 begin
   inherited;
-  FData := TCollections.CreateDictionaryIgnoreCase<string, string>;
 end;
 
 destructor TConfigurationProvider.Destroy;
@@ -188,11 +260,18 @@ end;
 
 function TConfigurationProvider.TryGet(const Key: string; out Value: string): Boolean;
 begin
+  if FData = nil then
+  begin
+    Value := '';
+    Exit(False);
+  end;
   Result := FData.TryGetValue(Key, Value);
 end;
 
 procedure TConfigurationProvider.Set_(const Key, Value: string);
 begin
+  if FData = nil then
+    FData := TCollections.CreateDictionaryIgnoreCase<string, string>;
   FData.AddOrSetValue(Key, Value);
 end;
 
@@ -220,18 +299,21 @@ begin
       
     Len := Length(Prefix);
     
-    for var Pair in FData do
+    if FData <> nil then
     begin
-      Key := Pair.Key;
-      if (Len = 0) or (Key.StartsWith(Prefix, True)) then
+      for var Pair in FData do
       begin
-        Segment := Key.Substring(Len);
-        var DelimiterIndex := Segment.IndexOf(TConfigurationPath.KeyDelimiter);
-        if DelimiterIndex >= 0 then
-          Segment := Segment.Substring(0, DelimiterIndex);
-          
-        if not Results.Contains(Segment) then
-          Results.Add(Segment);
+        Key := Pair.Key;
+        if (Len = 0) or (Key.StartsWith(Prefix, True)) then
+        begin
+          Segment := Key.Substring(Len);
+          var DelimiterIndex := Segment.IndexOf(TConfigurationPath.KeyDelimiter);
+          if DelimiterIndex >= 0 then
+            Segment := Segment.Substring(0, DelimiterIndex);
+            
+          if not Results.Contains(Segment) then
+            Results.Add(Segment);
+        end;
       end;
     end;
     
@@ -239,6 +321,54 @@ begin
     TDextSort.Sort<string>(Result, TComparer<string>.Default);
   finally
     Results := nil;
+  end;
+end;
+
+{ TConfigurationValidationRegistry }
+
+constructor TConfigurationValidationRegistry.Create;
+begin
+  inherited Create;
+  FRules := TCollections.CreateList<TConfigurationValidationRule>(True);
+end;
+
+function TConfigurationValidationRegistry.GetRules: IList<TConfigurationValidationRule>;
+begin
+  Result := FRules;
+end;
+
+procedure TConfigurationValidationRegistry.Add(const ASectionPath: string;
+  const AValidator: TConfigurationValidator);
+var
+  Rule: TConfigurationValidationRule;
+begin
+  if not Assigned(AValidator) then
+    Exit;
+  Rule := TConfigurationValidationRule.Create;
+  Rule.SectionPath := ASectionPath;
+  Rule.Validator := AValidator;
+  FRules.Add(Rule);
+end;
+
+{ TConfigurationReloadThread }
+
+constructor TConfigurationReloadThread.Create(ARoot: TConfigurationRoot; AIntervalMs: Integer);
+begin
+  inherited Create(False);
+  FreeOnTerminate := False;
+  FRoot := ARoot;
+  FIntervalMs := AIntervalMs;
+end;
+
+procedure TConfigurationReloadThread.Execute;
+begin
+  while not Terminated do
+  begin
+    Sleep(FIntervalMs);
+    if Terminated then
+      Break;
+    if Assigned(FRoot) then
+      FRoot.CheckForChanges;
   end;
 end;
 
@@ -294,49 +424,105 @@ end;
 
 { TConfigurationRoot }
 
-constructor TConfigurationRoot.Create(const Providers: IList<IConfigurationProvider>);
+constructor TConfigurationRoot.Create(const Providers: IList<IConfigurationProvider>;
+  AReloadOnChange: Boolean; AReloadIntervalMs: Integer);
 begin
   inherited Create;
+  FLock := TCriticalSection.Create;
+  FReloadOnChange := AReloadOnChange;
+  FReloadIntervalMs := AReloadIntervalMs;
+  if FReloadIntervalMs <= 0 then
+    FReloadIntervalMs := 1000;
+  FKeyCache := TCollections.CreateDictionary<Cardinal, string>;
+  FCacheDirty := True;
+
   FProviders := TCollections.CreateList<IConfigurationProvider>;
   for var Provider in Providers do
     FProviders.Add(Provider);
   
   for var Provider in FProviders do
     Provider.Load;
+
+  RebuildCache;
+  StartWatcher;
 end;
 
 destructor TConfigurationRoot.Destroy;
 begin
+  StopWatcher;
+  FKeyCache := nil;
   FProviders := nil;
+  FLock.Free;
   inherited;
 end;
 
 procedure TConfigurationRoot.Reload;
 begin
+  FLock.Enter;
+  try
+    for var Provider in FProviders do
+      Provider.Load;
+    RebuildCache;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TConfigurationRoot.RebuildCache;
+var
+  Value: string;
+begin
+  // Called inside FLock.Enter
+  FKeyCache.Clear;
+  // Iterate providers in order: last provider wins (overwrite earlier values)
   for var Provider in FProviders do
-    Provider.Load;
+  begin
+    var Keys := Provider.GetChildKeys([], '');
+    for var Key in Keys do
+    begin
+      if Provider.TryGet(Key, Value) then
+        FKeyCache.AddOrSetValue(StringRawHashIgnoreCase(@Key, 0), Value);
+    end;
+  end;
+  FCacheDirty := False;
 end;
 
 function TConfigurationRoot.GetConfiguration(const Key: string): string;
 var
   Value: string;
 begin
-  Result := '';
-  // Reverse order: last provider wins
-  for var I := FProviders.Count - 1 downto 0 do
-  begin
-    if FProviders[I].TryGet(Key, Value) then
+  FLock.Enter;
+  try
+    // Try cache first (O(1) lookup with hash)
+    var KeyHash := StringRawHashIgnoreCase(@Key, 0);
+    if (not FCacheDirty) and FKeyCache.TryGetValue(KeyHash, Value) then
       Exit(Value);
+
+    // Cache miss or dirty - fall back to provider scan
+    Result := '';
+    // Reverse order: last provider wins
+    for var I := FProviders.Count - 1 downto 0 do
+    begin
+      if FProviders[I].TryGet(Key, Value) then
+        Exit(Value);
+    end;
+  finally
+    FLock.Leave;
   end;
 end;
 
 procedure TConfigurationRoot.SetConfiguration(const Key, Value: string);
 begin
-  // Set in all providers? Or just the first one that supports it?
-  // Usually configuration is read-only from file sources, but memory source is writable.
-  // .NET sets it in all providers.
-  for var Provider in FProviders do
-    Provider.Set_(Key, Value);
+  FLock.Enter;
+  try
+    // Set in all providers
+    for var Provider in FProviders do
+      Provider.Set_(Key, Value);
+    // Invalidate cache
+    FCacheDirty := True;
+  finally
+    FLock.Leave;
+  end;
 end;
 
 function TConfigurationRoot.GetItem(const Key: string): string;
@@ -361,6 +547,8 @@ var
   Provider: IConfigurationProvider;
   ChildPath: string;
 begin
+  FLock.Enter;
+  try
   Keys := [];
   for Provider in FProviders do
   begin
@@ -376,6 +564,53 @@ begin
       ChildPath := TConfigurationPath.Combine(Path, Keys[I]);
       Result[I] := TConfigurationSection.Create(Self, ChildPath);
     end;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TConfigurationRoot.StartWatcher;
+begin
+  if not FReloadOnChange then
+    Exit;
+  if FReloadThread <> nil then
+    Exit;
+  FReloadThread := TConfigurationReloadThread.Create(Self, FReloadIntervalMs);
+end;
+
+procedure TConfigurationRoot.StopWatcher;
+begin
+  if FReloadThread = nil then
+    Exit;
+  FReloadThread.Terminate;
+  FReloadThread.WaitFor;
+  FreeAndNil(FReloadThread);
+end;
+
+procedure TConfigurationRoot.CheckForChanges;
+var
+  AnyChanged: Boolean;
+begin
+  FLock.Enter;
+  try
+    AnyChanged := False;
+    for var Provider in FProviders do
+    begin
+      if Supports(Provider, IConfigurationChangeTracker) then
+      begin
+        var Tracker := Provider as IConfigurationChangeTracker;
+        if Tracker.HasChanged then
+        begin
+          Provider.Load;
+          AnyChanged := True;
+        end;
+      end;
+    end;
+    if AnyChanged then
+      RebuildCache;
+  finally
+    FLock.Leave;
+  end;
 end;
 
 function TConfigurationRoot.GetChildren: TArray<IConfigurationSection>;
@@ -389,7 +624,7 @@ constructor TConfigurationBuilder.Create;
 begin
   inherited;
   FSources := TCollections.CreateList<IConfigurationSource>;
-  FProperties := TCollections.CreateDictionary<string, TObject>;
+  FProperties := TCollections.CreateDictionary<string, TObject>(True);
 end;
 
 destructor TConfigurationBuilder.Destroy;
@@ -428,7 +663,19 @@ begin
         Providers.Add(Provider);
     end;
     
-    Result := TConfigurationRoot.Create(Providers);
+    var ReloadFlagObj: TObject;
+    var ReloadEnabled := False;
+    if FProperties.TryGetValue(CConfigReloadOnChangeKey, ReloadFlagObj) and
+       (ReloadFlagObj is TBooleanBox) then
+      ReloadEnabled := TBooleanBox(ReloadFlagObj).Value;
+
+    var ReloadIntervalObj: TObject;
+    var ReloadIntervalMs := 1000;
+    if FProperties.TryGetValue(CConfigReloadIntervalKey, ReloadIntervalObj) and
+       (ReloadIntervalObj is TIntBox) then
+      ReloadIntervalMs := TIntBox(ReloadIntervalObj).Value;
+
+    Result := TConfigurationRoot.Create(Providers, ReloadEnabled, ReloadIntervalMs);
   finally
     Providers := nil;
   end;
@@ -460,6 +707,42 @@ end;
 function TDextConfiguration.Build: IConfigurationRoot;
 begin
   Result := FBuilder.Build;
+
+  var ValidateFlagObj: TObject;
+  var ShouldValidate := False;
+  if FBuilder.Properties.TryGetValue(CConfigValidateOnBuildKey, ValidateFlagObj) and
+     (ValidateFlagObj is TBooleanBox) then
+    ShouldValidate := TBooleanBox(ValidateFlagObj).Value;
+
+  if ShouldValidate then
+  begin
+    var RegistryObj: TObject;
+    if FBuilder.Properties.TryGetValue(CConfigValidatorRegistryKey, RegistryObj) and
+       (RegistryObj is TConfigurationValidationRegistry) then
+    begin
+      var Registry := TConfigurationValidationRegistry(RegistryObj);
+      var Errors := TCollections.CreateList<string>;
+      try
+        for var Rule in Registry.GetRules do
+        begin
+          var Section := Result.GetSection(Rule.SectionPath);
+          var Msg := Rule.Validator(Section).Trim;
+          if Msg <> '' then
+            Errors.Add(Format('[%s] %s', [Rule.SectionPath, Msg]));
+        end;
+
+        if Errors.Count > 0 then
+        begin
+          var FullMessage := 'Configuration validation failed:' + sLineBreak;
+          for var I := 0 to Errors.Count - 1 do
+            FullMessage := FullMessage + Format('  %d) %s%s', [I + 1, Errors[I], sLineBreak]);
+          raise EConfigurationException.Create(FullMessage);
+        end;
+      finally
+        Errors := nil;
+      end;
+    end;
+  end;
 end;
 
 function TDextConfiguration.Unwrap: IConfigurationBuilder;
@@ -467,16 +750,82 @@ begin
   Result := FBuilder;
 end;
 
+function TDextConfiguration.ValidateOnBuild(AEnabled: Boolean): TDextConfiguration;
+var
+  FlagObj: TObject;
+  BoxObj: TBooleanBox;
+begin
+  if not FBuilder.Properties.TryGetValue(CConfigValidateOnBuildKey, FlagObj) or
+     not (FlagObj is TBooleanBox) then
+  begin
+    BoxObj := TBooleanBox.Create;
+    FBuilder.Properties.AddOrSetValue(CConfigValidateOnBuildKey, BoxObj);
+  end
+  else
+    BoxObj := TBooleanBox(FlagObj);
+
+  BoxObj.Value := AEnabled;
+  Result := Self;
+end;
+
+function TDextConfiguration.AddSectionValidator(const ASectionPath: string;
+  const AValidator: TConfigurationValidator): TDextConfiguration;
+var
+  RegistryObj: TObject;
+  Registry: TConfigurationValidationRegistry;
+begin
+  if not FBuilder.Properties.TryGetValue(CConfigValidatorRegistryKey, RegistryObj) or
+     not (RegistryObj is TConfigurationValidationRegistry) then
+  begin
+    Registry := TConfigurationValidationRegistry.Create;
+    FBuilder.Properties.AddOrSetValue(CConfigValidatorRegistryKey, Registry);
+  end
+  else
+    Registry := TConfigurationValidationRegistry(RegistryObj);
+
+  Registry.Add(ASectionPath, AValidator);
+  Result := Self;
+end;
+
+function TDextConfiguration.ReloadOnChange(AEnabled: Boolean; AIntervalMs: Integer): TDextConfiguration;
+var
+  ReloadObj: TObject;
+  ReloadBox: TBooleanBox;
+  IntervalObj: TObject;
+  IntervalBox: TIntBox;
+begin
+  if not FBuilder.Properties.TryGetValue(CConfigReloadOnChangeKey, ReloadObj) or
+     not (ReloadObj is TBooleanBox) then
+  begin
+    ReloadBox := TBooleanBox.Create;
+    FBuilder.Properties.AddOrSetValue(CConfigReloadOnChangeKey, ReloadBox);
+  end
+  else
+    ReloadBox := TBooleanBox(ReloadObj);
+  ReloadBox.Value := AEnabled;
+
+  if not FBuilder.Properties.TryGetValue(CConfigReloadIntervalKey, IntervalObj) or
+     not (IntervalObj is TIntBox) then
+  begin
+    IntervalBox := TIntBox.Create;
+    FBuilder.Properties.AddOrSetValue(CConfigReloadIntervalKey, IntervalBox);
+  end
+  else
+    IntervalBox := TIntBox(IntervalObj);
+
+  if AIntervalMs <= 0 then
+    AIntervalMs := 1000;
+  IntervalBox.Value := AIntervalMs;
+
+  Result := Self;
+end;
+
 { TMemoryConfigurationProvider }
 
 constructor TMemoryConfigurationProvider.Create(Data: IDictionary<string, string>);
 begin
   inherited Create;
-  if Data <> nil then
-  begin
-    for var Pair in Data do
-      FData.Add(Pair.Key, Pair.Value);
-  end;
+  FData := Data;
 end;
 
 procedure TMemoryConfigurationProvider.Load;

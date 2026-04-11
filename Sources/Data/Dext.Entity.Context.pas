@@ -29,6 +29,7 @@ interface
 
 uses
   System.SysUtils,
+  System.SyncObjs,
   Data.DB,
   System.TypInfo,
   System.Rtti,
@@ -196,7 +197,7 @@ type
     
   public
     class var FModelCache: IDictionary<TClass, TModelBuilder>;
-    class var FCriticalSection: TObject; // For thread safety
+    class var FModelLock: TLightweightMREW; // For thread safety (D.1)
     
     constructor Create(const AConnection: IDbConnection; const ADialect: ISQLDialect = nil; const ANamingStrategy: INamingStrategy = nil; const ATenantProvider: ITenantProvider = nil); overload;
     /// <summary>Initializes the context based on a configurable options object.</summary>
@@ -364,14 +365,13 @@ const
 class constructor TDbContext.Create;
 begin
   FModelCache := TCollections.CreateDictionary<TClass, TModelBuilder>(True);
-  FCriticalSection := TObject.Create;
+  // TLightweightMREW is a record
 end;
  
  class destructor TDbContext.Destroy;
- begin
-   FModelCache := nil;
-   FreeAndNil(FCriticalSection);
- end;
+begin
+  FModelCache := nil;
+end;
 
 constructor TDbContext.Create(const AConnection: IDbConnection; const ADialect: ISQLDialect; const ANamingStrategy: INamingStrategy; const ATenantProvider: ITenantProvider);
 begin
@@ -403,7 +403,18 @@ begin
   FProxies := TCollections.CreateList<TObject>(True);
   
   // Model Caching Logic
-  System.TMonitor.Enter(FCriticalSection);
+  FModelLock.BeginRead;
+  try
+    if FModelCache.TryGetValue(Self.ClassType, FModelBuilder) then
+    begin
+       FOwnsModelBuilder := False;
+       Exit; // FAST PATH
+    end;
+  finally
+    FModelLock.EndRead;
+  end;
+
+  FModelLock.BeginWrite;
   try
     if not FModelCache.TryGetValue(Self.ClassType, FModelBuilder) then
     begin
@@ -416,7 +427,7 @@ begin
     // We reuse the cached builder. Do NOT own it.
     FOwnsModelBuilder := False;
   finally
-    System.TMonitor.Exit(FCriticalSection);
+    FModelLock.EndWrite;
   end;
 
   PreloadDbSets;

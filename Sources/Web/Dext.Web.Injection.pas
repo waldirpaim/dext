@@ -30,7 +30,7 @@ interface
 
 uses
   System.Rtti, System.SysUtils, System.TypInfo,
-  Dext.Web.Interfaces, Dext.DI.Interfaces;
+  Dext.Web.Interfaces, Dext.DI.Interfaces, Dext.Core.Activator;
 
 type
   /// <summary>
@@ -54,36 +54,31 @@ var
   Arguments: TArray<TValue>;
   I: Integer;
 begin
-  Context := TRttiContext.Create;
-  try
-    // Get the anonymous method's 'Invoke' method via RTTI
-    Method := Context.GetType(AHandler.TypeInfo).GetMethod('Invoke');
+  Context := TActivator.GetRttiContext;
+  // Get the anonymous method's 'Invoke' method via RTTI
+  Method := Context.GetType(AHandler.TypeInfo).GetMethod('Invoke');
 
-    Parameters := Method.GetParameters;
-    SetLength(Arguments, Length(Parameters));
+  Parameters := Method.GetParameters;
+  SetLength(Arguments, Length(Parameters));
 
-    // The first parameter is always IHttpContext
-    Arguments[0] := TValue.From<IHttpContext>(AContext);
+  // The first parameter is always IHttpContext
+  Arguments[0] := TValue.From<IHttpContext>(AContext);
 
-    // Resolve additional parameters from the DI container
-    for I := 1 to High(Parameters) do
+  // Resolve additional parameters from the DI container
+  for I := 1 to High(Parameters) do
+  begin
+    var ParamType := Parameters[I].ParamType;
+    if ParamType.TypeKind = tkInterface then
     begin
-      var ParamType := Parameters[I].ParamType;
-      if ParamType.TypeKind = tkInterface then
-      begin
-        var Guid := GetTypeData(ParamType.Handle)^.Guid;
-        var Service := AServiceProvider.GetServiceAsInterface(
-          TServiceType.FromInterface(Guid));
-        Arguments[I] := TValue.From(Service);
-      end;
+      var Guid := GetTypeData(ParamType.Handle)^.Guid;
+      var Service := AServiceProvider.GetServiceAsInterface(
+        TServiceType.FromInterface(Guid));
+      Arguments[I] := TValue.From(Service);
     end;
-
-    // Execute the handler
-    Method.Invoke(AHandler, Arguments);
-
-  finally
-    Context.Free;
   end;
+
+  // Execute the handler
+  Method.Invoke(AHandler, Arguments);
 end;
 
 end.

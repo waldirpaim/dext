@@ -37,17 +37,21 @@ uses
   Dext.Json.Types;
 
 type
-  TJsonConfigurationProvider = class(TConfigurationProvider)
+  TJsonConfigurationProvider = class(TConfigurationProvider, IConfigurationChangeTracker)
   private
     FPath: string;
     FOptional: Boolean;
+    FReloadOnChange: Boolean;
+    FLastWriteUtc: TDateTime;
+    FResolvedPath: string;
     function ResolveFilePath: string;
+    function HasChanged: Boolean;
     
     procedure ProcessNode(const Prefix: string; Node: IDextJsonNode);
     procedure ProcessObject(const Prefix: string; Obj: IDextJsonObject);
     procedure ProcessArray(const Prefix: string; Arr: IDextJsonArray);
   public
-    constructor Create(const Path: string; Optional: Boolean);
+    constructor Create(const Path: string; Optional: Boolean; ReloadOnChange: Boolean = False);
     procedure Load; override;
   end;
 
@@ -55,8 +59,10 @@ type
   private
     FPath: string;
     FOptional: Boolean;
+    FReloadOnChange: Boolean;
   public
-    constructor Create(const Path: string; Optional: Boolean = False);
+    constructor Create(const Path: string; Optional: Boolean = False;
+      ReloadOnChange: Boolean = False);
     function Build(Builder: IConfigurationBuilder): IConfigurationProvider;
   end;
 
@@ -73,32 +79,39 @@ type
   /// </summary>
   TDextConfigurationJsonExtensions = record helper for TDextConfiguration
   public
-    function AddJsonFile(const Path: string; Optional: Boolean = False): TDextConfiguration;
+    function AddJsonFile(const Path: string; Optional: Boolean = False;
+      ReloadOnChange: Boolean = False): TDextConfiguration;
   end;
 
 implementation
 
 { TJsonConfigurationSource }
 
-constructor TJsonConfigurationSource.Create(const Path: string; Optional: Boolean);
+constructor TJsonConfigurationSource.Create(const Path: string; Optional: Boolean;
+  ReloadOnChange: Boolean);
 begin
   inherited Create;
   FPath := Path;
   FOptional := Optional;
+  FReloadOnChange := ReloadOnChange;
 end;
 
 function TJsonConfigurationSource.Build(Builder: IConfigurationBuilder): IConfigurationProvider;
 begin
-  Result := TJsonConfigurationProvider.Create(FPath, FOptional);
+  Result := TJsonConfigurationProvider.Create(FPath, FOptional, FReloadOnChange);
 end;
 
 { TJsonConfigurationProvider }
 
-constructor TJsonConfigurationProvider.Create(const Path: string; Optional: Boolean);
+constructor TJsonConfigurationProvider.Create(const Path: string; Optional: Boolean;
+  ReloadOnChange: Boolean);
 begin
   inherited Create;
   FPath := Path;
   FOptional := Optional;
+  FReloadOnChange := ReloadOnChange;
+  FLastWriteUtc := 0;
+  FResolvedPath := '';
 end;
 
 procedure TJsonConfigurationProvider.Load;
@@ -108,6 +121,7 @@ var
   ResolvedPath: string;
 begin
   ResolvedPath := ResolveFilePath;
+  FResolvedPath := ResolvedPath;
 
   if ResolvedPath = '' then
   begin
@@ -118,16 +132,44 @@ begin
 
   try
     JsonContent := TFile.ReadAllText(ResolvedPath, TEncoding.UTF8);
+    try
+      FLastWriteUtc := TFile.GetLastWriteTimeUtc(ResolvedPath);
+    except
+      FLastWriteUtc := 0;
+    end;
     if JsonContent.Trim = '' then
       Exit;
 
     RootNode := TDextJson.Provider.Parse(JsonContent);
-    
-    FData.Clear;
+
+    ClearData;
     ProcessNode('', RootNode);
   except
     on E: Exception do
       raise EConfigurationException.CreateFmt('Error loading JSON configuration from %s: %s', [FPath, E.Message]);
+  end;
+end;
+
+function TJsonConfigurationProvider.HasChanged: Boolean;
+var
+  CurrentWrite: TDateTime;
+  Path: string;
+begin
+  Result := False;
+  if not FReloadOnChange then
+    Exit;
+
+  Path := FResolvedPath;
+  if Path = '' then
+    Path := ResolveFilePath;
+  if (Path = '') or not FileExists(Path) then
+    Exit;
+
+  try
+    CurrentWrite := TFile.GetLastWriteTimeUtc(Path);
+    Result := (FLastWriteUtc > 0) and (CurrentWrite > FLastWriteUtc);
+  except
+    Result := False;
   end;
 end;
 
@@ -216,9 +258,10 @@ end;
 
 { TDextConfigurationJsonExtensions }
 
-function TDextConfigurationJsonExtensions.AddJsonFile(const Path: string; Optional: Boolean): TDextConfiguration;
+function TDextConfigurationJsonExtensions.AddJsonFile(const Path: string; Optional: Boolean;
+  ReloadOnChange: Boolean): TDextConfiguration;
 begin
-  Result := Add(TJsonConfigurationSource.Create(Path, Optional));
+  Result := Add(TJsonConfigurationSource.Create(Path, Optional, ReloadOnChange));
 end;
 
 end.

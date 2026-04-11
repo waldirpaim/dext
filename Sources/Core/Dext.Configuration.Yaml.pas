@@ -39,14 +39,19 @@ type
   /// <summary>
   ///   Configuration provider that reads from a YAML file.
   /// </summary>
-  TYamlConfigurationProvider = class(TConfigurationProvider)
+  TYamlConfigurationProvider = class(TConfigurationProvider, IConfigurationChangeTracker)
   private
     FPath: string;
     FOptional: Boolean;
+    FReloadOnChange: Boolean;
+    FLastWriteUtc: TDateTime;
+    FResolvedPath: string;
     function ResolveFilePath: string;
     procedure FlattenNode(Node: TYamlNode; const Prefix: string);
+    function HasChanged: Boolean;
   public
-    constructor Create(const Path: string; Optional: Boolean);
+    constructor Create(const Path: string; Optional: Boolean;
+      ReloadOnChange: Boolean = False);
     procedure Load; override;
   end;
 
@@ -57,8 +62,10 @@ type
   private
     FPath: string;
     FOptional: Boolean;
+    FReloadOnChange: Boolean;
   public
-    constructor Create(const Path: string; Optional: Boolean = False);
+    constructor Create(const Path: string; Optional: Boolean = False;
+      ReloadOnChange: Boolean = False);
     function Build(Builder: IConfigurationBuilder): IConfigurationProvider;
   end;
 
@@ -75,32 +82,39 @@ type
   /// </summary>
   TDextConfigurationYamlExtensions = record helper for TDextConfiguration
   public
-    function AddYamlFile(const Path: string; Optional: Boolean = False): TDextConfiguration;
+    function AddYamlFile(const Path: string; Optional: Boolean = False;
+      ReloadOnChange: Boolean = False): TDextConfiguration;
   end;
 
 implementation
 
 { TYamlConfigurationSource }
 
-constructor TYamlConfigurationSource.Create(const Path: string; Optional: Boolean);
+constructor TYamlConfigurationSource.Create(const Path: string; Optional: Boolean;
+  ReloadOnChange: Boolean);
 begin
   inherited Create;
   FPath := Path;
   FOptional := Optional;
+  FReloadOnChange := ReloadOnChange;
 end;
 
 function TYamlConfigurationSource.Build(Builder: IConfigurationBuilder): IConfigurationProvider;
 begin
-  Result := TYamlConfigurationProvider.Create(FPath, FOptional);
+  Result := TYamlConfigurationProvider.Create(FPath, FOptional, FReloadOnChange);
 end;
 
 { TYamlConfigurationProvider }
 
-constructor TYamlConfigurationProvider.Create(const Path: string; Optional: Boolean);
+constructor TYamlConfigurationProvider.Create(const Path: string; Optional: Boolean;
+  ReloadOnChange: Boolean);
 begin
   inherited Create;
   FPath := Path;
   FOptional := Optional;
+  FReloadOnChange := ReloadOnChange;
+  FLastWriteUtc := 0;
+  FResolvedPath := '';
 end;
 
 procedure TYamlConfigurationProvider.Load;
@@ -111,6 +125,7 @@ var
   ResolvedPath: string;
 begin
   ResolvedPath := ResolveFilePath;
+  FResolvedPath := ResolvedPath;
 
   if ResolvedPath = '' then
   begin
@@ -122,6 +137,11 @@ begin
 
   try
     Content := TFile.ReadAllText(ResolvedPath, TEncoding.UTF8);
+    try
+      FLastWriteUtc := TFile.GetLastWriteTimeUtc(ResolvedPath);
+    except
+      FLastWriteUtc := 0;
+    end;
   except
     on E: Exception do
       raise EConfigurationException.CreateFmt('Failed to read configuration file %s: %s', [FPath, E.Message]);
@@ -141,6 +161,29 @@ begin
     end;
   finally
     Parser.Free;
+  end;
+end;
+
+function TYamlConfigurationProvider.HasChanged: Boolean;
+var
+  CurrentWrite: TDateTime;
+  Path: string;
+begin
+  Result := False;
+  if not FReloadOnChange then
+    Exit;
+
+  Path := FResolvedPath;
+  if Path = '' then
+    Path := ResolveFilePath;
+  if (Path = '') or not FileExists(Path) then
+    Exit;
+
+  try
+    CurrentWrite := TFile.GetLastWriteTimeUtc(Path);
+    Result := (FLastWriteUtc > 0) and (CurrentWrite > FLastWriteUtc);
+  except
+    Result := False;
   end;
 end;
 
@@ -210,9 +253,10 @@ end;
 
 { TDextConfigurationYamlExtensions }
 
-function TDextConfigurationYamlExtensions.AddYamlFile(const Path: string; Optional: Boolean): TDextConfiguration;
+function TDextConfigurationYamlExtensions.AddYamlFile(const Path: string; Optional: Boolean;
+  ReloadOnChange: Boolean): TDextConfiguration;
 begin
-  Result := Add(TYamlConfigurationSource.Create(Path, Optional));
+  Result := Add(TYamlConfigurationSource.Create(Path, Optional, ReloadOnChange));
 end;
 
 end.

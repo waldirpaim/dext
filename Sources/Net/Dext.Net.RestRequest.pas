@@ -29,6 +29,7 @@ interface
 
 uses
   System.Classes,
+  System.IOUtils,
   System.NetEncoding,
   System.SysUtils,
   Dext.Threading.Async,
@@ -64,6 +65,18 @@ type
     function Body<T: class>(const ABody: T): TRestRequest; overload;
     /// <summary>Defines a raw JSON string as the request body.</summary>
     function JsonBody(const AJson: string): TRestRequest;
+    /// <summary>Adds a form field to a multipart/form-data payload.</summary>
+    function AddFormField(const AName, AValue: string): TRestRequest;
+    /// <summary>Adds a file (from disk path) to a multipart/form-data payload.</summary>
+    function AddFile(const AFieldName, AFilePath: string): TRestRequest; overload;
+    /// <summary>Adds a file (from disk path) with explicit content type.</summary>
+    function AddFile(const AFieldName, AFilePath, AContentType: string): TRestRequest; overload;
+    /// <summary>Adds a file from bytes to a multipart/form-data payload.</summary>
+    function AddFile(const AFieldName, AFileName: string; const AContent: TBytes;
+      const AContentType: string = 'application/octet-stream'): TRestRequest; overload;
+    /// <summary>Adds a file from stream to a multipart/form-data payload.</summary>
+    function AddFile(const AFieldName, AFileName: string; AStream: TStream;
+      AOwnsStream: Boolean = False; const AContentType: string = 'application/octet-stream'): TRestRequest; overload;
     /// <summary>Associates a cancellation token with the execution of this request.</summary>
     function Cancellation(AToken: ICancellationToken): TRestRequest;
 
@@ -87,9 +100,15 @@ type
     function GetBody: TStream;
     function GetToken: ICancellationToken;
     function GetOwnsBody: Boolean;
+    function HasMultipartData: Boolean;
+    function BuildMultipartBody: TStream;
+    function GetMultipartBoundary: string;
 
     procedure SetBody(ABody: TStream; AOwns: Boolean);
     procedure SetToken(AToken: ICancellationToken);
+    procedure AddMultipartField(const AName, AValue: string);
+    procedure AddMultipartFile(const AFieldName, AFileName: string; const AData: TBytes;
+      const AContentType: string);
     function DetachBody: TStream;
   end;
 
@@ -99,6 +118,33 @@ uses
   Dext.Json;
 
 type
+  TMultipartPartKind = (mpField, mpFile);
+
+  TMultipartPart = record
+    Kind: TMultipartPartKind;
+    Name: string;
+    Value: string;
+    FileName: string;
+    ContentType: string;
+    Data: TBytes;
+  end;
+
+  TMultipartFormDataBuilder = class
+  private
+    FBoundary: string;
+    FParts: IList<TMultipartPart>;
+    class function NewBoundary: string; static;
+    class procedure WriteUtf8(AStream: TStream; const AText: string); static;
+  public
+    constructor Create;
+    function HasParts: Boolean;
+    procedure AddField(const AName, AValue: string);
+    procedure AddFile(const AFieldName, AFileName: string; const AData: TBytes;
+      const AContentType: string);
+    function BuildBody: TStream;
+    property Boundary: string read FBoundary;
+  end;
+
   TRestRequestData = class(TInterfacedObject, IRestRequestData)
   private
     FClient: TRestClient;
@@ -109,6 +155,7 @@ type
     FBody: TStream;
     FToken: ICancellationToken;
     FOwnsBody: Boolean;
+    FMultipartBuilder: TMultipartFormDataBuilder;
   public
     constructor Create(AClient: TRestClient; AMethod: TDextHttpMethod; const AEndpoint: string);
     destructor Destroy; override;
@@ -121,11 +168,115 @@ type
     function GetBody: TStream;
     function GetToken: ICancellationToken;
     function GetOwnsBody: Boolean;
+    function HasMultipartData: Boolean;
+    function BuildMultipartBody: TStream;
+    function GetMultipartBoundary: string;
 
     procedure SetBody(ABody: TStream; AOwns: Boolean);
     procedure SetToken(AToken: ICancellationToken);
+    procedure AddMultipartField(const AName, AValue: string);
+    procedure AddMultipartFile(const AFieldName, AFileName: string; const AData: TBytes;
+      const AContentType: string);
     function DetachBody: TStream;
   end;
+
+{ TMultipartFormDataBuilder }
+
+constructor TMultipartFormDataBuilder.Create;
+begin
+  inherited Create;
+  FBoundary := NewBoundary;
+  FParts := TCollections.CreateList<TMultipartPart>;
+end;
+
+class function TMultipartFormDataBuilder.NewBoundary: string;
+var
+  G: TGUID;
+begin
+  CreateGUID(G);
+  Result := '----DextBoundary' + GUIDToString(G).Replace('{', '').Replace('}', '');
+end;
+
+class procedure TMultipartFormDataBuilder.WriteUtf8(AStream: TStream; const AText: string);
+var
+  B: TBytes;
+begin
+  B := TEncoding.UTF8.GetBytes(AText);
+  if Length(B) > 0 then
+    AStream.WriteBuffer(B[0], Length(B));
+end;
+
+function TMultipartFormDataBuilder.HasParts: Boolean;
+begin
+  Result := (FParts <> nil) and (FParts.Count > 0);
+end;
+
+procedure TMultipartFormDataBuilder.AddField(const AName, AValue: string);
+var
+  Part: TMultipartPart;
+begin
+  Part.Kind := mpField;
+  Part.Name := AName;
+  Part.Value := AValue;
+  Part.FileName := '';
+  Part.ContentType := '';
+  Part.Data := nil;
+  FParts.Add(Part);
+end;
+
+procedure TMultipartFormDataBuilder.AddFile(const AFieldName, AFileName: string;
+  const AData: TBytes; const AContentType: string);
+var
+  Part: TMultipartPart;
+begin
+  Part.Kind := mpFile;
+  Part.Name := AFieldName;
+  Part.Value := '';
+  Part.FileName := AFileName;
+  Part.ContentType := AContentType;
+  Part.Data := Copy(AData);
+  FParts.Add(Part);
+end;
+
+function TMultipartFormDataBuilder.BuildBody: TStream;
+var
+  Part: TMultipartPart;
+  BoundaryLine: string;
+  LContentType: string;
+begin
+  Result := TMemoryStream.Create;
+  BoundaryLine := '--' + FBoundary + #13#10;
+
+  for Part in FParts do
+  begin
+    WriteUtf8(Result, BoundaryLine);
+    case Part.Kind of
+      mpField:
+        begin
+          WriteUtf8(Result,
+            Format('Content-Disposition: form-data; name="%s"'#13#10#13#10,
+            [Part.Name]));
+          WriteUtf8(Result, Part.Value + #13#10);
+        end;
+      mpFile:
+        begin
+          LContentType := Part.ContentType;
+          if LContentType = '' then
+            LContentType := 'application/octet-stream';
+          WriteUtf8(Result,
+            Format('Content-Disposition: form-data; name="%s"; filename="%s"'#13#10,
+            [Part.Name, Part.FileName]));
+          WriteUtf8(Result, 'Content-Type: ' + LContentType + #13#10#13#10);
+          if Length(Part.Data) > 0 then
+            Result.WriteBuffer(Part.Data[0], Length(Part.Data));
+          WriteUtf8(Result, #13#10);
+        end;
+    end;
+  end;
+
+  WriteUtf8(Result, '--' + FBoundary + '--'#13#10);
+  Result.Position := 0;
+end;
 
   { TRestRequestData }
 
@@ -145,6 +296,7 @@ begin
   // FQueryParams is ARC
   if FOwnsBody then
     FBody.Free;
+  FMultipartBuilder.Free;
   inherited;
 end;
 
@@ -178,6 +330,26 @@ begin
   Result := FOwnsBody;
 end;
 
+function TRestRequestData.HasMultipartData: Boolean;
+begin
+  Result := (FMultipartBuilder <> nil) and FMultipartBuilder.HasParts;
+end;
+
+function TRestRequestData.BuildMultipartBody: TStream;
+begin
+  if not HasMultipartData then
+    Exit(nil);
+  Result := FMultipartBuilder.BuildBody;
+end;
+
+function TRestRequestData.GetMultipartBoundary: string;
+begin
+  if FMultipartBuilder <> nil then
+    Result := FMultipartBuilder.Boundary
+  else
+    Result := '';
+end;
+
 function TRestRequestData.GetQueryParams: IDictionary<string, string>;
 begin
   Result := FQueryParams;
@@ -194,11 +366,27 @@ begin
     FBody.Free;
   FBody := ABody;
   FOwnsBody := AOwns;
+  FreeAndNil(FMultipartBuilder);
 end;
 
 procedure TRestRequestData.SetToken(AToken: ICancellationToken);
 begin
   FToken := AToken;
+end;
+
+procedure TRestRequestData.AddMultipartField(const AName, AValue: string);
+begin
+  if FMultipartBuilder = nil then
+    FMultipartBuilder := TMultipartFormDataBuilder.Create;
+  FMultipartBuilder.AddField(AName, AValue);
+end;
+
+procedure TRestRequestData.AddMultipartFile(const AFieldName, AFileName: string;
+  const AData: TBytes; const AContentType: string);
+begin
+  if FMultipartBuilder = nil then
+    FMultipartBuilder := TMultipartFormDataBuilder.Create;
+  FMultipartBuilder.AddFile(AFieldName, AFileName, AData, AContentType);
 end;
 
 function TRestRequestData.DetachBody: TStream;
@@ -281,6 +469,59 @@ begin
   Result := Self;
 end;
 
+function TRestRequest.AddFormField(const AName, AValue: string): TRestRequest;
+begin
+  GetData.AddMultipartField(AName, AValue);
+  Result := Self;
+end;
+
+function TRestRequest.AddFile(const AFieldName, AFilePath: string): TRestRequest;
+begin
+  Result := AddFile(AFieldName, AFilePath, 'application/octet-stream');
+end;
+
+function TRestRequest.AddFile(const AFieldName, AFilePath, AContentType: string): TRestRequest;
+var
+  Bytes: TBytes;
+begin
+  Bytes := TFile.ReadAllBytes(AFilePath);
+  GetData.AddMultipartFile(AFieldName, TPath.GetFileName(AFilePath), Bytes, AContentType);
+  Result := Self;
+end;
+
+function TRestRequest.AddFile(const AFieldName, AFileName: string; const AContent: TBytes;
+  const AContentType: string): TRestRequest;
+begin
+  GetData.AddMultipartFile(AFieldName, AFileName, AContent, AContentType);
+  Result := Self;
+end;
+
+function TRestRequest.AddFile(const AFieldName, AFileName: string; AStream: TStream;
+  AOwnsStream: Boolean; const AContentType: string): TRestRequest;
+var
+  Bytes: TBytes;
+  OriginalPosition: Int64;
+begin
+  if AStream = nil then
+    raise EDextRestException.Create('AddFile stream cannot be nil');
+
+  OriginalPosition := AStream.Position;
+  try
+    AStream.Position := 0;
+    SetLength(Bytes, AStream.Size);
+    if AStream.Size > 0 then
+      AStream.ReadBuffer(Bytes[0], AStream.Size);
+  finally
+    if not AOwnsStream then
+      AStream.Position := OriginalPosition;
+    if AOwnsStream then
+      AStream.Free;
+  end;
+
+  GetData.AddMultipartFile(AFieldName, AFileName, Bytes, AContentType);
+  Result := Self;
+end;
+
 function TRestRequest.Cancellation(AToken: ICancellationToken): TRestRequest;
 begin
   GetData.SetToken(AToken);
@@ -292,12 +533,23 @@ begin
   var Data := GetData;
   var Client := Data.GetClient;
   var Body: TStream;
-  var OwnsBody := Data.GetOwnsBody;
+  var OwnsBody: Boolean;
 
-  if OwnsBody then
-    Body := Data.DetachBody
+  if Data.HasMultipartData then
+  begin
+    Body := Data.BuildMultipartBody;
+    OwnsBody := True;
+    Data.GetHeaders.AddOrSetValue('Content-Type',
+      'multipart/form-data; boundary=' + Data.GetMultipartBoundary);
+  end
   else
-    Body := Data.GetBody;
+  begin
+    OwnsBody := Data.GetOwnsBody;
+    if OwnsBody then
+      Body := Data.DetachBody
+    else
+      Body := Data.GetBody;
+  end;
 
   Result := Client.ExecuteAsync(Data.GetMethod, GetFullUrl, Body, OwnsBody,
     Data.GetHeaders);

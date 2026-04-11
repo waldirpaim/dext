@@ -27,6 +27,8 @@ type
     class function IndexOfInt32(Data: Pointer; Count: Integer; Value: Integer): Integer;
     /// <summary>Finds the index of a Byte value in a memory block using SIMD acceleration.</summary>
     class function IndexOfByte(Data: Pointer; Count: Integer; Value: Byte): Integer;
+    /// <summary>Compares two byte buffers for equality using SIMD acceleration when available.</summary>
+    class function EqualsBytes(Left, Right: Pointer; Count: Integer): Boolean;
   end;
 
 implementation
@@ -80,6 +82,64 @@ function HasAVX2: Boolean; begin Result := False; end;
 {$IF (defined(CPUX86) or defined(CPUX64)) and defined(MSWINDOWS)}
 
 {$IFDEF CPUX86}
+function EqualsBytes_SSE2_32(Left, Right: Pointer; Count: Integer): Boolean;
+asm
+  // EAX = Left, EDX = Right, ECX = Count
+  cmp eax, edx
+  je @True
+  test ecx, ecx
+  jle @True
+  test eax, eax
+  jz @False
+  test edx, edx
+  jz @False
+
+  push esi
+  push edi
+  mov esi, eax
+  mov edi, edx
+
+@VectorLoop:
+  cmp ecx, 16
+  jl @ScalarLoop
+
+  movdqu xmm0, [esi]
+  movdqu xmm1, [edi]
+  pcmpeqb xmm0, xmm1
+  pmovmskb eax, xmm0
+  cmp eax, 0FFFFh
+  jne @NoMatch
+
+  add esi, 16
+  add edi, 16
+  sub ecx, 16
+  jmp @VectorLoop
+
+@ScalarLoop:
+  test ecx, ecx
+  jz @Match
+  mov al, [esi]
+  cmp al, [edi]
+  jne @NoMatch
+  inc esi
+  inc edi
+  dec ecx
+  jmp @ScalarLoop
+
+@Match:
+  pop edi
+  pop esi
+@True:
+  mov eax, 1
+  ret
+
+@NoMatch:
+  pop edi
+  pop esi
+@False:
+  xor eax, eax
+end;
+
 function IndexOfInt32_SSE2_32(Data: Pointer; Count: Integer; Value: Integer): Integer;
 asm
   // EAX = Data, EDX = Count, ECX = Value
@@ -202,6 +262,52 @@ end;
 {$ENDIF}
 
 {$IFDEF CPUX64}
+function EqualsBytes_SSE2_64(Left, Right: Pointer; Count: Integer): Boolean;
+// RCX = Left, RDX = Right, R8D = Count
+asm
+  cmp rcx, rdx
+  je @True
+  test r8d, r8d
+  jle @True
+  test rcx, rcx
+  jz @False
+  test rdx, rdx
+  jz @False
+
+@VectorLoop:
+  cmp r8d, 16
+  jl @ScalarLoop
+
+  movdqu xmm0, [rcx]
+  movdqu xmm1, [rdx]
+  pcmpeqb xmm0, xmm1
+  pmovmskb eax, xmm0
+  cmp eax, 0FFFFh
+  jne @False
+
+  add rcx, 16
+  add rdx, 16
+  sub r8d, 16
+  jmp @VectorLoop
+
+@ScalarLoop:
+  test r8d, r8d
+  jz @True
+  mov al, [rcx]
+  cmp al, [rdx]
+  jne @False
+  inc rcx
+  inc rdx
+  dec r8d
+  jmp @ScalarLoop
+
+@True:
+  mov eax, 1
+  ret
+@False:
+  xor eax, eax
+end;
+
 function IndexOfInt32_SSE2_64(Data: Pointer; Count: Integer; Value: Integer): Integer;
 // RCX = Data, EDX = Count, R8D = Value
 asm
@@ -305,6 +411,30 @@ end;
 
 {$ENDIF}
 
+function EqualsBytes_Pascal(Left, Right: Pointer; Count: Integer): Boolean;
+var
+  L, R: PByte;
+  I: Integer;
+begin
+  if Left = Right then
+    Exit(True);
+  if Count <= 0 then
+    Exit(True);
+  if (Left = nil) or (Right = nil) then
+    Exit(False);
+
+  L := PByte(Left);
+  R := PByte(Right);
+  for I := 0 to Count - 1 do
+  begin
+    if L^ <> R^ then
+      Exit(False);
+    Inc(L);
+    Inc(R);
+  end;
+  Result := True;
+end;
+
 function IndexOfInt32_Pascal(Data: Pointer; Count: Integer; Value: Integer): Integer;
 var
   P: PInteger;
@@ -378,6 +508,28 @@ begin
   {$ENDIF}
   begin
     Result := IndexOfByte_Pascal(Data, Count, Value);
+  end;
+end;
+
+class function TDextSimd.EqualsBytes(Left, Right: Pointer; Count: Integer): Boolean;
+begin
+  {$IFDEF MSWINDOWS}
+  if FCapability >= scSSE2 then
+  begin
+    {$IFDEF CPUX64}
+    Result := EqualsBytes_SSE2_64(Left, Right, Count);
+    {$ELSE}
+    {$IFDEF CPUX86}
+    Result := EqualsBytes_SSE2_32(Left, Right, Count);
+    {$ELSE}
+    Result := EqualsBytes_Pascal(Left, Right, Count);
+    {$ENDIF}
+    {$ENDIF}
+  end
+  else
+  {$ENDIF}
+  begin
+    Result := EqualsBytes_Pascal(Left, Right, Count);
   end;
 end;
 

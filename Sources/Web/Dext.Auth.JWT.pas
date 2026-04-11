@@ -181,6 +181,7 @@ type
     FAudience: string;
     FExpirationMinutes: Integer;
     FBase64: TBase64Encoding;
+    class function ToBase64Url(const ABase64: string): string; static;
 
     function Base64UrlEncode(const AInput: string): string;
     function Base64UrlDecode(const AInput: string): string;
@@ -244,17 +245,42 @@ begin
   FBase64 := TBase64Encoding.Create(0);
 end;
 
+class function TJwtTokenHandler.ToBase64Url(const ABase64: string): string;
+var
+  I, J, L: Integer;
+begin
+  L := Length(ABase64);
+  SetLength(Result, L);
+  J := 1;
+  for I := 1 to L do
+  begin
+    case ABase64[I] of
+      '+':
+        begin
+          Result[J] := '-';
+          Inc(J);
+        end;
+      '/':
+        begin
+          Result[J] := '_';
+          Inc(J);
+        end;
+      '=':
+        ; // skip padding in URL-safe format
+    else
+      Result[J] := ABase64[I];
+      Inc(J);
+    end;
+  end;
+  SetLength(Result, J - 1);
+end;
+
 function TJwtTokenHandler.Base64UrlEncode(const AInput: string): string;
 var
   Bytes: TBytes;
 begin
   Bytes := TEncoding.UTF8.GetBytes(AInput);
-  Result := FBase64.EncodeBytesToString(Bytes);
-  
-  // Convert to Base64URL format
-  Result := Result.Replace('+', '-', [rfReplaceAll]);
-  Result := Result.Replace('/', '_', [rfReplaceAll]);
-  Result := Result.Replace('=', '', [rfReplaceAll]);
+  Result := ToBase64Url(FBase64.EncodeBytesToString(Bytes));
 end;
 
 function TJwtTokenHandler.Base64UrlDecode(const AInput: string): string;
@@ -313,10 +339,7 @@ begin
   end;
   {$ENDIF}
     
-  // Convert to Base64URL format
-  Result := Base64Hash.Replace('+', '-', [rfReplaceAll]);
-  Result := Result.Replace('/', '_', [rfReplaceAll]);
-  Result := Result.Replace('=', '', [rfReplaceAll]);
+  Result := ToBase64Url(Base64Hash);
 end;
 
 destructor TJwtTokenHandler.Destroy;
@@ -645,7 +668,6 @@ begin
 end;
 
 end.
-
 
 
 

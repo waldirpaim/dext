@@ -208,6 +208,11 @@ type
     function GetBindingName(Param: TRttiParameter): string; overload;
   end;
 
+/// <summary>
+///   Returns a per-thread shared RTTI context for high-frequency web binding paths.
+/// </summary>
+function GetWebSharedRttiContext: TRttiContext;
+
 implementation
 
 uses
@@ -216,7 +221,13 @@ uses
   Dext.Core.DateUtils,
   Dext.Core.Span,
   Dext.Entity.Attributes,
-  Dext.Json.Utf8.Serializer;
+  Dext.Json.Utf8.Serializer,
+  Dext.Core.Activator;
+
+function GetWebSharedRttiContext: TRttiContext;
+begin
+  Result := TActivator.GetRttiContext;
+end;
 
 { BindingAttribute }
 
@@ -422,7 +433,7 @@ begin
   if (AType.Kind <> tkRecord) and (AType.Kind <> tkClass) then
     raise EBindingException.Create('BindQuery currently only supports records and classes');
 
-  ContextRtti := TRttiContext.Create;
+  ContextRtti := GetWebSharedRttiContext;
   try
     RttiType := ContextRtti.GetType(AType);
     QueryParams := Context.Request.Query;
@@ -493,7 +504,7 @@ begin
     end;
 
   finally
-    ContextRtti.Free;
+  ;
   end;
 end;
 
@@ -515,7 +526,7 @@ var
   FieldValue: string;
   SingleParamValue: string;
 begin
-  // ✅ SUPPORT FOR PRIMITIVES (Single Route Param Inference)
+  // âœ… SUPPORT FOR PRIMITIVES (Single Route Param Inference)
   if (AType.Kind in [tkInteger, tkInt64, tkFloat, tkString, tkLString, tkWString, tkUString, tkEnumeration]) or
      ((AType.Kind = tkRecord) and ((AType = TypeInfo(TGUID)) or (AType = TypeInfo(TUUID)))) then
   begin
@@ -542,7 +553,7 @@ begin
 
   TValue.Make(nil, AType, Result);
 
-  ContextRtti := TRttiContext.Create;
+  ContextRtti := GetWebSharedRttiContext;
   try
     RttiType := ContextRtti.GetType(AType);
     RouteParams := Context.Request.RouteParams;
@@ -565,7 +576,7 @@ begin
     end;
 
   finally
-    ContextRtti.Free;
+  ;
   end;
 end;
 
@@ -589,7 +600,7 @@ begin
 
   TValue.Make(nil, AType, Result);
 
-  ContextRtti := TRttiContext.Create;
+  ContextRtti := GetWebSharedRttiContext;
   try
     RttiType := ContextRtti.GetType(AType);
     Headers := Context.Request.Headers;
@@ -612,7 +623,7 @@ begin
           except
             on E: Exception do
             begin
-              SafeWriteln(Format('⚠️ BindHeader warning: Error converting field "%s" value "%s": %s',
+              SafeWriteln(Format('âš ï¸ BindHeader warning: Error converting field "%s" value "%s": %s',
                 [FieldName, FieldValue, E.Message]));
             end;
           end; // try
@@ -623,7 +634,7 @@ begin
     end;
 
   finally
-    ContextRtti.Free;
+  ;
   end;
 end;
 
@@ -807,7 +818,7 @@ begin
   if (AType.Kind <> tkRecord) and (AType.Kind <> tkInterface) and (AType.Kind <> tkClass) then
     raise EBindingException.Create('BindServices currently only supports records, classes or interfaces');
 
-  ContextRtti := TRttiContext.Create;
+  ContextRtti := GetWebSharedRttiContext;
   try
     Services := Context.GetServices;
     
@@ -912,7 +923,7 @@ begin
       end;
     end;
   finally
-    ContextRtti.Free;
+  ;
   end;
 end;
 
@@ -939,7 +950,7 @@ begin
   TValue.Make(nil, AType, Result);
   BodyJsonObj := nil;
 
-  ContextRtti := TRttiContext.Create;
+  ContextRtti := GetWebSharedRttiContext;
   try
     RttiType := ContextRtti.GetType(AType);
     SourceProvider := TBindingSourceProvider.Create;
@@ -1153,7 +1164,7 @@ begin
       SourceProvider.Free;
     end;
   finally
-    ContextRtti.Free;
+  ;
   end;
 end;
 

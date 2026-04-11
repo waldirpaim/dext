@@ -225,7 +225,7 @@ begin
        if TValue.From<T>(Result).AsObject <> nil then
        begin
          var IsEntity := False;
-         var CtxRtti := TRttiContext.Create;
+         var CtxRtti := GetWebSharedRttiContext;
          try
            var Typ := CtxRtti.GetType(TypeInfo(T));
            if Typ <> nil then
@@ -237,7 +237,7 @@ begin
              end;
            end;
          finally
-           CtxRtti.Free;
+         ;
          end;
 
          if not IsEntity then
@@ -531,6 +531,4 @@ begin
 end;
 
 end.
-
-
 

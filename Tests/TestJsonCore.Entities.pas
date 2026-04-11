@@ -25,6 +25,8 @@ type
   end;
   {$M-}
   TPosts = class(TList<TPost>, IPosts)
+  public
+    constructor Create;
   end;
 
   TThreadContent = class
@@ -63,6 +65,8 @@ type
   ['{EFB6D27D-E6E2-4B9D-9414-B61B1CC18D20}']
   end;
   TEntityWithUUIDList = class(TList<TEntityWithUUID>, IEntityWithUUIDList)
+  public
+    constructor Create;
   end;
   {$M-}
 
@@ -81,6 +85,20 @@ end;
 procedure TThreadContent.SetPosts(const Value: IPosts);
 begin
   FInternalPosts := Value;
+end;
+
+{ TPosts }
+
+constructor TPosts.Create;
+begin
+  inherited Create(True);
+end;
+
+{ TEntityWithUUIDList }
+
+constructor TEntityWithUUIDList.Create;
+begin
+  inherited Create(True);
 end;
 
 initialization

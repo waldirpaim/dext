@@ -29,7 +29,10 @@ interface
 
 uses
   System.SysUtils,
-  System.SyncObjs;
+  System.TypInfo,
+  System.Rtti,
+  System.SyncObjs,
+  Dext.Events.Interfaces;
 
 type
   /// <summary>Defines the high-level application lifecycle states.</summary>
@@ -47,6 +50,19 @@ type
     /// <summary>Application completely stopped.</summary>
     asStopped
   );
+
+  /// <summary>
+  ///   Event published via IEventBus on each application state transition.
+  ///   Subscribe with IEventHandler<TAppStateChangedEvent> for decoupled monitoring.
+  /// </summary>
+  TAppStateChangedEvent = record
+    /// <summary>The state before the transition.</summary>
+    PreviousState: TApplicationState;
+    /// <summary>The new state after the transition.</summary>
+    NewState: TApplicationState;
+    /// <summary>Timestamp of the transition (UTC).</summary>
+    Timestamp: TDateTime;
+  end;
 
   /// <summary>Read-only interface for observing current application state.</summary>
   IAppStateObserver = interface
@@ -72,8 +88,12 @@ type
   private
     FState: TApplicationState;
     FLock: TCriticalSection;
+    FEventBus: IEventBus;
+    procedure PublishStateEvent(APrevious, ANew: TApplicationState);
   public
-    constructor Create;
+    constructor Create; overload;
+    /// <summary>Creates the manager with an event bus for publishing state transitions.</summary>
+    constructor Create(const AEventBus: IEventBus); overload;
     destructor Destroy; override;
 
     function GetState: TApplicationState;
@@ -83,17 +103,27 @@ type
 
 implementation
 
+uses
+  System.DateUtils;
+
 { TApplicationStateManager }
 
 constructor TApplicationStateManager.Create;
 begin
   inherited;
   FLock := TCriticalSection.Create;
-  FState := asStarting; // Default state
+  FState := asStarting;
+end;
+
+constructor TApplicationStateManager.Create(const AEventBus: IEventBus);
+begin
+  Create;
+  FEventBus := AEventBus;
 end;
 
 destructor TApplicationStateManager.Destroy;
 begin
+  FEventBus := nil;
   FLock.Free;
   inherited;
 end;
@@ -113,15 +143,39 @@ begin
   Result := GetState = asRunning;
 end;
 
+procedure TApplicationStateManager.PublishStateEvent(APrevious, ANew: TApplicationState);
+var
+  Event: TAppStateChangedEvent;
+  EventValue: TValue;
+begin
+  if not Assigned(FEventBus) then
+    Exit;
+  try
+    Event.PreviousState := APrevious;
+    Event.NewState := ANew;
+    Event.Timestamp := TTimeZone.Local.ToUniversalTime(Now);
+    TValue.Make(@Event, TypeInfo(TAppStateChangedEvent), EventValue);
+    FEventBus.Dispatch(TypeInfo(TAppStateChangedEvent), EventValue);
+  except
+    // State events are best-effort — never block state transitions
+  end;
+end;
+
 procedure TApplicationStateManager.SetState(AState: TApplicationState);
+var
+  Previous: TApplicationState;
 begin
   FLock.Enter;
   try
+    Previous := FState;
     FState := AState;
-    // We could trigger events here if needed in the future
   finally
     FLock.Leave;
   end;
+
+  // Publish outside lock to avoid deadlocks with event handlers
+  if Previous <> AState then
+    PublishStateEvent(Previous, AState);
 end;
 
 end.

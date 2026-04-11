@@ -13,6 +13,7 @@ uses
   Dext.Entity.Core,
   Dext.Entity.DbSet,
   Dext.Entity.Dialects,
+  Dext.Entity.LazyLoader,
   Dext.Entity.Drivers.Interfaces,
   Dext.Entity.Mapping,
   Dext.Entity.TypeConverters,
@@ -26,12 +27,11 @@ type
   /// </summary>
   TLazyProxyInterceptor = class(TInterfacedObject, IInterceptor)
   private
-    FContext: TObject; // Stored as object to avoid interface refcounting issues, cast to TDbContext in implementation
+    FLoader: ILazyLoader;
     FPropName: string;
     FLoaded: Boolean;
-    FValue: TValue;
   public
-    constructor Create(AContext: IDbContext; const APropName: string);
+    constructor Create(const ALoader: ILazyLoader; const APropName: string);
     procedure Intercept(const Invocation: IInvocation);
   end;
 
@@ -40,7 +40,13 @@ type
   /// </summary>
   TEntityProxyFactory = class
   public
-    class function CreateInstance<T: class>(AContext: IDbContext): T; static;
+    class function CreateInstance<T: class>(AContext: IDbContext): T; overload;
+    class function CreateInstance<T: class>(ALoader: ILazyLoader): T; overload;
+    /// <summary>
+    ///  Creates a TClassProxy for an entity using a manual Loader.
+    ///  NOTE: Caller is responsible for freeing the Proxy object (which frees the Instance if OwnsInstance is True).
+    /// </summary>
+    class function CreateProxyObject<T: class>(ALoader: ILazyLoader): TClassProxy; static;
     class function NeedsProxy(AParam: PTypeInfo; AContext: IDbContext): Boolean; static;
   end;
 
@@ -49,157 +55,98 @@ implementation
 uses
   Dext.Entity.Context;
 
+threadvar
+  GInsideIntercept: Boolean;
+
 { TLazyProxyInterceptor }
 
-constructor TLazyProxyInterceptor.Create(AContext: IDbContext; const APropName: string);
+constructor TLazyProxyInterceptor.Create(const ALoader: ILazyLoader; const APropName: string);
 begin
   inherited Create;
-  FContext := TObject(AContext);
+  FLoader := ALoader;
   FPropName := APropName;
   FLoaded := False;
 end;
 
 procedure TLazyProxyInterceptor.Intercept(const Invocation: IInvocation);
 var
-  Ctx: TRttiContext;
-  Prop, FKProp: TRttiProperty;
-  Map: TEntityMap;
-  PropMap, PMap: TPropertyMap;
-  FKVal: TValue;
-  TargetSet: IDbSet;
-  LoadedObj: TObject;
-  FKName, PKCol, PKVal: string;
   Instance: TObject;
-  PropField: TRttiField;
-  DBVal, ExistingVal: TValue;
-  Dialect: ISQLDialect;
-  SQL: string;
-  Cmd: IDbCommand;
+  Ctx: TRttiContext;
+  RType: TRttiType;
+  RField: TRttiField;
+
+  function GetBackingField(AType: TRttiType; const APropName: string): TRttiField;
+  begin
+    Result := AType.GetField('F' + APropName);
+    if Result = nil then
+      Result := AType.GetField(APropName);
+  end;
+
 begin
+  Instance := Invocation.Target.AsObject;
+  if Instance = nil then
+  begin
+    Invocation.Proceed;
+    Exit;
+  end;
+
+  if GInsideIntercept then
+  begin
+    // If we are already intercepting, it means Invocation.Proceed is causing recursion.
+    // In this case, we MUST access the field directly to break the loop.
+    Ctx := TRttiContext.Create;
+    try
+      RType := Ctx.GetType(Instance.ClassType);
+      if RType <> nil then
+      begin
+        RField := GetBackingField(RType, FPropName);
+        if RField <> nil then
+        begin
+          if SameText(Invocation.Method.Name, 'Get' + FPropName) or 
+             SameText(Invocation.Method.Name, FPropName) then
+            Invocation.Result := RField.GetValue(Instance)
+          else if SameText(Invocation.Method.Name, 'Set' + FPropName) and (Length(Invocation.Arguments) > 0) then
+            RField.SetValue(Instance, Invocation.Arguments[0]);
+        end;
+      end;
+    finally
+      Ctx.Free;
+    end;
+    Exit;
+  end;
+
   if SameText(Invocation.Method.Name, 'Get' + FPropName) or 
      SameText(Invocation.Method.Name, FPropName) then
   begin
-    if not FLoaded then
-    begin
-      Instance := Invocation.Target.AsObject;
-      if Instance = nil then Exit;
+    GInsideIntercept := True;
+    try
+      if not FLoaded then
+      begin
+        FLoaded := True;
+        if FLoader <> nil then
+          FLoader.Load(Instance, FPropName);
+      end;
 
+      // Access the field directly. This is safer and faster for Lazy properties.
       Ctx := TRttiContext.Create;
       try
-        Map := TEntityMap(TDbContext(FContext).GetMapping(Instance.ClassInfo));
-        if (Map <> nil) and Map.Properties.TryGetValue(FPropName, PropMap) then
+        RType := Ctx.GetType(Instance.ClassType);
+        if RType <> nil then
         begin
-          var RType := Ctx.GetType(Map.EntityType);
-          Prop := RType.GetProperty(FPropName);
-          
-          PropField := RType.GetField(PropMap.FieldName);
-          if PropField = nil then PropField := RType.GetField(TReflection.NormalizeFieldName(FPropName));
-
-          if PropMap.IsNavigation then
-          begin
-            FKName := PropMap.ForeignKeyColumn;
-            if FKName = '' then FKName := FPropName + 'Id';
-            
-            FKProp := RType.GetProperty(FKName);
-            if FKProp <> nil then
-            begin
-              FKVal := FKProp.GetValue(Instance);
-              if not FKVal.IsEmpty then
-              begin
-                TargetSet := TDbContext(FContext).DataSet(Prop.PropertyType.Handle);
-                LoadedObj := TargetSet.FindObject(FKVal.AsVariant);
-                if LoadedObj <> nil then
-                  FValue := TValue.From(LoadedObj);
-              end;
-            end;
-          end
+          RField := GetBackingField(RType, FPropName);
+          if RField <> nil then
+            Invocation.Result := RField.GetValue(Instance)
           else
-          begin
-            TargetSet := TDbContext(FContext).DataSet(Map.EntityType);
-            if TargetSet <> nil then
-            begin
-              PKVal := TargetSet.GetEntityId(Instance);
-              if PKVal <> '' then
-              begin
-                Dialect := TDbContext(FContext).Dialect;
-                PKCol := '';
-                for PMap in Map.Properties.Values do
-                  if PMap.IsPK then
-                  begin
-                    PKCol := PMap.ColumnName;
-                    if PKCol = '' then PKCol := PMap.PropertyName;
-                    Break;
-                  end;
-
-                if PKCol <> '' then
-                begin
-                  SQL := Format('SELECT %s FROM %s WHERE %s = :p1', 
-                    [Dialect.QuoteIdentifier(PropMap.ColumnName), 
-                     Dialect.QuoteIdentifier(Map.TableName),
-                     Dialect.QuoteIdentifier(PKCol)]);
-                      
-                  Cmd := TDbContext(FContext).Connection.CreateCommand(SQL);
-                  Cmd.AddParam('p1', PKVal);
-                  DBVal := Cmd.ExecuteScalar;
-                  
-                  ExistingVal := TValue.Empty;
-                  if PropField <> nil then 
-                    ExistingVal := PropField.GetValue(Instance)
-                  else
-                    ExistingVal := Prop.GetValue(Instance);
-
-                  if not DBVal.IsEmpty then
-                  begin
-                  if ExistingVal.IsObject and (ExistingVal.AsObject is TStrings) then
-                  begin
-                    TStrings(ExistingVal.AsObject).Text := DBVal.ToString;
-                    FValue := ExistingVal;
-                  end
-                  else if Prop.PropertyType.IsInstance then
-                  begin
-                    // Use TActivator to create a concrete instance (e.g. TStrings -> TStringList)
-                    var NewObj := TActivator.CreateInstance(Prop.PropertyType.AsInstance.MetaclassType, []);
-                    if NewObj is TStrings then
-                      TStrings(NewObj).Text := DBVal.ToString;
-                    
-                    FValue := NewObj;
-                    
-                    if PropField <> nil then
-                      PropField.SetValue(Instance, FValue)
-                    else
-                      TReflection.SetValue(Pointer(Instance), Prop, FValue);
-                  end
-                  else
-                  begin
-                    if PropMap.Converter <> nil then
-                      FValue := PropMap.Converter.FromDatabase(DBVal, Prop.PropertyType.Handle)
-                    else
-                      FValue := DBVal;
-                    
-                    if PropField <> nil then
-                      PropField.SetValue(Instance, FValue)
-                    else
-                      TReflection.SetValue(Pointer(Instance), Prop, FValue);
-                  end;
-                  end
-                  else
-                  begin
-                    if ExistingVal.IsObject and (ExistingVal.AsObject is TStrings) then
-                      FValue := ExistingVal
-                    else
-                      FValue := TValue.Empty;
-                  end;
-                end;
-              end;
-            end;
-          end;
-        end;
+            Invocation.Proceed; // Fallback
+        end
+        else
+          Invocation.Proceed;
       finally
         Ctx.Free;
       end;
-      FLoaded := True;
+    finally
+      GInsideIntercept := False;
     end;
-    Invocation.Result := FValue;
   end
   else
     Invocation.Proceed;
@@ -218,6 +165,9 @@ begin
   Result := False;
   Map := TEntityMap(AContext.GetMapping(AParam));
   if Map = nil then Exit;
+  
+  // Explicitly marked as Proxy, or ANY property is lazy
+  if Map.IsProxy then Exit(True);
   
   Ctx := TRttiContext.Create;
   try
@@ -239,6 +189,53 @@ begin
   end;
 end;
 
+class function TEntityProxyFactory.CreateInstance<T>(ALoader: ILazyLoader): T;
+var
+  Proxy: TClassProxy;
+begin
+  Proxy := CreateProxyObject<T>(ALoader);
+  if Proxy <> nil then
+    Result := T(Proxy.Instance)
+  else
+    Result := T(TActivator.CreateInstance(TClass(T), []));
+end;
+
+class function TEntityProxyFactory.CreateProxyObject<T>(ALoader: ILazyLoader): TClassProxy;
+var
+  Interceptors: IList<IInterceptor>;
+  Map: TEntityMap;
+  Prop: TPropertyMap;
+  Ctx: TRttiContext;
+  RType: TRttiType;
+  RProp: TRttiProperty;
+begin
+  Map := TModelBuilder.Instance.GetMap(TypeInfo(T));
+  if Map = nil then
+    Exit(nil);
+
+  Interceptors := TCollections.CreateList<IInterceptor>;
+  Ctx := TRttiContext.Create;
+  try
+    RType := Ctx.GetType(TypeInfo(T));
+    for Prop in Map.Properties.Values do
+    begin
+      if Prop.IsLazy then
+      begin
+        RProp := RType.GetProperty(Prop.PropertyName);
+        if (RProp <> nil) and (not RProp.PropertyType.Name.StartsWith('Lazy<')) then
+          Interceptors.Add(TLazyProxyInterceptor.Create(ALoader, Prop.PropertyName));
+      end;
+    end;
+  finally
+    Ctx.Free;
+  end;
+  
+  if Interceptors.Count = 0 then
+    Exit(nil);
+
+  Result := TClassProxy.Create(TClass(T), Interceptors.ToArray, True);
+end;
+
 class function TEntityProxyFactory.CreateInstance<T>(AContext: IDbContext): T;
 var
   Interceptors: IList<IInterceptor>;
@@ -248,12 +245,14 @@ var
   Ctx: TRttiContext;
   RType: TRttiType;
   RProp: TRttiProperty;
+  Loader: ILazyLoader;
 begin
   if not NeedsProxy(TypeInfo(T), AContext) then
     Exit(T(TActivator.CreateInstance(TClass(T), [])));
 
   Map := TEntityMap(AContext.GetMapping(TypeInfo(T)));
   Interceptors := TCollections.CreateList<IInterceptor>;
+  Loader := TDextLazyLoader.Create(AContext);
   
   Ctx := TRttiContext.Create;
   try
@@ -265,7 +264,7 @@ begin
         RProp := RType.GetProperty(Prop.PropertyName);
         // Only add proxy interceptor if NOT a Lazy<T> record
         if (RProp <> nil) and (not RProp.PropertyType.Name.StartsWith('Lazy<')) then
-          Interceptors.Add(TLazyProxyInterceptor.Create(AContext, Prop.PropertyName));
+          Interceptors.Add(TLazyProxyInterceptor.Create(Loader, Prop.PropertyName));
       end;
     end;
   finally

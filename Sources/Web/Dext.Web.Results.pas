@@ -39,7 +39,8 @@ uses
   Dext.Web.View,
   Dext.Entity.Core,
   Dext.Entity.Query,
-  Dext.Json;
+  Dext.Json,
+  Dext.Core.Activator;
 
 type
   /// <summary>
@@ -233,19 +234,12 @@ implementation
 { TOutputFormatterContext }
 
 constructor TOutputFormatterContext.Create(const AContext: IHttpContext; ATypeInfo: Pointer; const AObject: TValue);
-var
-  Ctx: TRttiContext;
 begin
   inherited Create;
   FContext := AContext;
-  // Use stack-local TRttiContext to avoid holding a reference to the global RTTI pool.
-  // The TRttiType pointer remains valid as long as the pool exists.
-  Ctx := TRttiContext.Create;
-  try
-    FObjectType := Ctx.GetType(ATypeInfo);
-  finally
-    Ctx.Free;
-  end;
+  // Use the global RTTI context from TActivator to ensure efficient type lookups.
+  FObjectType := TActivator.GetRttiContext.GetType(ATypeInfo);
+  FObject := AObject;
   FObject := AObject;
 end;
 

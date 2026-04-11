@@ -31,10 +31,7 @@ package Dext.Core;
 
 requires
   rtl,
-  dbrtl,
-  IndySystem,
-  IndyProtocols,
-  IndyCore;
+  dbrtl;
 
 contains
   Dext.Core.Activator in 'Core\Base\Dext.Core.Activator.pas',
@@ -44,7 +41,6 @@ contains
   Dext.Utils in 'Core\Base\Dext.Utils.pas',
   Dext.Types.Nullable in 'Core\Base\Dext.Types.Nullable.pas',
   Dext.Types.Lazy in 'Core\Base\Dext.Types.Lazy.pas',
-  Dext.Core.Extensions in 'Core\Base\Dext.Core.Extensions.pas',
   Dext.Json.Driver.DextJsonDataObjects in 'Core\Json\Dext.Json.Driver.DextJsonDataObjects.pas',
   Dext.Json.Driver.SystemJson in 'Core\Json\Dext.Json.Driver.SystemJson.pas',
   DextJsonDataObjects in 'Core\Json\DextJsonDataObjects.pas',
@@ -87,6 +83,7 @@ contains
   Dext.MultiTenancy in 'Core\Dext.MultiTenancy.pas',
   Dext.Hosting.AppState in 'Core\Dext.Hosting.AppState.pas',
   Dext.Hosting.BackgroundService in 'Core\Dext.Hosting.BackgroundService.pas',
+  Dext.Hosting.Events in 'Core\Dext.Hosting.Events.pas',
   Dext.Hosting.ApplicationLifetime in 'Core\Dext.Hosting.ApplicationLifetime.pas',
   Dext.MM in 'Core\Dext.MM.pas',
   Dext.Core.Span in 'Core\Base\Dext.Core.Span.pas',
@@ -121,7 +118,10 @@ contains
   Dext.Collections.Stack in 'Core\Dext.Collections.Stack.pas',
   Dext.Logging.Extensions in 'Core\Dext.Logging.Extensions.pas',
   Dext.Core.Enums in 'Core\Dext.Core.Enums.pas',
-  Dext.Core.Debug in 'Debug\Dext.Core.Debug.pas';
+  Dext.Core.Debug in 'Debug\Dext.Core.Debug.pas',
+  Dext.Templating in 'Core\Base\Dext.Templating.pas',
+  Dext.Events.Interfaces in 'Events\Dext.Events.Interfaces.pas',
+  Dext.Text.Escaping in 'Core\Base\Dext.Text.Escaping.pas';
 
 end.
 

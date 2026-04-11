@@ -159,8 +159,7 @@ begin
       end;
 
       // 2. Whitelist from each registered TDbContext's ModelBuilder
-      if Assigned(TDbContext.FCriticalSection) then
-        System.TMonitor.Enter(TDbContext.FCriticalSection);
+      TDbContext.FModelLock.BeginRead;
       try
         if Assigned(TDbContext.FModelCache) then
         begin
@@ -178,8 +177,7 @@ begin
           end;
         end;
       finally
-        if Assigned(TDbContext.FCriticalSection) then
-          System.TMonitor.Exit(TDbContext.FCriticalSection);
+        TDbContext.FModelLock.EndRead;
       end;
     finally
       Ctx.Free;

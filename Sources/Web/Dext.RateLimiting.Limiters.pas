@@ -53,6 +53,9 @@ type
     FWindowSeconds: Integer;
     FEntries: IDictionary<string, TWindowEntry>;
     FLock: TCriticalSection;
+    FCleanupKeys: TArray<string>;
+    FCleanupCursor: Integer;
+    FCleanupBatchSize: Integer;
   public
     constructor Create(APermitLimit, AWindowSeconds: Integer);
     destructor Destroy; override;
@@ -78,6 +81,9 @@ type
     FWindowSeconds: Integer;
     FEntries: IDictionary<string, TRequestList>;
     FLock: TCriticalSection;
+    FCleanupKeys: TArray<string>;
+    FCleanupCursor: Integer;
+    FCleanupBatchSize: Integer;
   public
     constructor Create(APermitLimit, AWindowSeconds: Integer);
     destructor Destroy; override;
@@ -103,6 +109,9 @@ type
     FRefillRate: Integer;  // Tokens per second
     FEntries: IDictionary<string, TBucketEntry>;
     FLock: TCriticalSection;
+    FCleanupKeys: TArray<string>;
+    FCleanupCursor: Integer;
+    FCleanupBatchSize: Integer;
     
     procedure RefillTokens(var AEntry: TBucketEntry);
   public
@@ -143,6 +152,9 @@ begin
   FWindowSeconds := AWindowSeconds;
   FEntries := TCollections.CreateDictionary<string, TWindowEntry>;
   FLock := TCriticalSection.Create;
+  FCleanupCursor := 0;
+  FCleanupBatchSize := 128;
+  FCleanupKeys := nil;
 end;
 
 destructor TFixedWindowLimiter.Destroy;
@@ -196,6 +208,8 @@ begin
       Entry.RequestCount := 1;
       Entry.WindowStart := Now;
       FEntries.Add(APartitionKey, Entry);
+      FCleanupKeys := nil;
+      FCleanupCursor := 0;
       Result := TRateLimitResult.Allow(FPermitLimit - Entry.RequestCount, FPermitLimit);
     end;
   finally
@@ -211,26 +225,40 @@ end;
 procedure TFixedWindowLimiter.Cleanup;
 var
   Now: TDateTime;
-  KeysToRemove: IList<string>;
+  Checked: Integer;
   Key: string;
   Entry: TWindowEntry;
 begin
   FLock.Enter;
   try
     Now := System.SysUtils.Now;
-    KeysToRemove := TCollections.CreateList<string>;
-    try
-      for Key in FEntries.Keys do
+
+    if Length(FCleanupKeys) = 0 then
+    begin
+      FCleanupKeys := FEntries.Keys;
+      FCleanupCursor := 0;
+      if Length(FCleanupKeys) = 0 then
+        Exit;
+    end;
+
+    Checked := 0;
+    while (Checked < FCleanupBatchSize) and (FCleanupCursor < Length(FCleanupKeys)) do
+    begin
+      Key := FCleanupKeys[FCleanupCursor];
+      Inc(FCleanupCursor);
+      Inc(Checked);
+
+      if FEntries.TryGetValue(Key, Entry) then
       begin
-        Entry := FEntries[Key];
         if SecondsBetween(Now, Entry.WindowStart) > FWindowSeconds * 2 then
-          KeysToRemove.Add(Key);
+          FEntries.Remove(Key);
       end;
-      
-      for Key in KeysToRemove do
-        FEntries.Remove(Key);
-    finally
-      // KeysToRemove is ARC
+    end;
+
+    if FCleanupCursor >= Length(FCleanupKeys) then
+    begin
+      FCleanupKeys := nil;
+      FCleanupCursor := 0;
     end;
   finally
     FLock.Leave;
@@ -246,6 +274,9 @@ begin
   FWindowSeconds := AWindowSeconds;
   FEntries := TCollections.CreateDictionary<string, TRequestList>;
   FLock := TCriticalSection.Create;
+  FCleanupCursor := 0;
+  FCleanupBatchSize := 128;
+  FCleanupKeys := nil;
 end;
 
 destructor TSlidingWindowLimiter.Destroy;
@@ -273,6 +304,8 @@ begin
     begin
       RequestList := TCollections.CreateList<TRequestTimestamp>;
       FEntries.Add(APartitionKey, RequestList);
+      FCleanupKeys := nil;
+      FCleanupCursor := 0;
     end;
     
     // Remove expired requests
@@ -313,7 +346,7 @@ procedure TSlidingWindowLimiter.Cleanup;
 var
   Now: TDateTime;
   WindowStart: TDateTime;
-  KeysToRemove: IList<string>;
+  Checked: Integer;
   Key: string;
   RequestList: TRequestList;
 begin
@@ -321,19 +354,33 @@ begin
   try
     Now := System.SysUtils.Now;
     WindowStart := IncSecond(Now, -FWindowSeconds * 2);
-    KeysToRemove := TCollections.CreateList<string>;
-    try
-      for Key in FEntries.Keys do
+
+    if Length(FCleanupKeys) = 0 then
+    begin
+      FCleanupKeys := FEntries.Keys;
+      FCleanupCursor := 0;
+      if Length(FCleanupKeys) = 0 then
+        Exit;
+    end;
+
+    Checked := 0;
+    while (Checked < FCleanupBatchSize) and (FCleanupCursor < Length(FCleanupKeys)) do
+    begin
+      Key := FCleanupKeys[FCleanupCursor];
+      Inc(FCleanupCursor);
+      Inc(Checked);
+
+      if FEntries.TryGetValue(Key, RequestList) then
       begin
-        RequestList := FEntries[Key];
         if (RequestList.Count = 0) or (RequestList[RequestList.Count - 1].Timestamp < WindowStart) then
-          KeysToRemove.Add(Key);
+          FEntries.Remove(Key);
       end;
-      
-      for Key in KeysToRemove do
-        FEntries.Remove(Key);
-    finally
-      // KeysToRemove is ARC
+    end;
+
+    if FCleanupCursor >= Length(FCleanupKeys) then
+    begin
+      FCleanupKeys := nil;
+      FCleanupCursor := 0;
     end;
   finally
     FLock.Leave;
@@ -349,6 +396,9 @@ begin
   FRefillRate := ARefillRate;
   FEntries := TCollections.CreateDictionary<string, TBucketEntry>;
   FLock := TCriticalSection.Create;
+  FCleanupCursor := 0;
+  FCleanupBatchSize := 128;
+  FCleanupKeys := nil;
 end;
 
 destructor TTokenBucketLimiter.Destroy;
@@ -387,6 +437,8 @@ begin
       // Initialize new bucket
       Entry.Tokens := FTokenLimit;
       Entry.LastRefill := System.SysUtils.Now;
+      FCleanupKeys := nil;
+      FCleanupCursor := 0;
     end;
     
     if Entry.Tokens >= 1.0 then
@@ -414,26 +466,40 @@ end;
 procedure TTokenBucketLimiter.Cleanup;
 var
   Now: TDateTime;
-  KeysToRemove: IList<string>;
+  Checked: Integer;
   Key: string;
   Entry: TBucketEntry;
 begin
   FLock.Enter;
   try
     Now := System.SysUtils.Now;
-    KeysToRemove := TCollections.CreateList<string>;
-    try
-      for Key in FEntries.Keys do
+
+    if Length(FCleanupKeys) = 0 then
+    begin
+      FCleanupKeys := FEntries.Keys;
+      FCleanupCursor := 0;
+      if Length(FCleanupKeys) = 0 then
+        Exit;
+    end;
+
+    Checked := 0;
+    while (Checked < FCleanupBatchSize) and (FCleanupCursor < Length(FCleanupKeys)) do
+    begin
+      Key := FCleanupKeys[FCleanupCursor];
+      Inc(FCleanupCursor);
+      Inc(Checked);
+
+      if FEntries.TryGetValue(Key, Entry) then
       begin
-        Entry := FEntries[Key];
         if SecondsBetween(Now, Entry.LastRefill) > 3600 then  // 1 hour idle
-          KeysToRemove.Add(Key);
+          FEntries.Remove(Key);
       end;
-      
-      for Key in KeysToRemove do
-        FEntries.Remove(Key);
-    finally
-      // KeysToRemove is ARC
+    end;
+
+    if FCleanupCursor >= Length(FCleanupKeys) then
+    begin
+      FCleanupKeys := nil;
+      FCleanupCursor := 0;
     end;
   finally
     FLock.Leave;

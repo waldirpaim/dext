@@ -29,6 +29,7 @@ interface
 
 uses
   System.SysUtils,
+  System.TypInfo,
   Dext.Configuration.Interfaces,
   Dext.Configuration.Binder;
 
@@ -59,7 +60,9 @@ type
   /// </summary>
   TOptionsFactory = class
   public
-    class function Create<T: class, constructor>(Configuration: IConfiguration): IOptions<T>;
+    class function Create<T: class, constructor>(Configuration: IConfiguration): IOptions<T>; overload;
+    class function Create<T: class, constructor>(Configuration: IConfiguration;
+      const Validator: TFunc<T, string>): IOptions<T>; overload;
   end;
 
 implementation
@@ -90,6 +93,27 @@ var
   Value: T;
 begin
   Value := TConfigurationBinder.Bind<T>(Configuration);
+  Result := TOptions<T>.Create(Value);
+end;
+
+class function TOptionsFactory.Create<T>(Configuration: IConfiguration;
+  const Validator: TFunc<T, string>): IOptions<T>;
+var
+  Value: T;
+  Error: string;
+begin
+  Value := TConfigurationBinder.Bind<T>(Configuration);
+  if Assigned(Validator) then
+  begin
+    Error := Validator(Value);
+    if Error.Trim <> '' then
+    begin
+      Value.Free;
+      raise EConfigurationException.CreateFmt(
+        'Options validation failed for %s: %s',
+        [String(PTypeInfo(TypeInfo(T)).Name), Error]);
+    end;
+  end;
   Result := TOptions<T>.Create(Value);
 end;
 

@@ -87,6 +87,14 @@ type
   end;
 
   /// <summary>
+  ///   Optional capability for providers that can detect source changes.
+  /// </summary>
+  IConfigurationChangeTracker = interface
+    ['{8E0D2D9B-6F57-4F2C-8F4A-0FD0F3B0E9E1}']
+    function HasChanged: Boolean;
+  end;
+
+  /// <summary>
   ///   Represents a source of configuration key/values for an application.
   /// </summary>
   IConfigurationSource = interface

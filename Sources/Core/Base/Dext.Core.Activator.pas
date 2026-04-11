@@ -73,7 +73,10 @@ type
     class function GetDictionaryKeyType(AType: PTypeInfo): PTypeInfo;
     /// <summary>Gets the Value type of a dictionary.</summary>
     class function GetDictionaryValueType(AType: PTypeInfo): PTypeInfo;
+    /// <summary>Returns the global shared RTTI context.</summary>
+    class function GetRttiContext: TRttiContext;
   private
+    class var FRttiContext: TRttiContext;
     class var FDefaultImplementations: IDictionary<TClass, TClass>;
     class var FInterfaceDefaultImpl: IDictionary<PTypeInfo, TClass>;
     class constructor Create;
@@ -91,6 +94,7 @@ uses
 
 class constructor TActivator.Create;
 begin
+  FRttiContext := TRttiContext.Create;
   FDefaultImplementations := TCollections.CreateDictionary<TClass, TClass>;
   FInterfaceDefaultImpl := TCollections.CreateDictionary<PTypeInfo, TClass>;
   // Default framework mappings
@@ -99,8 +103,14 @@ end;
 
 class destructor TActivator.Destroy;
 begin
+  FRttiContext.Free;
   FDefaultImplementations := nil;
   FInterfaceDefaultImpl := nil;
+end;
+
+class function TActivator.GetRttiContext: TRttiContext;
+begin
+  Result := FRttiContext;
 end;
 
 class procedure TActivator.RegisterDefault(ABase: TClass; AImpl: TClass);
@@ -245,7 +255,7 @@ var
 begin
   TargetClass := ResolveImplementation(AClass);
   BestMethod := nil;
-  Context := TRttiContext.Create;
+  Context := GetRttiContext;
   try
     TypeObj := Context.GetType(TargetClass);
     if TypeObj = nil then
@@ -323,7 +333,7 @@ begin
 
     raise EArgumentException.CreateFmt('No compatible constructor found for class %s', [AClass.ClassName]);
   finally
-    Context.Free;
+  ;
   end;
 end;
 
@@ -347,7 +357,7 @@ var
   TargetClass: TClass;
 begin
   TargetClass := ResolveImplementation(AClass);
-  Context := TRttiContext.Create;
+  Context := GetRttiContext;
   try
     TypeObj := Context.GetType(TargetClass);
     if TypeObj = nil then
@@ -444,7 +454,7 @@ begin
       raise EArgumentException.CreateFmt('TActivator: No satisfiable constructor found for %s. Check if all dependencies are registered.', [AClass.ClassName]);
     end;
   finally
-    Context.Free;
+  ;
   end;
 end;
 
@@ -466,7 +476,7 @@ begin
   if Length(AArgs) = 0 then
     Exit(CreateInstance(AProvider, TargetClass));
 
-  Context := TRttiContext.Create;
+  Context := GetRttiContext;
   try
     TypeObj := Context.GetType(TargetClass);
     if TypeObj = nil then
@@ -514,7 +524,7 @@ begin
 
     raise EArgumentException.CreateFmt('No compatible constructor found for %s using Hybrid Injection', [AClass.ClassName]);
   finally
-    Context.Free;
+  ;
   end;
 end;
 
@@ -534,7 +544,7 @@ begin
 
   if AType.Kind = tkInterface then
   begin
-    Context := TRttiContext.Create;
+    Context := GetRttiContext;
     try
       RttiType := Context.GetType(AType);
       
@@ -709,7 +719,7 @@ begin
       raise EArgumentException.CreateFmt('TActivator: Cannot find a suitable implementation for interface %s. ' +
         'Ensure the implementation is registered in DI or use TArray<T> for automatic RTTI support in DTOs.', [AType.NameFld.ToString]);
     finally
-      Context.Free;
+    ;
     end;
   end;
 
@@ -736,7 +746,7 @@ begin
 
   if (AType.Kind = tkClass) or (AType.Kind = tkInterface) then
   begin
-    Ctx := TRttiContext.Create;
+    Ctx := GetRttiContext;
     try
       RttiType := Ctx.GetType(AType);
       
@@ -769,7 +779,7 @@ begin
             Exit(True);
       end;
     finally
-      Ctx.Free;
+    ;
     end;
   end;
 end;
@@ -801,7 +811,7 @@ var
 
 begin
   Result := nil;
-  Context := TRttiContext.Create;
+  Context := GetRttiContext;
   try
     RttiType := Context.GetType(AType);
     if RttiType = nil then Exit;
@@ -828,7 +838,7 @@ begin
       end;
     end;
   finally
-    Context.Free;
+  ;
   end;
 end;
 
@@ -850,7 +860,7 @@ var
 
 begin
   Result := nil;
-  Context := TRttiContext.Create;
+  Context := GetRttiContext;
   try
     RttiType := Context.GetType(AType);
     if RttiType = nil then Exit;
@@ -877,7 +887,7 @@ begin
       end;
     end;
   finally
-    Context.Free;
+  ;
   end;
 end;
 
@@ -912,7 +922,7 @@ var
 
 begin
   Result := nil;
-  Context := TRttiContext.Create;
+  Context := GetRttiContext;
   try
     RttiType := Context.GetType(AType);
     if RttiType = nil then Exit;
@@ -939,7 +949,7 @@ begin
       end;
     end;
   finally
-    Context.Free;
+  ;
   end;
 end;
 
@@ -953,7 +963,7 @@ var
   Ctx: TRttiContext;
   TypeObj: TRttiType;
 begin
-  Ctx := TRttiContext.Create;
+  Ctx := GetRttiContext;
   try
     var TI := TypeInfo(T);
     if TI = nil then
@@ -965,7 +975,7 @@ begin
     else
       raise EArgumentException.Create('Type parameter T must be a class type');
   finally
-    Ctx.Free;
+  ;
   end;
 end;
 

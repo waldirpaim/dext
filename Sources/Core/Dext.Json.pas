@@ -321,7 +321,7 @@ type
     function ToIndentedString: string;
     
     /// <summary>Creates a new JSON builder instance.</summary>
-    class function New: TJsonBuilder;
+    class function NewBuilder: TJsonBuilder;
   end;
 
 /// <summary>
@@ -1519,39 +1519,8 @@ begin
 end;
 
 function TDextSerializer.GetListElementType(AType: PTypeInfo): PTypeInfo;
-var
-  Context: TRttiContext;
-  RttiType: TRttiType;
-  Method: TRttiMethod;
-  Prop: TRttiProperty;
 begin
-  Context := TRttiContext.Create;
-  try
-    RttiType := Context.GetType(AType);
-    
-    // Try GetItem method (indexer getter)
-    Method := RttiType.GetMethod('GetItem');
-    if Assigned(Method) and (Method.MethodKind = mkFunction) and (Length(Method.GetParameters) = 1) then
-      Exit(Method.ReturnType.Handle);
-
-    // Try Add method (collection addition)
-    for Method in RttiType.GetMethods do
-    begin
-      if (Method.Name = 'Add') and (Length(Method.GetParameters) = 1) then
-      begin
-        Exit(Method.GetParameters[0].ParamType.Handle);
-      end;
-    end;
-    
-    // Try Items property
-    Prop := RttiType.GetProperty('Items');
-    if Assigned(Prop) then
-      Exit(Prop.PropertyType.Handle);
-
-    Result := nil;
-  finally
-    Context.Free;
-  end;
+  Result := TActivator.GetListElementType(AType);
 end;
 
 procedure TDextSerializer.Populate(AInstance: TObject; const AJson: string);
@@ -1986,45 +1955,96 @@ var
   Count: Integer;
   I: Integer;
   ElementValue: TValue;
-  Context: TRttiContext;
   RttiType: TRttiType;
   IntfValue: IInterface;
-  CountMethod: TRttiMethod;
-  GetItemMethod: TRttiMethod;
+  CountMethod, GetItemMethod: TRttiMethod;
+  CountProp: TRttiProperty;
+  Instance: TObject;
 begin
   Result := TDextJson.Provider.CreateArray;
-  
   if AValue.IsEmpty then Exit;
 
-  Context := TRttiContext.Create;
-  try
-    RttiType := Context.GetType(AValue.TypeInfo);
+  RttiType := TActivator.GetRttiContext.GetType(AValue.TypeInfo);
+  
+  // For interfaces, we need to get the interface value
+  if AValue.Kind = tkInterface then
+  begin
+    IntfValue := AValue.AsInterface;
+    if IntfValue = nil then Exit;
     
-    // For interfaces, we need to get the interface value
-    if AValue.Kind = tkInterface then
+    // Try to get Count via GetCount method instead of property
+    CountMethod := RttiType.GetMethod('GetCount');
+    if not Assigned(CountMethod) then Exit;
+    
+    Count := CountMethod.Invoke(AValue, []).AsInteger;
+    
+    // Get the GetItem method
+    GetItemMethod := RttiType.GetMethod('GetItem');
+    if not Assigned(GetItemMethod) then Exit;
+    
+    for I := 0 to Count - 1 do
     begin
-      IntfValue := AValue.AsInterface;
-      if IntfValue = nil then Exit;
+      ElementValue := GetItemMethod.Invoke(AValue, [I]);
       
-      // Try to get Count via GetCount method instead of property
-      CountMethod := RttiType.GetMethod('GetCount');
-      if not Assigned(CountMethod) then Exit;
-      
-      Count := CountMethod.Invoke(AValue, []).AsInteger;
-      
-      // Get the GetItem method
-      GetItemMethod := RttiType.GetMethod('GetItem');
-      if not Assigned(GetItemMethod) then Exit;
-      
+      if ElementValue.IsEmpty then
+      begin
+        Result.AddNull;
+        Continue;
+      end;
+
+      case ElementValue.TypeInfo.Kind of
+        tkRecord:
+          if ElementValue.TypeInfo = TypeInfo(TGUID) then
+            Result.Add(GUIDToString(ElementValue.AsType<TGUID>))
+          else if ElementValue.TypeInfo = TypeInfo(TUUID) then
+            Result.Add(ElementValue.AsType<TUUID>.ToString)
+          else
+            Result.Add(SerializeRecord(ElementValue));
+        tkClass:
+          begin
+            if ElementValue.AsObject = nil then
+              Result.AddNull
+            else
+              Result.Add(SerializeObject(ElementValue));
+          end;
+        tkDynArray:
+          Result.Add(SerializeArray(ElementValue));
+        tkInteger, tkInt64:
+          Result.Add(ElementValue.AsInt64);
+        tkFloat:
+          Result.Add(ElementValue.AsExtended);
+        tkString, tkLString, tkWString, tkUString:
+          Result.Add(ElementValue.AsString);
+        tkEnumeration:
+          if ElementValue.TypeInfo = TypeInfo(Boolean) then
+            Result.Add(ElementValue.AsBoolean)
+          else
+            Result.Add(GetEnumName(ElementValue.TypeInfo, ElementValue.AsOrdinal));
+      else
+        Result.AddNull;
+      end;
+    end;
+  end
+  else if AValue.Kind = tkClass then
+  begin
+    // For classes, use the original RTTI approach
+    Instance := AValue.AsObject;
+    if Instance = nil then Exit;
+    
+    CountProp := RttiType.GetProperty('Count');
+    if not Assigned(CountProp) then Exit;
+    
+    Count := CountProp.GetValue(Instance).AsInteger;
+    
+    GetItemMethod := RttiType.GetMethod('GetItem');
+    if not Assigned(GetItemMethod) then
+      GetItemMethod := RttiType.GetMethod('Items');
+    
+    if Assigned(GetItemMethod) then
+    begin
       for I := 0 to Count - 1 do
       begin
-        ElementValue := GetItemMethod.Invoke(AValue, [I]);
-        
-        if ElementValue.IsEmpty then
-        begin
-          Result.AddNull;
-          Continue;
-        end;
+        ElementValue := GetItemMethod.Invoke(Instance, [I]);
 
         case ElementValue.TypeInfo.Kind of
           tkRecord:
@@ -2058,64 +2078,7 @@ begin
           Result.AddNull;
         end;
       end;
-    end
-    else if AValue.Kind = tkClass then
-    begin
-      // For classes, use the original RTTI approach
-      var Instance := AValue.AsObject;
-      if Instance = nil then Exit;
-      
-      var CountProp := RttiType.GetProperty('Count');
-      if not Assigned(CountProp) then Exit;
-      
-      Count := CountProp.GetValue(Instance).AsInteger;
-      
-      GetItemMethod := RttiType.GetMethod('GetItem');
-      if not Assigned(GetItemMethod) then
-        GetItemMethod := RttiType.GetMethod('Items');
-      
-      if Assigned(GetItemMethod) then
-      begin
-        for I := 0 to Count - 1 do
-        begin
-          ElementValue := GetItemMethod.Invoke(Instance, [I]);
-
-          case ElementValue.TypeInfo.Kind of
-            tkRecord:
-              if ElementValue.TypeInfo = TypeInfo(TGUID) then
-                Result.Add(GUIDToString(ElementValue.AsType<TGUID>))
-              else if ElementValue.TypeInfo = TypeInfo(TUUID) then
-                Result.Add(ElementValue.AsType<TUUID>.ToString)
-              else
-                Result.Add(SerializeRecord(ElementValue));
-            tkClass:
-              begin
-                if ElementValue.AsObject = nil then
-                  Result.AddNull
-                else
-                  Result.Add(SerializeObject(ElementValue));
-              end;
-            tkDynArray:
-              Result.Add(SerializeArray(ElementValue));
-            tkInteger, tkInt64:
-              Result.Add(ElementValue.AsInt64);
-            tkFloat:
-              Result.Add(ElementValue.AsExtended);
-            tkString, tkLString, tkWString, tkUString:
-              Result.Add(ElementValue.AsString);
-            tkEnumeration:
-              if ElementValue.TypeInfo = TypeInfo(Boolean) then
-                Result.Add(ElementValue.AsBoolean)
-              else
-                Result.Add(GetEnumName(ElementValue.TypeInfo, ElementValue.AsOrdinal));
-          else
-            Result.AddNull;
-          end;
-        end;
-      end;
     end;
-  finally
-    Context.Free;
   end;
 end;
 
@@ -2149,12 +2112,6 @@ begin
   FNodeStack := nil;
   inherited;
 end;
-
-class function TJsonBuilder.New: TJsonBuilder;
-begin
-  Result := TJsonBuilder.Create;
-end;
-
 function TJsonBuilder.GetCurrentObject: IDextJsonObject;
 begin
   if FCurrent.NodeType = ntObject then
@@ -2283,6 +2240,11 @@ end;
 function TJsonBuilder.ToIndentedString: string;
 begin
   Result := FRoot.JsonObj.ToJson(True);
+end;
+
+class function TJsonBuilder.NewBuilder: TJsonBuilder;
+begin
+  Result := TJsonBuilder.Create;
 end;
 
 initialization

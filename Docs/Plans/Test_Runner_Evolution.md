@@ -4,7 +4,6 @@ This document summarizes the technical challenges, architectural decisions, and 
 
 ## 1. Context & Challenges
 The integration with TestInsight allowed the Dext framework to be usable directly from the Delphi IDE. However, it revealed several "friction points" in how modern IDE test plugins communicate with external runners.
-
 ### Key Learnings:
 *   **IPC Overhead**: Individual test reporting via IPC (Inter-Process Communication) is extremely slow when scaled. For a suite of ~100 tests, reporting skipped tests individually added **11 seconds** to execution time, while the test logic itself ran in **22ms**.
 *   **Visual State Persistence**: IDE plugins often maintain a "cache" of previous results. If a runner doesn't explicitly clear or report all tests, the UI might show stale "Green" or "Red" states for tests that didn't run.
@@ -59,3 +58,9 @@ In the .NET world (VSTest/NUnit), execution is bound to a **Session ID**.
 
 > [!TIP]
 > **Performance over Perfection**: In Developer Tools, a delay of >1s for a single test execution is considered a failure. Always prioritize the "Instant Feedback Loop" (TDD) even if it means some visual state in the IDE is not perfectly synchronized.
+
+---
+
+More...
+
+Test Insight, Drop Down com todos os projetos de testes disponíveis no workspace

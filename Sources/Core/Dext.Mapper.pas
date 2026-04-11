@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework - AutoMapper                                     }
 {                                                                           }
@@ -217,7 +217,7 @@ var
   RttiType: TRttiType;
   Value: TValue;
 begin
-  Ctx := TRttiContext.Create;
+  Ctx := TActivator.GetRttiContext;
   try
     RttiType := Ctx.GetType(TypeInfo(TDest));
     if RttiType.IsInstance then
@@ -228,7 +228,7 @@ begin
     else
       Result := Default(TDest);
   finally
-    Ctx.Free;
+    // No Free here, using centralized context
   end;
   Map<TSource, TDest>(Source, Result, AOnlyNonDefault);
 end;
@@ -248,7 +248,7 @@ var
 begin
   Config := nil;
 
-  Ctx := TRttiContext.Create;
+  Ctx := TActivator.GetRttiContext;
   try
     SourceType := Ctx.GetType(TypeInfo(TSource));
     DestType := Ctx.GetType(TypeInfo(TDest));
@@ -385,7 +385,7 @@ begin
       end;
     end;
   finally
-    Ctx.Free;
+    // No Free here, using centralized context
   end;
 end;
 

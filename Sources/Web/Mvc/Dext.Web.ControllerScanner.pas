@@ -70,7 +70,6 @@ type
 
   TControllerScanner = class(TInterfacedObject, IControllerScanner)
   private
-    FCtx: TRttiContext;
     FCachedMethods: IList<TCachedMethod>;
     procedure ExecuteCachedMethod(Context: IHttpContext; const CachedMethod: TCachedMethod);
     function CreateHandler(const AMethod: TCachedMethod): TRequestDelegate;
@@ -86,16 +85,16 @@ implementation
 
 uses
   Dext.Auth.Attributes,
-  Dext.Web.ModelBinding,
+  Dext.Core.Activator,
+  Dext.Utils,
   Dext.Web.HandlerInvoker,
-  Dext.Utils;
+  Dext.Web.ModelBinding;
 
 { TControllerScanner }
 
 constructor TControllerScanner.Create;
 begin
   inherited Create;
-  FCtx := TRttiContext.Create;
   FCachedMethods := TCollections.CreateList<TCachedMethod>;
 end;
 
@@ -111,7 +110,7 @@ var
 begin
   Controllers := TCollections.CreateList<TControllerInfo>;
   try
-    Types := FCtx.GetTypes;
+    Types := TActivator.GetRttiContext.GetTypes;
 
     SafeWriteLn('🔍 ' + Format('Scanning %d types...', [Length(Types)]));
 
@@ -493,7 +492,6 @@ end;
 
 destructor TControllerScanner.Destroy;
 begin
-  FCtx.Free;
   inherited;
 end;
 
@@ -527,10 +525,9 @@ begin
     end;
   end;
 
-  // Use the scanner's FCtx instead of creating a new TRttiContext per request.
-  // This avoids creating/freeing RTTI pool references on every request.
+  // Use the global context via TActivator to avoid per-thread pool overhead.
     // RE-ACQUIRE TYPE AT RUNTIME
-    ControllerType := FCtx.FindType(CachedMethod.TypeName);
+    ControllerType := TActivator.GetRttiContext.FindType(CachedMethod.TypeName);
     if ControllerType = nil then
     begin
       SafeWriteLn('❌ Controller type not found: ' + CachedMethod.TypeName);

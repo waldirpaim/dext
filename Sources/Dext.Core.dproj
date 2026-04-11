@@ -107,9 +107,6 @@ $(PreBuildEvent)]]></PreBuildEvent>
         </DelphiCompile>
         <DCCReference Include="rtl.dcp"/>
         <DCCReference Include="dbrtl.dcp"/>
-        <DCCReference Include="IndySystem.dcp"/>
-        <DCCReference Include="IndyProtocols.dcp"/>
-        <DCCReference Include="IndyCore.dcp"/>
         <DCCReference Include="Core\Base\Dext.Core.Activator.pas"/>
         <DCCReference Include="Core\Base\Dext.Core.Memory.pas"/>
         <DCCReference Include="Core\Dext.Threading.CancellationToken.pas"/>
@@ -117,7 +114,6 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <DCCReference Include="Core\Base\Dext.Utils.pas"/>
         <DCCReference Include="Core\Base\Dext.Types.Nullable.pas"/>
         <DCCReference Include="Core\Base\Dext.Types.Lazy.pas"/>
-        <DCCReference Include="Core\Base\Dext.Core.Extensions.pas"/>
         <DCCReference Include="Core\Json\Dext.Json.Driver.DextJsonDataObjects.pas"/>
         <DCCReference Include="Core\Json\Dext.Json.Driver.SystemJson.pas"/>
         <DCCReference Include="Core\Json\DextJsonDataObjects.pas"/>
@@ -160,6 +156,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <DCCReference Include="Core\Dext.MultiTenancy.pas"/>
         <DCCReference Include="Core\Dext.Hosting.AppState.pas"/>
         <DCCReference Include="Core\Dext.Hosting.BackgroundService.pas"/>
+        <DCCReference Include="Core\Dext.Hosting.Events.pas"/>
         <DCCReference Include="Core\Dext.Hosting.ApplicationLifetime.pas"/>
         <DCCReference Include="Core\Dext.MM.pas"/>
         <DCCReference Include="Core\Base\Dext.Core.Span.pas"/>
@@ -195,6 +192,9 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <DCCReference Include="Core\Dext.Logging.Extensions.pas"/>
         <DCCReference Include="Core\Dext.Core.Enums.pas"/>
         <DCCReference Include="Debug\Dext.Core.Debug.pas"/>
+        <DCCReference Include="Core\Base\Dext.Templating.pas"/>
+        <DCCReference Include="Events\Dext.Events.Interfaces.pas"/>
+        <DCCReference Include="Core\Base\Dext.Text.Escaping.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
