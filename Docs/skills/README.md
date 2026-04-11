@@ -18,13 +18,13 @@ Focused instruction packages for writing correct, idiomatic **Dext** (Delphi mod
 | **dext-background** | `dext-background.md` | Background workers (`IHostedService`), configuration (`IConfiguration`, Options pattern), async tasks (`TAsyncTask`) |
 | **dext-networking** | `dext-networking.md` | REST client (`TRestClient`), async HTTP requests, typed responses, auth providers, connection pooling |
 | **dext-realtime** | `dext-realtime.md` | Hubs (`THub`), SignalR-compatible real-time messaging, groups, `IHubContext<T>` |
-| **dext-database-as-api** | `dext-database-as-api.md` | Zero-code CRUD REST API from ORM entities (`TDataApiHandler<T>`) |
+| **dext-database-as-api** | `dext-database-as-api.md` | Zero-code CRUD REST API from ORM entities (`MapDataApi<T>`) |
 | **dext-desktop-ui** | `dext-desktop-ui.md` | VCL desktop apps, Navigator (Flutter-inspired), Magic Binding (declarative two-way), MVVM |
 | **dext-server-adapters** | `dext-server-adapters.md` | Indy adapter (self-hosted), SSL/HTTPS (OpenSSL/Taurus), `Run` vs `Start`, deployment patterns, WebBroker/ISAPI (roadmap) |
 
 ## Manual Installation
 
-Copy the `.claude/skills/` folder into your project, then reference skills by filename.
+Copy the `Docs/ai-agents/skills/` folder into your project, then reference skills by filename.
 
 | Agent | Project-level path | Global path |
 |-------|--------------------|-------------|
@@ -36,29 +36,33 @@ Copy the `.claude/skills/` folder into your project, then reference skills by fi
 
 ## How It Works
 
-Skills are loaded dynamically when the agent needs them. The README is always loaded so the agent knows which skill to activate. Individual skill files are loaded on demand — keeping the context window lean.
+Skills are loaded dynamically when the agent needs them. The README is always loaded so the agent knows which skill to activate. Individual skill files are loaded on demand — keeping the context window lean. Note that some advanced users prefer to setup symbolic links to point tools like `claude-code` from `.claude/skills` directly to the `Docs/ai-agents/skills` repository.
 
 ## Trigger Guide
 
 **Load `dext-app-structure`** when:
+
 - Creating a new Dext project from scratch
 - Setting up the Startup class and middleware pipeline
 - Configuring the `.dpr` entry point
 - Organising project files and modules
 
 **Load `dext-web`** when:
+
 - Creating or modifying HTTP endpoints (`MapGet`, `MapPost`, `[HttpGet]`, `[HttpPost]`)
 - Writing controllers (`[ApiController]`, `TInterfacedObject`)
 - Handling model binding, route parameters, query strings, headers
 - Using `Results.Ok`, `Results.Created`, etc.
 
 **Load `dext-orm`** when:
+
 - Defining entity classes with `[Table]`, `[PK]`, `[Required]`, etc.
 - Writing `TDbContext` subclasses with `IDbSet<T>` properties
 - Querying with `.Where`, `.ToList`, `.Find`, Smart Properties
 - Adding/updating/removing records, database seeding
 
 **Load `dext-orm-advanced`** when:
+
 - Defining relationships (`[ForeignKey]`, `[InverseProperty]`, `[ManyToMany]`)
 - Using eager loading (`.Include`)
 - Working with TPH/TPT inheritance (`[Inheritance]`, `[DiscriminatorColumn]`)
@@ -66,18 +70,21 @@ Skills are loaded dynamically when the agent needs them. The README is always lo
 - Implementing locking (optimistic/pessimistic) or multi-tenancy
 
 **Load `dext-di`** when:
+
 - Registering services with `.AddScoped`, `.AddSingleton`, `.AddTransient`
 - Setting up `ConfigureServices` in a Startup class
 - Injecting services via constructors or `[Inject]` attribute
 - Using factory registration with `IServiceProvider`
 
 **Load `dext-auth`** when:
+
 - Implementing JWT authentication
 - Creating login endpoints
 - Using `[Authorize]`, `[AllowAnonymous]`
 - Building claims with `TClaimsBuilder`
 
 **Load `dext-testing`** when:
+
 - Writing `[TestFixture]` classes
 - Using `Mock<T>` (from `Dext.Mocks`)
 - Writing fluent assertions with `Should(...)`
@@ -85,41 +92,49 @@ Skills are loaded dynamically when the agent needs them. The README is always lo
 - Using snapshot testing (`MatchSnapshot`)
 
 **Load `dext-collections`** when:
+
 - Using `IList<T>`, `TCollections.CreateList`, `TCollections.CreateObjectList`
 - Writing LINQ-style queries on in-memory lists
 - Using `IChannel<T>` for thread communication
 
 **Load `dext-api-features`** when:
+
 - Adding middleware (CORS, rate limiting, compression, static files)
 - Configuring OpenAPI/Swagger documentation
 - Setting up health checks, response caching
 
 **Load `dext-background`** when:
+
 - Creating background workers with `IHostedService`
 - Loading or binding configuration (`appsettings.json`, environment variables, Options pattern)
 - Using `TAsyncTask` for non-blocking async operations
 
 **Load `dext-networking`** when:
+
 - Making outbound HTTP requests to external APIs
 - Using `TRestClient` for REST calls
 - Needing async HTTP with typed deserialization
 
 **Load `dext-realtime`** when:
+
 - Building real-time features (WebSockets, push notifications)
 - Using `THub` and `IHubContext<T>`
 - Sending messages to connected clients or groups
 
 **Load `dext-database-as-api`** when:
+
 - Needing instant REST CRUD for an entity with zero controller code
-- Using `TDataApiHandler<T>` for admin panels or rapid prototyping
+- Using `App.Builder.MapDataApi<T>` for admin panels or rapid prototyping
 
 **Load `dext-server-adapters`** when:
+
 - Configuring SSL/HTTPS (`SslProvider`, `SslCert`, `SslKey`)
 - Choosing between `App.Run` (blocking) and `App.Start` (non-blocking)
 - Deploying behind IIS/nginx reverse proxy
 - Questions about ISAPI/WebBroker or future adapter support
 
 **Load `dext-desktop-ui`** when:
+
 - Building VCL desktop applications with Dext Navigator
 - Implementing Magic Binding (declarative two-way binding)
 - Following MVVM pattern with ViewModel + Controller + Frame
@@ -147,3 +162,5 @@ Skills are loaded dynamically when the agent needs them. The README is always lo
 10. **`Mock<T>` is a Record** — never call `.Free` on it
 11. **`Dext.Entity.Core`** must be in `uses` for `IDbSet<T>` generics to compile
 12. **`SetConsoleCharSet`** is REQUIRED in all console projects (test runners, CLI tools)
+13. **Uses Clause Order (CRITICAL)**: Due to Delphi's single class helper limitation, the `uses` order MUST always be: `Dext` → `Dext.Entity` → `Dext.Web`. The last one always wins and ensures Web methods (like `MapGet`, `AddWebStencils`) are visible.
+14. **Smart Properties**: For entities, always use **IntType**, **StringType**, **DoubleType**, and **BoolType** aliases (from `Dext.Core.SmartTypes`) instead of `Prop<T>`.

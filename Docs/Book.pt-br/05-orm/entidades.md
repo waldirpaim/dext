@@ -68,6 +68,8 @@ type
 | `[SoftDelete('deleted', 1, 0)]` | Exclusão lógica |
 | `[CreatedAt]` | Timestamp automático na inserção |
 | `[UpdatedAt]` | Timestamp automático na atualização |
+| `[Field('FBackingField')]` | Mapeamento direto para field (ignora setters) |
+
 
 ### Atributos de Validação
 
@@ -123,6 +125,63 @@ type
     function FromDatabase(const AValue: TValue; ATypeInfo: PTypeInfo): TValue; override;
   end;
 ```
+
+## Mapeamento de Campos (Otimização)
+
+O recurso de **Field Mapping** permite que o Dext ORM popule as entidades diretamente através de seus **fields de backup** (campos privados), ignorando os setters das propriedades. Isso é crítico para performance e para garantir que lógicas colocadas nos setters (como rastreamento de mudanças ou validações) não sejam executadas durante a fase de hidratação (carregamento do banco).
+
+### Uso
+
+1.  **Baseado em Convenção**: Se você usar o atributo `[Field]` sem argumentos, o Dext assume que o campo é `F` + `NomeDaPropriedade`.
+2.  **Mapeamento Explícito**:
+```pascal
+type
+  TUser = class
+  private
+    FInternalName: string;
+  public
+    [Field('FInternalName')] // Mapeia explicitamente para o campo 'FInternalName'
+    property Name: string read GetName write SetName;
+  end;
+```
+
+3.  **Via Fluent API**:
+```pascal
+Builder.Prop('Name').UseField; // Usa convenção
+Builder.Prop('Email').HasFieldName('FInternalEmail');
+```
+
+## Soft Delete (Exclusão Lógica)
+
+O Soft Delete marca entidades como excluídas no banco de dados sem remover fisicamente o registro.
+
+### Configuração
+
+Aplique o atributo `[SoftDelete]` na classe. Por padrão, ele usa uma flag booleana (`1` = Excluído, `0` = Ativo).
+
+```pascal
+[Table('tasks')]
+[SoftDelete('IsDeleted')] 
+TTask = class
+  // ...
+  property IsDeleted: Boolean read FIsDeleted write FIsDeleted;
+end;
+```
+
+### Operações
+
+- **Remove**: Automaticamente executa um `UPDATE` em vez de `DELETE`.
+- **HardDelete**: Remove o registro permanentemente.
+- **IgnoreQueryFilters**: Inclui registros marcados como excluídos nas consultas.
+- **OnlyDeleted**: Consulta apenas registros marcados como excluídos.
+- **Restore**: Reverte uma exclusão lógica.
+
+```pascal
+Context.Tasks.Remove(Task); // Soft delete
+Context.Tasks.HardDelete(Task); // Exclusão física
+var Todos := Context.Tasks.IgnoreQueryFilters.ToList; // Ativos + Excluídos
+```
+
 
 ## Colunas Anuláveis (Nullable)
 

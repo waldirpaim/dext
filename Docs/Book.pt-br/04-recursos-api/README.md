@@ -4,11 +4,13 @@ Recursos essenciais para construir APIs prontas para produção.
 
 ## Capítulos
 
-1. [OpenAPI / Swagger](openapi-swagger.md) - Documentação auto-gerada
-2. [Rate Limiting](rate-limiting.md) - Limitação de requisições
-3. [CORS](cors.md) - Compartilhamento de recursos cross-origin
-4. [Cache de Resposta](cache.md) - Headers de cache & estratégias
-5. [Health Checks](health-checks.md) - Endpoints de monitoramento
+1. [Middleware](middleware.md) - Componentes do pipeline de requisição
+2. [Filtros de Action](filtros.md) - Interceptadores declarativos
+3. [OpenAPI / Swagger](openapi-swagger.md) - Documentação auto-gerada
+4. [Rate Limiting](rate-limiting.md) - Controle de taxa
+5. [CORS](cors.md) - Cross-origin resource sharing
+6. [Response Caching](cache.md) - Cabeçalhos e estratégias de cache
+7. [Health Checks](health-checks.md) - Endpoints de monitoramento
 
 ## Exemplos Rápidos
 

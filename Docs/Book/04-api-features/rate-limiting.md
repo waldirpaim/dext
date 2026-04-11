@@ -1,114 +1,61 @@
 # Rate Limiting
 
-Protect your API from abuse with request throttling.
+Protect your API from abuse, DDoS attacks, and scraping by limiting the number of requests per client.
 
-> 📦 **Example**: [Web.RateLimitDemo](../../../Examples/Web.RateLimitDemo/)
+## Basic Usage
 
-## Quick Setup
+### 1. Default (100 req/min)
 
 ```pascal
-App.Configure(procedure(App: IApplicationBuilder)
+App.UseRateLimiting;
+```
+
+### 2. Custom Configuration
+
+```pascal
+App.UseRateLimiting(procedure(Options: TRateLimitBuilder)
   begin
-    App.UseRateLimiting(
-      TRateLimitOptions.Create
-        .Limit(100)
-        .PerMinute
-    );
-    
-    // Endpoints...
+    Options
+      .WithPermitLimit(10)      // Maximum 10 requests 
+      .WithWindow(60)           // Per 60 seconds (1 minute)
+      .WithRejectionStatusCode(429);
   end);
 ```
 
-## Configuration Options
+## How it works
 
-### Fixed Window
+Dext identifies clients by their IP address (automatically supporting `X-Forwarded-For` if behind a proxy).
 
-```pascal
-TRateLimitOptions.Create
-  .Limit(100)        // 100 requests
-  .PerMinute         // per minute
-  
-TRateLimitOptions.Create
-  .Limit(1000)
-  .PerHour
-  
-TRateLimitOptions.Create
-  .Limit(10000)
-  .PerDay
-```
+### HTTP Headers
 
-### Token Bucket
+The middleware adds standard headers to every response to inform the client:
 
-```pascal
-TRateLimitOptions.Create
-  .TokenBucket
-  .BucketSize(100)      // Max burst
-  .RefillRate(10)       // 10 tokens per second
-```
+- `X-RateLimit-Limit`: The total permitted requests in the window.
+- `X-RateLimit-Remaining`: How many requests are left in the current window.
+- `Retry-After`: (Sent only on 429) Seconds until the client can try again.
 
-### By Key
+## Features
 
-```pascal
-// By IP (default)
-TRateLimitOptions.Create
-  .ByIP
-  .Limit(100).PerMinute
+- **Thread-Safe**: Uses high-performance locking to handle concurrent requests.
+- **Auto-Cleanup**: Automatically purges expired client data to save memory.
+- **Zero-Config**: Reasonable defaults for quick startup.
 
-// By User ID
-TRateLimitOptions.Create
-  .ByUser
-  .Limit(1000).PerHour
+## Best Practices
 
-// By API Key
-TRateLimitOptions.Create
-  .ByHeader('X-API-Key')
-  .Limit(5000).PerDay
+1. **Authentication**: Place `UseRateLimiting` **before** `UseAuthentication` to prevent unauthorized users from consuming too many server resources (e.g., CPU for hashing passwords).
+2. **Specific Limits**: Consider different limits for different parts of your API.
+   - Public reading: 200 req/min
+   - Writing/Creating: 50 req/min
+   - Authentication/Login: 5 req/min
 
-// Custom key extractor
-TRateLimitOptions.Create
-  .ByKey(function(Ctx: IHttpContext): string
-    begin
-      Result := Ctx.Request.QueryParam('tenant');
-    end)
-  .Limit(100).PerMinute
-```
-
-## Per-Endpoint Limits
+## Example: Friendly Rejection
 
 ```pascal
-// Global limit
-App.UseRateLimiting(GlobalOptions);
-
-// Override for specific endpoint
-App.MapPost('/api/expensive-operation', Handler)
-  .RateLimit(
-    TRateLimitOptions.Create
-      .Limit(10)
-      .PerMinute
-  );
-```
-
-## Response Headers
-
-Rate limit info is included in response headers:
-
-```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1704643200
-```
-
-## Exceeded Response
-
-When limit is exceeded, returns `429 Too Many Requests`:
-
-```json
-{
-  "error": "Rate limit exceeded",
-  "retryAfter": 30
-}
+Options.WithRejectionMessage(
+  '{"error": "Too many requests", "message": "Please try again in 1 minute"}'
+);
 ```
 
 ---
 
-[← OpenAPI/Swagger](openapi-swagger.md) | [Next: CORS →](cors.md)
+[← Action Filters](filters.md) | [Next: CORS →](cors.md)

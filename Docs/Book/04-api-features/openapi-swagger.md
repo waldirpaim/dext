@@ -1,107 +1,79 @@
 # OpenAPI / Swagger
 
-Auto-generate interactive API documentation.
+OpenAPI (formerly Swagger) is the industry standard for documenting REST APIs. Dext provides built-in support for generating OpenAPI 3.0 specifications and serving an interactive Swagger UI.
 
-> 📦 **Example**: [Web.SwaggerExample](../../../Examples/Web.SwaggerExample/)
+## Basic Setup
 
-## Quick Setup
+To enable Swagger UI, call `UseSwagger` in your application builder.
 
 ```pascal
-App.Configure(procedure(App: IApplicationBuilder)
-  begin
-    App.UseSwagger;
-    App.UseSwaggerUI;
-    
-    // Your endpoints...
-  end);
+var
+  Options: TOpenAPIOptions;
+begin
+  Options := TOpenAPIOptions.Default;
+  Options.Title := 'My Dext API';
+  Options.Version := '1.0.0';
+
+  App.UseSwagger(Options);
+end;
 ```
 
-Visit `http://localhost:5000/swagger` to see the UI!
+Once running, you can access:
+- **Swagger UI**: `http://localhost:8080/swagger`
+- **OpenAPI JSON**: `http://localhost:8080/swagger.json`
 
 ## Documenting Endpoints
 
-### Minimal APIs
+### 1. Minimal APIs (Fluent DSL)
+
+Use `SwaggerEndpoint.From` to add metadata to your routes:
 
 ```pascal
-App.MapGet('/users', procedure(Ctx: IHttpContext)
-  begin
-    Ctx.Response.Json(UserService.GetAll);
-  end)
-  .SwaggerEndpoint
-    .Summary('List all users')
-    .Description('Returns a list of all registered users')
-    .Tag('Users')
-    .Response(200, 'List of users')
-    .Response(401, 'Unauthorized');
+uses
+  Dext.OpenAPI.Fluent;
+
+SwaggerEndpoint.From(App.MapGet('/api/users', GetUsers))
+  .Summary('List all users')
+  .Description('Retrieves a complete list of users from the database')
+  .Tag('Identity')
+  .Response(200, TypeInfo(TUserArray), 'Success');
 ```
 
-### Controllers
+### 2. Controllers (Attributes)
+
+Attributes allow you to document your API directly on the controller class:
 
 ```pascal
-type
-  [Route('/api/users')]
-  [SwaggerTag('Users', 'User management endpoints')]
-  TUsersController = class(TController)
-  public
-    [HttpGet]
-    [SwaggerSummary('List all users')]
-    [SwaggerResponse(200, 'Success', TArray<TUser>)]
-    function GetAll: IActionResult;
-    
-    [HttpGet('/{id}')]
-    [SwaggerSummary('Get user by ID')]
-    [SwaggerParam('id', 'User ID', True)]
-    [SwaggerResponse(200, 'User found', TUser)]
-    [SwaggerResponse(404, 'User not found')]
-    function GetById(Id: Integer): IActionResult;
-    
-    [HttpPost]
-    [SwaggerSummary('Create new user')]
-    [SwaggerBody(TCreateUserRequest)]
-    [SwaggerResponse(201, 'User created', TUser)]
-    function Create([FromBody] Request: TCreateUserRequest): IActionResult;
-  end;
+[DextController('/api/products')]
+[SwaggerTag('Catalog')]
+TProductsController = class
+public
+  [DextGet('{id}')]
+  [SwaggerOperation('Get Product', 'Returns details of a single product')]
+  [SwaggerResponse(200, 'Product found')]
+  [SwaggerResponse(404, 'Product not found')]
+  function GetById(Id: Integer): IResult;
+end;
 ```
 
-## Swagger Attributes
+## Security Documentation
 
-| Attribute | Description |
-|-----------|-------------|
-| `[SwaggerSummary('')]` | Short description |
-| `[SwaggerDescription('')]` | Detailed description |
-| `[SwaggerTag('Name')]` | Group endpoints |
-| `[SwaggerParam('name', 'desc')]` | Document parameter |
-| `[SwaggerBody(TType)]` | Request body type |
-| `[SwaggerResponse(code, 'desc')]` | Response documentation |
-| `[SwaggerResponse(code, 'desc', TType)]` | With response type |
-
-## Fluent API
-
-For Minimal APIs, use the fluent syntax:
+Document your authentication requirements so they appear in Swagger with the "Authorize" button:
 
 ```pascal
-App.MapPost('/orders', OrderHandler)
-  .SwaggerEndpoint
-    .Summary('Create order')
-    .Description('Creates a new order from the shopping cart')
-    .Tag('Orders')
-    .Body<TCreateOrderRequest>('Order details')
-    .Response<TOrder>(201, 'Order created')
-    .Response(400, 'Invalid request')
-    .Response(401, 'Not authenticated');
+Options.WithBearerAuth; // Adds JWT Bearer support to the spec
+
+// On an endpoint:
+SwaggerEndpoint.From(App.MapPost('/api/admin', ...))
+  .RequireAuthorization;
 ```
 
-## Security Definitions
+## Advanced Features
 
-```pascal
-App.UseSwagger(
-  TSwaggerOptions.Create
-    .Title('My API')
-    .Version('v1')
-    .AddBearerAuth  // Adds JWT authentication button
-);
-```
+- **Schema Generation**: Dext uses RTTI to automatically generate JSON schemas for your Request and Response types.
+- **Custom Paths**: You can change the default `/swagger` path in the options.
+- **Multiple Tags**: Group endpoints to keep your documentation organized.
 
 ---
 
-[← API Features](README.md) | [Next: Rate Limiting →](rate-limiting.md)
+[← Middleware](middleware.md) | [Next: Rate Limiting →](rate-limiting.md)

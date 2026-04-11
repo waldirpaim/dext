@@ -1,100 +1,99 @@
 # Smart Properties
 
-Expressões de query type-safe usando `Prop<T>`.
+Expressões de consulta type-safe usando `Prop<T>`. Isso permite escrever queries que são verificadas em tempo de compilação, eliminando "strings mágicas".
 
 > 📦 **Exemplo**: [Web.SmartPropsDemo](../../../Examples/Web.SmartPropsDemo/)
 
-## O Problema
+## Aliases de Tipo
 
-Queries tradicionais baseadas em strings são propensas a erros:
+Para definições de entidade mais limpas, use os seguintes aliases de `Dext.Core.SmartTypes`:
 
-```pascal
-// Typo não será capturado em tempo de compilação!
-Query.Where('usre_name = ?', ['João']);  // Bug: "usre_name"
-```
-
-## A Solução: Smart Properties
+| Tipo | Equivalente Delphi |
+|------|--------------------|
+| `StringType` | `string` |
+| `IntType` | `Integer` |
+| `Int64Type` | `Int64` |
+| `BoolType` | `Boolean` |
+| `DateTimeType` | `TDateTime` |
+| `CurrencyType` | `Currency` |
 
 ```pascal
 type
-  [Table('users')]
-  TUser = class
+  [Table('products')]
+  TProduct = class
+  private
+    FName: StringType; // Smart Property
+    FPrice: CurrencyType;
   public
-    class var Props: TUserProps;  // Smart properties
-    
-    property Id: Integer;
-    property Name: string;
-    property Age: Integer;
+    [Column('name')]
+    property Name: StringType read FName write FName;
+    [Column('price')]
+    property Price: CurrencyType read FPrice write FPrice;
   end;
-  
-  TUserProps = record
-    Id: Prop<Integer>;
-    Name: Prop<string>;
-    Age: Prop<Integer>;
+```
+
+## Padrões de Uso
+
+Existem duas formas principais de usar Smart Properties em consultas:
+
+### 1. O Padrão "Member Props" (Mais Limpo)
+
+Define uma propriedade estática `Props` na sua classe.
+
+```pascal
+type
+  TProduct = class
+  public
+    class var Props: record
+      Name: StringType;
+      Price: CurrencyType;
+    end;
   end;
 
-// Query type-safe!
-var Adultos := Context.Users
-  .Where(TUser.Props.Age >= 18)  // Verificado em tempo de compilação!
-  .OrderBy(TUser.Props.Name)
+// Uso:
+var p := TProduct.Props;
+var ProdutosBaratos := Context.Products
+  .Where(p.Price < 10)
   .ToList;
 ```
 
-## Operações de Query
+### 2. O Padrão "Phantom Entity" (Sem alterações na classe)
 
-### Comparação
-
-```pascal
-TUser.Props.Age = 25       // Igual
-TUser.Props.Age <> 25      // Diferente
-TUser.Props.Age > 18       // Maior que
-TUser.Props.Age >= 18      // Maior ou igual
-TUser.Props.Age < 65       // Menor que
-TUser.Props.Age <= 65      // Menor ou igual
-```
-
-### Operações de String
+Se você não quiser adicionar um campo `Props` à sua classe, use `Prototype.Entity<T>`.
 
 ```pascal
-TUser.Props.Name.Contains('João')
-TUser.Props.Name.StartsWith('J')
-TUser.Props.Name.EndsWith('Silva')
-TUser.Props.Email.IsNull
-TUser.Props.Email.IsNotNull
+uses Dext.Entity.Prototype;
+
+var p := Prototype.Entity<TProduct>;
+var ProdutosBaratos := Context.Products
+  .Where(p.Price < 10)
+  .ToList;
 ```
 
-### Operadores Lógicos
+## Operações Suportadas
 
+### Comparações
+- `=`, `<>`, `>`, `>=`, `<`, `<=`
+- `In([V1, V2])`, `NotIn([V1, V2])`
+- `IsNull`, `IsNotNull`
+
+### Lógica de String
+- `Contains('texto')`
+- `StartsWith('texto')`
+- `EndsWith('texto')`
+- `Like('%texto%')`
+
+### Lógica Booleana
 ```pascal
-// AND
-(TUser.Props.Age >= 18) and (TUser.Props.Age <= 65)
-
-// OR
-(TUser.Props.Status = 'ativo') or (TUser.Props.IsAdmin = True)
-
-// NOT
-not TUser.Props.IsDeleted
+var u := TUser.Props;
+Context.Users.Where((u.Age > 18) and (u.IsActive = True)).ToList;
 ```
 
-## Exemplo Completo
+## Por que usar Smart Properties?
 
-```pascal
-var
-  AdultosAtivos: IList<TUser>;
-begin
-  AdultosAtivos := Context.Users
-    .Where(
-      (TUser.Props.Age >= 18) and 
-      (TUser.Props.Status = 'ativo') and
-      (TUser.Props.Email.IsNotNull)
-    )
-    .OrderBy(TUser.Props.Name)
-    .Take(10)
-    .ToList;
-end;
-```
-
-> 💡 **Referência**: Veja o exemplo [Orm.EntityStyles](../../../Examples/Orm.EntityStyles/) para ver as Smart Properties em ação sem classes de metadados separadas.
+1. **Segurança em Refatoração**: Se você renomear uma propriedade na classe, o compilador apontará todos os erros nas queries.
+2. **Legibilidade**: O código fica próximo ao SQL, mas permanece 100% Pascal.
+3. **Suporte da IDE**: O Code Completion funciona para todos os campos disponíveis na consulta.
 
 ---
 

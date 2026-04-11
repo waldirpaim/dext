@@ -159,6 +159,22 @@ var Page := Context.Users
   .ToList;
 ```
 
+## No Tracking Queries (Performance)
+
+Use `.AsNoTracking` for **Read-Only** scenarios. This returns objects without adding them to the `IdentityMap` or `ChangeTracker`, resulting in ~30-50% better performance and lower memory usage.
+
+> [!IMPORTANT]
+> **Memory Management**: In No Tracking mode, the returned `IList<T>` **owns** the objects. They are freed automatically when the list reference goes out of scope.
+
+```pascal
+// Ideal for APIs and Reports
+var Users := Context.Users
+  .AsNoTracking
+  .Where(u.IsActive = True)
+  .ToList; // Objects will be freed when Users is released
+```
+
+
 ## Projection (Select)
 
 ```pascal
@@ -234,12 +250,37 @@ Queries are lazy — executed only when you:
 | `.Find(id)` | Execute and return by PK |
 
 ```pascal
-// Query NOT executed yet
-var Query := Context.Users.Where(TUser.Props.Age > 18);
-
 // Query executed HERE
 var Users := Query.ToList;
 ```
+
+## Advanced Querying (Joins & Grouping)
+
+For complex scenarios, you can use the strict typing of Specification or direct Joins.
+
+### Joins
+
+Link related tables using `.Join`.
+
+```pascal
+var Results := Context.Orders
+  .Join('Customers', 'C', 'Orders.CustomerId = C.Id')
+  .Where(TOrder.Props.Total > 500)
+  .ToList;
+```
+
+### Group By & Having
+
+Aggregate data and filter grouped results.
+
+```pascal
+var Stats := Context.Orders
+  .GroupBy('CustomerId')
+  .Having(TOrder.Props.Total.Sum > 1000)
+  .Select(['CustomerId', 'Total.Sum'])
+  .ToList;
+```
+
 
 ## Performance & Caching
 

@@ -1,54 +1,82 @@
 # Migrations
 
-Version control for your database schema.
+Version control for your database schema. Dext supports both **Pascal-based** (compiled) and **JSON-based** (external) migrations.
 
-## Overview
+## Creating a Pascal Migration
 
-Migrations let you:
-- Track schema changes over time
-- Apply/revert changes reproducibly
-- Share schema between team members
-
-## Creating a Migration
+Pascal migrations are units that implement the `IMigration` interface and are registered at initialization.
 
 ```pascal
-unit Migration_001_CreateUsers;
+unit Migrations.M20251205_CreateUsers;
 
 interface
 
 uses
-  Dext.Entity.Migrations;
+  Dext.Entity.Migrations,
+  Dext.Entity.Migrations.Builder;
 
 type
-  [Migration(1, 'CreateUsers')]
-  TMigration_001_CreateUsers = class(TMigration)
+  TMigration_20251205_CreateUsers = class(TInterfacedObject, IMigration)
   public
-    procedure Up; override;
-    procedure Down; override;
+    function GetId: string;
+    procedure Up(Builder: TSchemaBuilder);
+    procedure Down(Builder: TSchemaBuilder);
   end;
 
 implementation
 
-procedure TMigration_001_CreateUsers.Up;
+function TMigration_20251205_CreateUsers.GetId: string;
 begin
-  CreateTable('users', procedure(T: TTableBuilder)
+  Result := '20251205_CreateUsers';
+end;
+
+procedure TMigration_20251205_CreateUsers.Up(Builder: TSchemaBuilder);
+begin
+  Builder.CreateTable('users', procedure(T: TTableBuilder)
     begin
-      T.AddColumn('id').AsInteger.PrimaryKey.AutoIncrement;
-      T.AddColumn('name').AsString(100).NotNull;
-      T.AddColumn('email').AsString(255).NotNull.Unique;
-      T.AddColumn('created_at').AsDateTime.Default('CURRENT_TIMESTAMP');
+      T.Column('id', 'INTEGER').PrimaryKey.Identity;
+      T.Column('name', 'VARCHAR').Length(100).NotNull;
+      T.Column('email', 'VARCHAR').Length(255).NotNull;
+      T.Column('created_at', 'TIMESTAMP').Default('CURRENT_TIMESTAMP');
     end);
 end;
 
-procedure TMigration_001_CreateUsers.Down;
+procedure TMigration_20251205_CreateUsers.Down(Builder: TSchemaBuilder);
 begin
-  DropTable('users');
+  Builder.DropTable('users');
 end;
+
+initialization
+  RegisterMigration(TMigration_20251205_CreateUsers.Create);
 
 end.
 ```
 
+## JSON Migrations (External)
+
+For CI/CD environments where you don't want DDL permissions in the main app, you can use JSON migrations executed by `dext.exe`.
+
+**Example (`20251205_CreateUsers.json`):**
+```json
+{
+  "id": "20251205060000",
+  "description": "Create Users Table",
+  "operations": [
+    {
+      "op": "create_table",
+      "name": "Users",
+      "columns": [
+        { "name": "Id", "type": "INTEGER", "pk": true },
+        { "name": "Email", "type": "VARCHAR", "length": 255, "nullable": false }
+      ]
+    }
+  ]
+}
+```
+
 ## CLI Commands
+
+The Dext CLI (`dext.exe`) is the primary tool for managing migrations.
 
 ```bash
 # Apply pending migrations
@@ -60,73 +88,45 @@ dext migrate:down
 # Check status
 dext migrate:list
 
-# Generate skeleton
+# Generate skeleton (Pascal)
 dext migrate:generate --name AddOrdersTable
 ```
 
-## Table Builder API
+## Schema Builder API
 
 ### Columns
 
-```pascal
-T.AddColumn('id').AsInteger.PrimaryKey.AutoIncrement;
-T.AddColumn('name').AsString(100).NotNull;
-T.AddColumn('email').AsString(255).Nullable;
-T.AddColumn('price').AsDecimal(10, 2).Default('0.00');
-T.AddColumn('is_active').AsBoolean.Default('true');
-T.AddColumn('created_at').AsDateTime;
-T.AddColumn('data').AsText;  // CLOB/TEXT
-T.AddColumn('binary').AsBlob;  // BLOB
-T.AddColumn('uuid').AsGuid;
-```
-
-### Constraints
+Inside `Up` or `Down`, use the `Builder` object:
 
 ```pascal
-T.AddColumn('email').AsString(255).Unique;
-T.AddColumn('status').AsString(20).Check('status IN (''active'', ''inactive'')');
-T.AddForeignKey('user_id', 'users', 'id').OnDeleteCascade;
-T.AddIndex('idx_email', 'email');
-T.AddUniqueIndex('idx_email_unique', 'email');
+// Within CreateTable proc
+T.Column('id', 'INTEGER').PrimaryKey.Identity;
+T.Column('name', 'VARCHAR').Length(100).NotNull;
+T.Column('price', 'DECIMAL').Precision(18, 2).Default('0.00');
+T.Column('is_active', 'BOOLEAN').Default('1');
 ```
 
-### Alter Table
+### Table Operations
 
 ```pascal
-procedure TMigration_002.Up;
-begin
-  AlterTable('users', procedure(T: TTableBuilder)
-    begin
-      T.AddColumn('phone').AsString(20).Nullable;
-      T.DropColumn('legacy_field');
-      T.RenameColumn('name', 'full_name');
-    end);
-end;
+// Add a new column
+Builder.AddColumn('users', 'phone', 'VARCHAR', 20);
+
+// Drop a column
+Builder.DropColumn('users', 'legacy_field');
+
+// Create an Index
+Builder.CreateIndex('users', 'IX_Users_Email', ['Email'], True);
 ```
 
-## Raw SQL
+### Execution (Safety Handshake)
 
-For complex operations:
+You can validate schema compatibility at startup without running migrations:
 
 ```pascal
-procedure TMigration_003.Up;
-begin
-  Execute('CREATE INDEX CONCURRENTLY idx_users_email ON users(email)');
-end;
+if not Context.Migrator.ValidateSchemaCompatibility('20251205_CreateUsers') then
+  raise Exception.Create('Database schema is outdated!');
 ```
-
-## Registering Migrations
-
-Add to your program's uses clause:
-
-```pascal
-uses
-  Migration_001_CreateUsers,
-  Migration_002_AddEmailIndex,
-  Migration_003_CreateOrders;
-```
-
-Dext auto-discovers `[Migration]` attributed classes.
 
 ---
 

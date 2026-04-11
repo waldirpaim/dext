@@ -69,6 +69,8 @@ type
 | `[SoftDelete('deleted_col', 1, 0)]` | Logical deletion |
 | `[CreatedAt]` | Automatic timestamp on insertion |
 | `[UpdatedAt]` | Automatic timestamp on update |
+| `[Field('FBackingField')]` | Use direct field mapping (bypasses setters) |
+
 
 ### Validation Attributes
 
@@ -138,6 +140,63 @@ type
     // Default TDateTime converter (ISO format)
     property ScheduledAt: TDateTime read FScheduledAt write FScheduledAt;
   end;
+```
+
+## Field Mapping (Optimization)
+
+The **Field Mapping** feature allows Dext ORM to populate entities directly via their **backing fields**, bypassing property setters. This is critical for performance and for ensuring that logic placed in property setters (such as change tracking or validation) is not executed during object hydration (loading from the database).
+
+### Usage
+
+1.  **Convention-based**: If you use the `[Field]` attribute without arguments, Dext assumes the field is `F` + `PropertyName`.
+2.  **Explicit Mapping**:
+```pascal
+type
+  TUser = class
+  private
+    FInternalName: string;
+  public
+    [Field('FInternalName')] // Maps explicitly to 'FInternalName' field
+    property Name: string read GetName write SetName;
+  end;
+```
+
+3.  **Fluent API**:
+```pascal
+Builder.Prop('Name').UseField; // Uses convention
+Builder.Prop('Email').HasFieldName('FInternalEmail');
+```
+
+## Soft Delete
+
+Soft Delete marks entities as deleted in the database without physically removing the record.
+
+### Configuration
+
+Apply the `[SoftDelete]` attribute to the class. By default, it uses a boolean flag (`1` = Deleted, `0` = Active).
+
+```pascal
+[Table('tasks')]
+[SoftDelete('IsDeleted')] 
+TTask = class
+  // ...
+  property IsDeleted: Boolean read FIsDeleted write FIsDeleted;
+end;
+```
+
+### Operations
+
+- **Remove**: Automatically performs an `UPDATE` instead of `DELETE`.
+- **HardDelete**: Permanently removes the record.
+- **IgnoreQueryFilters**: Includes soft-deleted records in queries.
+- **OnlyDeleted**: Queries only records marked as deleted.
+- **Restore**: Reverts a soft deletion.
+
+```pascal
+Context.Tasks.Remove(Task); // Soft delete
+Context.Tasks.HardDelete(Task); // Physical delete
+var All := Context.Tasks.IgnoreQueryFilters.ToList; // Active + Deleted
+```
 ```
 
 ## Nullable Columns

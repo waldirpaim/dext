@@ -1,73 +1,79 @@
 # OpenAPI / Swagger
 
-Gere documentação interativa da API automaticamente.
+OpenAPI (anteriormente Swagger) é o padrão da indústria para documentação de APIs REST. O Dext oferece suporte nativo para gerar especificações OpenAPI 3.0 e servir uma interface interativa (Swagger UI).
 
-> 📦 **Exemplo**: [Web.SwaggerExample](../../../Examples/Web.SwaggerExample/)
+## Configuração Básica
 
-## Configuração Rápida
+Para habilitar o Swagger UI, chame `UseSwagger` no configurador da sua aplicação.
 
 ```pascal
-App.Configure(procedure(App: IApplicationBuilder)
-  begin
-    App.UseSwagger;
-    App.UseSwaggerUI;
-    
-    // Seus endpoints...
-  end);
+var
+  Options: TOpenAPIOptions;
+begin
+  Options := TOpenAPIOptions.Default;
+  Options.Title := 'Minha API Dext';
+  Options.Version := '1.0.0';
+
+  App.UseSwagger(Options);
+end;
 ```
 
-Visite `http://localhost:5000/swagger` para ver a interface!
+Uma vez em execução, você pode acessar:
+- **Swagger UI**: `http://localhost:8080/swagger`
+- **OpenAPI JSON**: `http://localhost:8080/swagger.json`
 
 ## Documentando Endpoints
 
-### Minimal APIs
+### 1. Minimal APIs (DSL Fluente)
+
+Use `SwaggerEndpoint.From` para adicionar metadados às suas rotas:
 
 ```pascal
-App.MapGet('/users', procedure(Ctx: IHttpContext)
-  begin
-    Ctx.Response.Json(UserService.GetAll);
-  end)
-  .SwaggerEndpoint
-    .Summary('Listar todos os usuários')
-    .Description('Retorna uma lista de todos os usuários registrados')
-    .Tag('Usuários')
-    .Response(200, 'Lista de usuários')
-    .Response(401, 'Não autorizado');
+uses
+  Dext.OpenAPI.Fluent;
+
+SwaggerEndpoint.From(App.MapGet('/api/users', GetUsers))
+  .Summary('Listar todos os usuários')
+  .Description('Retorna uma lista completa de usuários do banco de dados')
+  .Tag('Identidade')
+  .Response(200, TypeInfo(TUserArray), 'Sucesso');
 ```
 
-### Controllers
+### 2. Controllers (Atributos)
+
+Atributos permitem documentar sua API diretamente na classe do controller:
 
 ```pascal
-type
-  [Route('/api/users')]
-  [SwaggerTag('Usuários', 'Endpoints de gerenciamento de usuários')]
-  TUsersController = class(TController)
-  public
-    [HttpGet]
-    [SwaggerSummary('Listar todos os usuários')]
-    [SwaggerResponse(200, 'Sucesso', TArray<TUser>)]
-    function GetAll: IActionResult;
-    
-    [HttpGet('/{id}')]
-    [SwaggerSummary('Buscar usuário por ID')]
-    [SwaggerParam('id', 'ID do usuário', True)]
-    [SwaggerResponse(200, 'Usuário encontrado', TUser)]
-    [SwaggerResponse(404, 'Usuário não encontrado')]
-    function GetById(Id: Integer): IActionResult;
-  end;
+[DextController('/api/products')]
+[SwaggerTag('Catálogo')]
+TProductsController = class
+public
+  [DextGet('{id}')]
+  [SwaggerOperation('Obter Produto', 'Retorna detalhes de um único produto')]
+  [SwaggerResponse(200, 'Produto encontrado')]
+  [SwaggerResponse(404, 'Produto não encontrado')]
+  function GetById(Id: Integer): IResult;
+end;
 ```
 
-## Atributos Swagger
+## Documentação de Segurança
 
-| Atributo | Descrição |
-|----------|-----------|
-| `[SwaggerSummary('')]` | Descrição curta |
-| `[SwaggerDescription('')]` | Descrição detalhada |
-| `[SwaggerTag('Nome')]` | Agrupar endpoints |
-| `[SwaggerParam('nome', 'desc')]` | Documentar parâmetro |
-| `[SwaggerBody(TType)]` | Tipo do request body |
-| `[SwaggerResponse(code, 'desc')]` | Documentação de resposta |
+Documente seus requisitos de autenticação para que apareçam no Swagger com o botão "Authorize":
+
+```pascal
+Options.WithBearerAuth; // Adiciona suporte a JWT Bearer na especificação
+
+// Em um endpoint específico:
+SwaggerEndpoint.From(App.MapPost('/api/admin', ...))
+  .RequireAuthorization;
+```
+
+## Recursos Avançados
+
+- **Geração de Schema**: O Dext usa RTTI para gerar automaticamente esquemas JSON para seus tipos de Requisição e Resposta.
+- **Caminhos Customizados**: Você pode alterar o caminho padrão `/swagger` nas opções.
+- **Múltiplas Tags**: Agrupe endpoints para manter sua documentação organizada.
 
 ---
 
-[← Recursos da API](README.md) | [Próximo: Rate Limiting →](rate-limiting.md)
+[← Middleware](middleware.md) | [Próximo: Rate Limiting →](rate-limiting.md)

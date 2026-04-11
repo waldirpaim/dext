@@ -4,21 +4,23 @@ Dext.Entity is a full-featured ORM for Delphi with support for multiple database
 
 ## Chapters
 
-1. [Getting Started](getting-started.md) - First entity & context
-2. [Entities & Mapping](entities.md) - Attributes and configuration
-3. [Querying](querying.md) - Fluent query API
-4. [Smart Properties](smart-properties.md) - Type-safe queries without metadata classes
-5. [JSON Queries](json-queries.md) - Query JSON/JSONB columns
-6. [Specifications](specifications.md) - Reusable query logic
-7. [Relationships](relationships.md) - 1:1, 1:N, Lazy Loading
-8. [Inheritance](inheritance.md) - TPH, TPT strategies
-9. [Migrations](migrations.md) - Database schema lifecycle
-10. [Scaffolding](scaffolding.md) - Generate entities from DB
-11. [Multi-Tenancy](multi-tenancy.md) - SaaS data isolation
-12. [Raw SQL with FromSql](raw-sql-from-sql.md) - Manual SQL mapping
-13. [Stored Procedures](stored-procedures.md) - RPC & Functions
-14. [Concurrency & Locking](locking.md) - Pessimistic & Offline locks
-15. [Multi-Mapping](nested-mapping.md) - Nested objects & Value Objects
+1. [Getting Started](getting-started.md)
+2. [Entities & Mapping](entities.md)
+3. [Querying](querying.md)
+4. [Smart Properties](smart-properties.md)
+5. [JSON Queries](json-queries.md)
+6. [Specifications](specifications.md)
+7. [Relationships](relationships.md)
+8. [Inheritance](inheritance.md)
+9. [Migrations](migrations.md)
+10. [Scaffolding](scaffolding.md)
+11. [Multi-Tenancy](multi-tenancy.md)
+12. [Raw SQL (FromSql)](raw-sql-from-sql.md)
+13. [Stored Procedures](stored-procedures.md)
+14. [Concurrency & Locking](locking.md)
+15. [Transactions](transactions.md)
+16. [Soft Delete](soft-delete.md)
+17. [Multi-Mapping](nested-mapping.md)
 
 > 📦 **Examples**:
 >

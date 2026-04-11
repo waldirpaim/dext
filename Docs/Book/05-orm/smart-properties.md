@@ -1,152 +1,99 @@
 # Smart Properties
 
-Type-safe query expressions using `Prop<T>`.
+Type-safe query expressions using `Prop<T>`. This allows you to write queries that are checked at compile time, eliminating "magic strings".
 
 > 📦 **Example**: [Web.SmartPropsDemo](../../../Examples/Web.SmartPropsDemo/)
 
-## The Problem
+## Type Aliases
 
-Traditional string-based queries are error-prone:
+For cleaner entity definitions, use the following aliases from `Dext.Core.SmartTypes`:
 
-```pascal
-// Typo won't be caught at compile time!
-Query.Where('usre_name = ?', ['John']);  // Bug: "usre_name"
-```
-
-## The Solution: Smart Properties
+| Type | Delphi Equivalent |
+|------|-------------------|
+| `StringType` | `string` |
+| `IntType` | `Integer` |
+| `Int64Type` | `Int64` |
+| `BoolType` | `Boolean` |
+| `DateTimeType` | `TDateTime` |
+| `CurrencyType` | `Currency` |
 
 ```pascal
 type
-  [Table('users')]
-  TUser = class
+  [Table('products')]
+  TProduct = class
+  private
+    FName: StringType; // Smart Property
+    FPrice: CurrencyType;
   public
-    class var Props: TUserProps;  // Smart properties
-    
-    property Id: Integer;
-    property Name: string;
-    property Age: Integer;
+    [Column('name')]
+    property Name: StringType read FName write FName;
+    [Column('price')]
+    property Price: CurrencyType read FPrice write FPrice;
   end;
-  
-  TUserProps = record
-    Id: Prop<Integer>;
-    Name: Prop<string>;
-    Age: Prop<Integer>;
+```
+
+## Usage Patterns
+
+There are two main ways to use Smart Properties in queries:
+
+### 1. The "Member Props" Pattern (Cleanest)
+
+Define a static property `Props` in your class.
+
+```pascal
+type
+  TProduct = class
+  public
+    class var Props: record
+      Name: StringType;
+      Price: CurrencyType;
+    end;
   end;
 
-// Type-safe querying!
-var Adults := Context.Users
-  .Where(TUser.Props.Age >= 18)  // Compile-time checked!
-  .OrderBy(TUser.Props.Name)
+// Usage:
+var p := TProduct.Props;
+var CheapProducts := Context.Products
+  .Where(p.Price < 10)
   .ToList;
 ```
 
-## Defining Smart Properties
+### 2. The "Phantom Entity" Pattern (No changes to class)
 
-### Option 1: Inline Record
-
-```pascal
-type
-  TUser = class
-  public
-    class var Props: record
-      Id: Prop<Integer>;
-      Name: Prop<string>;
-      Email: Prop<string>;
-    end;
-  end;
-```
-
-### Option 2: Separate Record
+If you don't want to add a `Props` field to your class, use `Prototype.Entity<T>`.
 
 ```pascal
-type
-  TUserProps = record
-    Id: Prop<Integer>;
-    Name: Prop<string>;
-    Email: Prop<string>;
-  end;
-  
-  TUser = class
-  public
-    class var Props: TUserProps;
-  end;
+uses Dext.Entity.Prototype;
+
+var p := Prototype.Entity<TProduct>;
+var CheapProducts := Context.Products
+  .Where(p.Price < 10)
+  .ToList;
 ```
 
-## Query Operations
+## Supported Operations
 
-### Comparison
+### Comparisons
+- `=`, `<>`, `>`, `>=`, `<`, `<=`
+- `In([V1, V2])`, `NotIn([V1, V2])`
+- `IsNull`, `IsNotNull`
 
+### String Logic
+- `Contains('text')`
+- `StartsWith('text')`
+- `EndsWith('text')`
+- `Like('%text%')`
+
+### Boolean Logic
 ```pascal
-TUser.Props.Age = 25       // Equal
-TUser.Props.Age <> 25      // Not equal
-TUser.Props.Age > 18       // Greater than
-TUser.Props.Age >= 18      // Greater or equal
-TUser.Props.Age < 65       // Less than
-TUser.Props.Age <= 65      // Less or equal
+var u := TUser.Props;
+Context.Users.Where((u.Age > 18) and (u.IsActive = True)).ToList;
 ```
 
-### String Operations
+## Why use Smart Properties?
 
-```pascal
-TUser.Props.Name.Contains('John')
-TUser.Props.Name.StartsWith('J')
-TUser.Props.Name.EndsWith('son')
-TUser.Props.Email.IsNull
-TUser.Props.Email.IsNotNull
-```
-
-### Logical Operators
-
-```pascal
-// AND
-(TUser.Props.Age >= 18) and (TUser.Props.Age <= 65)
-
-// OR
-(TUser.Props.Status = 'active') or (TUser.Props.IsAdmin = True)
-
-// NOT
-not TUser.Props.IsDeleted
-```
-
-### IN Clause
-
-```pascal
-TUser.Props.Status.In(['active', 'pending', 'review'])
-TUser.Props.Id.In([1, 2, 3, 4, 5])
-```
-
-## Full Example
-
-```pascal
-var
-  ActiveAdults: IList<TUser>;
-begin
-  ActiveAdults := Context.Users
-    .Where(
-      (TUser.Props.Age >= 18) and 
-      (TUser.Props.Status = 'active') and
-      (TUser.Props.Email.IsNotNull)
-    )
-    .OrderBy(TUser.Props.Name)
-    .Take(10)
-    .ToList;
-end;
-```
-
-## Generated SQL
-
-The smart properties generate optimized SQL:
-
-```sql
-SELECT * FROM users 
-WHERE age >= 18 
-  AND status = 'active' 
-  AND email IS NOT NULL 
-ORDER BY name 
-LIMIT 10
-```
-
-> 💡 **Reference**: See the [Orm.EntityStyles](../../../Examples/Orm.EntityStyles/) example to see Smart Properties in action without separate metadata classes.
+1. **Refactoring Safety**: If you rename a property in the class, the compiler will catch all query errors.
+2. **Readability**: Code looks closer to SQL yet remains 100% Pascal.
+3. **IDE Support**: Code completion works for all available fields in the query.
 
 ---
 

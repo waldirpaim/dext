@@ -1,87 +1,61 @@
 # Rate Limiting
 
-Proteja sua API contra abusos com limitação de requisições.
+Proteja sua API contra abuso, ataques DDoS e scraping limitando o número de requisições por cliente.
 
-> 📦 **Exemplo**: [Web.RateLimitDemo](../../../Examples/Web.RateLimitDemo/)
+## Uso Básico
 
-## Configuração Rápida
+### 1. Padrão (100 req/min)
 
 ```pascal
-App.Configure(procedure(App: IApplicationBuilder)
+App.UseRateLimiting;
+```
+
+### 2. Configuração Personalizada
+
+```pascal
+App.UseRateLimiting(procedure(Options: TRateLimitBuilder)
   begin
-    App.UseRateLimiting(
-      TRateLimitOptions.Create
-        .Limit(100)
-        .PerMinute
-    );
-    
-    // Endpoints...
+    Options
+      .WithPermitLimit(10)      // Máximo de 10 requisições
+      .WithWindow(60)           // Por 60 segundos (1 minuto)
+      .WithRejectionStatusCode(429);
   end);
 ```
 
-## Opções de Configuração
+## Como funciona
 
-### Janela Fixa
+O Dext identifica os clientes pelo endereço de IP (suportando automaticamente `X-Forwarded-For` se estiver atrás de um proxy).
 
-```pascal
-TRateLimitOptions.Create
-  .Limit(100)        // 100 requisições
-  .PerMinute         // por minuto
-  
-TRateLimitOptions.Create
-  .Limit(1000)
-  .PerHour
-  
-TRateLimitOptions.Create
-  .Limit(10000)
-  .PerDay
-```
+### Headers HTTP
 
-### Por Chave
+O middleware adiciona headers padrão a todas as respostas para informar o cliente:
 
-```pascal
-// Por IP (padrão)
-TRateLimitOptions.Create
-  .ByIP
-  .Limit(100).PerMinute
+- `X-RateLimit-Limit`: O total de requisições permitidas na janela.
+- `X-RateLimit-Remaining`: Quantas requisições ainda restam na janela atual.
+- `Retry-After`: (Enviado apenas no erro 429) Segundos até que o cliente possa tentar novamente.
 
-// Por ID de Usuário
-TRateLimitOptions.Create
-  .ByUser
-  .Limit(1000).PerHour
+## Recursos
 
-// Por API Key
-TRateLimitOptions.Create
-  .ByHeader('X-API-Key')
-  .Limit(5000).PerDay
-```
+- **Thread-Safe**: Usa travas de alta performance para lidar com requisições concorrentes.
+- **Auto-Cleanup**: Remove automaticamente dados expirados de clientes para economizar memória.
+- **Zero-Config**: Padrões sensatos para início rápido.
 
-## Limites por Endpoint
+## Melhores Práticas
+
+1. **Autenticação**: Coloque o `UseRateLimiting` **antes** do `UseAuthentication` para evitar que usuários não autorizados consumam muitos recursos do servidor (ex: CPU para processar senhas).
+2. **Limites Específicos**: Considere limites diferentes para partes diferentes da sua API.
+   - Leitura pública: 200 req/min
+   - Escrita/Criação: 50 req/min
+   - Autenticação/Login: 5 req/min
+
+## Exemplo: Rejeição Amigável
 
 ```pascal
-// Limite global
-App.UseRateLimiting(GlobalOptions);
-
-// Sobrescrever para endpoint específico
-App.MapPost('/api/operacao-cara', Handler)
-  .RateLimit(
-    TRateLimitOptions.Create
-      .Limit(10)
-      .PerMinute
-  );
-```
-
-## Resposta de Limite Excedido
-
-Quando limite é excedido, retorna `429 Too Many Requests`:
-
-```json
-{
-  "error": "Limite de requisições excedido",
-  "retryAfter": 30
-}
+Options.WithRejectionMessage(
+  '{"error": "Muitas requisições", "message": "Por favor, tente novamente em 1 minuto"}'
+);
 ```
 
 ---
 
-[← OpenAPI/Swagger](openapi-swagger.md) | [Próximo: CORS →](cors.md)
+[← Filtros de Action](filtros.md) | [Próximo: CORS →](cors.md)

@@ -4,20 +4,22 @@ Dext.Entity é um ORM completo para Delphi com suporte a múltiplos bancos de da
 
 ## Capítulos
 
-1. [Primeiros Passos](primeiros-passos.md) - Primeira entidade & contexto
-2. [Entidades & Mapeamento](entidades.md) - Atributos e configuração
-3. [Consultas](consultas.md) - API fluente de queries
-4. [Smart Properties](smart-properties.md) - Queries type-safe sem classes de metadados
-5. [Consultas JSON](consultas-json.md) - Consultar colunas JSON/JSONB
-6. [Specifications](specifications.md) - Lógica de consulta reutilizável
-7. [Relacionamentos](relacionamentos.md) - 1:1, 1:N, Lazy Loading
-8. [Migrations](migrations.md) - Ciclo de vida do schema do banco
-9. [Scaffolding](scaffolding.md) - Gerar entidades a partir do BD
-10. [Multi-Tenancy](multi-tenancy.md) - Isolamento de dados SaaS
-11. [SQL Puro com FromSql](sql-puro-from-sql.md) - Mapeamento manual de SQL
-12. [Stored Procedures](procedimentos-armazenados.md) - RPC & Funções
-13. [Concorrência e Travamento](travamento-concorrencia.md) - Locks Pessimistas e Offline
-14. [Multi-Mapping](mapeamento-aninhado.md) - Objetos aninhados & Value Objects
+1. [Primeiros Passos](primeiros-passos.md)
+2. [Entidades & Mapeamento](entidades.md)
+3. [Consultas](consultas.md)
+4. [Smart Properties](smart-properties.md)
+5. [Consultas JSON](consultas-json.md)
+6. [Specifications](specifications.md)
+7. [Relacionamentos](relacionamentos.md)
+8. [Migrations](migrations.md)
+9. [Scaffolding](scaffolding.md)
+10. [Multi-Tenancy](multi-tenancy.md)
+11. [SQL Puro (FromSql)](sql-puro-from-sql.md)
+12. [Procedimentos Armazenados](procedimentos-armazenados.md)
+13. [Concorrência e Travamento](travamento-concorrencia.md)
+14. [Transações](transacoes.md)
+15. [Soft Delete](soft-delete.md)
+16. [Mapeamento Aninhado](mapeamento-aninhado.md)
 
 > 📦 **Exemplos**:
 >

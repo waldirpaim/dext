@@ -1,76 +1,68 @@
-# Stored Procedures e Funções
+# Procedimentos Armazenados
 
-O Dext fornece uma maneira declarativa de mapear e executar Stored Procedures e Funções de banco de dados usando atributos.
+Mapeie e execute stored procedures e funções do banco de dados usando DTOs decorativos.
 
-## Mapeando um Procedimento
+## Mapeamento
 
-Crie uma classe (ou use seu DbContext) com um método decorado com o atributo `[StoredProcedure]`. Use `[DbParam]` para definir as direções e tipos dos parâmetros.
+O Dext permite mapear Stored Procedures usando o atributo `[Procedure]` e definindo os parâmetros com `[DbParam]`.
 
 ```pascal
-type
-  TMyProcs = class
-  public
-    [StoredProcedure('sp_GetCustomerBalance')]
-    procedure GetBalance(
-      [DbParam(pdInput)] CustomerId: Integer;
-      [DbParam(pdOutput)] out Balance: Currency
-    );
-  end;
+[Procedure('SP_CALCULATE_BONUS')]
+TBonusDto = class
+private
+  FEmpId: Integer;
+  FBaseAmount: Currency;
+  FBonusValue: Currency; // Parâmetro de Saída
+  FResult: Integer;      // Parâmetro de Retorno/Resultado
+public
+  [DbParam(ptInput)]
+  property EmpId: Integer read FEmpId write FEmpId;
+  
+  [DbParam(ptInput)]
+  property BaseAmount: Currency read FBaseAmount write FBaseAmount;
+  
+  [DbParam(ptOutput)]
+  property BonusValue: Currency read FBonusValue write FBonusValue;
+  
+  [DbParam(ptResult)]
+  property Result: Integer read FResult write FResult;
+end;
 ```
 
 ## Execução
 
-Você pode resolver a classe de procedimentos a partir do container de injeção de dependência ou instanciá-la manualmente se fornecer uma conexão.
+Os procedimentos armazenados são executados via `DbContext`. O Dext trata automaticamente a sintaxe SQL específica de cada banco (ex: `EXEC` para SQL Server, `CALL` para MySQL/PostgreSQL ou blocos anônimos para Oracle).
 
 ```pascal
-var Procs := ServiceProvider.GetService<TMyProcs>;
-var MyBalance: Currency;
-Procs.GetBalance(123, MyBalance);
+var Bonus := TBonusDto.Create;
+try
+  Bonus.EmpId := 10;
+  Bonus.BaseAmount := 5000;
+  
+  // Executa e mapeia os resultados de volta para as propriedades do DTO
+  Db.ExecuteProcedure(Bonus);
+  
+  WriteLn('Bônus Calculado: ', Bonus.BonusValue);
+finally
+  Bonus.Free;
+end;
 ```
 
-## Conjuntos de Resultados (Funções)
+## Tipos de Parâmetros Suportados
 
-Para funções armazenadas ou procedimentos que retornam um conjunto de resultados, você pode mapear o valor de retorno para uma lista de objetos ou um tipo primitivo.
+| Tipo | Descrição |
+|------|-----------|
+| `ptInput` | Valor de entrada para a procedure. |
+| `ptOutput` | Valor de saída populado pela procedure. |
+| `ptInputOutput` | Valor passado na entrada e atualizado pela procedure. |
+| `ptResult` | O valor de retorno de uma função ou procedure. |
 
-```pascal
-type
-  TMyProcs = class
-  public
-    [StoredProcedure('fn_GetActiveCustomers')]
-    function GetActiveCustomers(
-      [DbParam(pdInput)] RegionId: Integer
-    ): IList<TCustomer>;
-  end;
-```
+## Por que usar Stored Procedures com Dext?
 
-## Retornando Múltiplos Conjuntos de Resultados
+1. **Segurança de Tipos**: Acabe com o mapeamento manual de parâmetros por índice ou nome.
+2. **Auto-Mapeamento**: Resultados de `ptOutput` e `ptResult` são automaticamente copiados de volta para o seu DTO.
+3. **Abstração**: Seu código Pascal não precisa conhecer a sintaxe SQL específica necessária para chamar a procedure em diferentes motores de banco de dados.
 
-O Dext pode lidar com procedimentos que retornam múltiplos conjuntos de resultados usando a interface `IMultipleResults`.
+---
 
-```pascal
-var Results := Db.ExecuteProcedure('sp_GetInvoicesAndItems', [CustomerId]);
-var Invoices := Results.Read<TInvoice>();
-var Items := Results.Read<TInvoiceItem>();
-```
-
-## Lidando com parâmetros OUT com [DbParam]
-
-O atributo `[DbParam]` permite especificar detalhes sobre o parâmetro do banco de dados:
-
-*   **Direction**: `pdInput`, `pdOutput`, `pdInputOutput`, `pdReturnValue`.
-*   **Name**: Se o nome do parâmetro no banco de dados for diferente do nome do parâmetro no Delphi.
-*   **DataType**: `ftDate`, `ftTimeStamp`, etc., de forma explícita.
-
-```pascal
-procedure Process(
-  [DbParam(pdInput, 'p_input_val')] Val: string;
-  [DbParam(pdOutput, 'p_result_code')] out Code: Integer
-);
-```
-
-## Especificidades dos Dialetos
-
-O Dext lida com as diferenças na invocação de procedimentos entre os bancos de dados automaticamente:
-*   **SQL Server**: `EXEC sp_name @p1, @p2`
-*   **PostgreSQL**: `SELECT * FROM func_name(:p1, :p2)` ou `CALL proc_name(...)`
-*   **Firebird**: `EXECUTE PROCEDURE name ...`
+[← Soft Delete](soft-delete.md) | [Próximo: Travamento e Concorrência →](travamento-concorrencia.md)

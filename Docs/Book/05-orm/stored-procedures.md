@@ -1,76 +1,68 @@
-# Stored Procedures & Functions
+# Stored Procedures
 
-Dext provides a declarative way to map and execute database Stored Procedures and Functions using attributes.
+Map and execute database stored procedures and functions using decorative DTOs.
 
-## Mapping a Procedure
+## Mappings
 
-Create a class (or use your DbContext) with a method decorated with the `[StoredProcedure]` attribute. Use `[DbParam]` to define parameter directions and types.
+Dext allows mapping Stored Procedures using the `[Procedure]` attribute and defining parameters with `[DbParam]`.
 
 ```pascal
-type
-  TMyProcs = class
-  public
-    [StoredProcedure('sp_GetCustomerBalance')]
-    procedure GetBalance(
-      [DbParam(pdInput)] CustomerId: Integer;
-      [DbParam(pdOutput)] out Balance: Currency
-    );
-  end;
+[Procedure('SP_CALCULATE_BONUS')]
+TBonusDto = class
+private
+  FEmpId: Integer;
+  FBaseAmount: Currency;
+  FBonusValue: Currency; // Output Parameter
+  FResult: Integer;      // Return/Result Parameter
+public
+  [DbParam(ptInput)]
+  property EmpId: Integer read FEmpId write FEmpId;
+  
+  [DbParam(ptInput)]
+  property BaseAmount: Currency read FBaseAmount write FBaseAmount;
+  
+  [DbParam(ptOutput)]
+  property BonusValue: Currency read FBonusValue write FBonusValue;
+  
+  [DbParam(ptResult)]
+  property Result: Integer read FResult write FResult;
+end;
 ```
 
 ## Execution
 
-You can resolve the procedure class from the dependency injection container or instantiate it manually if you provide a connection.
+Stored procedures are executed via the `DbContext`. Dext automatically handles the SQL syntax specific to each database (e.g., `EXEC` for SQL Server, `CALL` for MySQL/PostgreSQL, or anonymous blocks for Oracle).
 
 ```pascal
-var Procs := ServiceProvider.GetService<TMyProcs>;
-var MyBalance: Currency;
-Procs.GetBalance(123, MyBalance);
+var Bonus := TBonusDto.Create;
+try
+  Bonus.EmpId := 10;
+  Bonus.BaseAmount := 5000;
+  
+  // Executes and maps results back to the DTO properties
+  Db.ExecuteProcedure(Bonus);
+  
+  WriteLn('Calculated Bonus: ', Bonus.BonusValue);
+finally
+  Bonus.Free;
+end;
 ```
 
-## Result Sets (Functions)
+## Supported Parameter Types
 
-For stored functions or procedures that return a result set, you can map the return value to a list of objects or a primitive.
+| Type | Description |
+|------|-------------|
+| `ptInput` | Input value to the procedure. |
+| `ptOutput` | Output value populated by the procedure. |
+| `ptInputOutput` | Value passed in and updated by the procedure. |
+| `ptResult` | The return value of a function or procedure. |
 
-```pascal
-type
-  TMyProcs = class
-  public
-    [StoredProcedure('fn_GetActiveCustomers')]
-    function GetActiveCustomers(
-      [DbParam(pdInput)] RegionId: Integer
-    ): IList<TCustomer>;
-  end;
-```
+## Why use Stored Procedures with Dext?
 
-## Returning Multiple Result Sets
+1. **Type Safety**: No more manual parameter binding by index or name.
+2. **Auto-Mapping**: Results from `ptOutput` and `ptResult` are automatically copied back to your DTO.
+3. **Abstraction**: Your Pascal code doesn't need to know the specific SQL syntax required to call the procedure on different database engines.
 
-Dext can handle procedures that return multiple result sets using the `IMultipleResults` interface.
+---
 
-```pascal
-var Results := Db.ExecuteProcedure('sp_GetInvoicesAndItems', [CustomerId]);
-var Invoices := Results.Read<TInvoice>();
-var Items := Results.Read<TInvoiceItem>();
-```
-
-## Handling OUT Parameters with [DbParam]
-
-The `[DbParam]` attribute allows you to specify details about the database parameter:
-
-*   **Direction**: `pdInput`, `pdOutput`, `pdInputOutput`, `pdReturnValue`.
-*   **Name**: If the database parameter name differs from the Delphi parameter name.
-*   **DataType**: Explicit `ftDate`, `ftTimeStamp`, etc.
-
-```pascal
-procedure Process(
-  [DbParam(pdInput, 'p_input_val')] Val: string;
-  [DbParam(pdOutput, 'p_result_code')] out Code: Integer
-);
-```
-
-## Dialect Specifics
-
-Dext handles the differences in procedure invocation across databases automatically:
-*   **SQL Server**: `EXEC sp_name @p1, @p2`
-*   **PostgreSQL**: `SELECT * FROM func_name(:p1, :p2)` or `CALL proc_name(...)`
-*   **Firebird**: `EXECUTE PROCEDURE name ...`
+[← Soft Delete](soft-delete.md) | [Next: Concurrency & Locking →](locking.md)

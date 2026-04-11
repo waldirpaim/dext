@@ -1,109 +1,62 @@
-# CORS
+# CORS (Cross-Origin Resource Sharing)
 
-Configure Cross-Origin Resource Sharing for browser clients.
+Manage cross-origin requests securely using a fluent configuration builder.
 
-## Quick Setup
+## What is CORS?
+
+CORS is a security mechanism that allows a server to indicate which origins (domains) are permitted to access its resources. By default, browsers block cross-origin requests for security reasons.
+
+## Basic Usage
+
+### 1. Permissive (Development)
+
+To allow any origin during development:
 
 ```pascal
-App.Configure(procedure(App: IApplicationBuilder)
+App.UseCors(procedure(Builder: TCorsBuilder)
   begin
-    App.UseCors(
-      TCorsOptions.Create
-        .AllowAnyOrigin
-        .AllowAnyMethod
-        .AllowAnyHeader
-    );
-    
-    // Endpoints...
+    Builder
+      .AllowAnyOrigin
+      .AllowAnyMethod
+      .AllowAnyHeader;
   end);
 ```
 
-> ⚠️ `AllowAnyOrigin` is for development only. In production, specify allowed origins.
+### 2. Restrictive (Production)
 
-## Production Configuration
+For production, always specify your domains:
 
 ```pascal
-App.UseCors(
-  TCorsOptions.Create
-    .AllowOrigins(['https://myapp.com', 'https://admin.myapp.com'])
-    .AllowMethods(['GET', 'POST', 'PUT', 'DELETE'])
-    .AllowHeaders(['Content-Type', 'Authorization'])
-    .AllowCredentials
-    .MaxAge(3600)  // Preflight cache: 1 hour
-);
+App.UseCors(procedure(Builder: TCorsBuilder)
+  begin
+    Builder
+      .WithOrigins(['https://myapp.com', 'https://www.myapp.com'])
+      .WithMethods(['GET', 'POST', 'PUT', 'DELETE'])
+      .WithHeaders(['Content-Type', 'Authorization'])
+      .AllowCredentials
+      .WithMaxAge(3600); // Cache preflight response for 1 hour
+  end);
 ```
 
-## Options Reference
+## Configuration Options
 
 | Method | Description |
 |--------|-------------|
-| `.AllowAnyOrigin` | Allow all origins (dev only) |
-| `.AllowOrigins([...])` | Allow specific origins |
-| `.AllowAnyMethod` | Allow all HTTP methods |
-| `.AllowMethods([...])` | Allow specific methods |
-| `.AllowAnyHeader` | Allow all headers |
-| `.AllowHeaders([...])` | Allow specific headers |
-| `.AllowCredentials` | Allow cookies/auth headers |
-| `.ExposeHeaders([...])` | Headers client can read |
-| `.MaxAge(seconds)` | Preflight response cache |
+| `WithOrigins(['...'])` | Define permitted domains. |
+| `AllowAnyOrigin` | Allow any origin (*). |
+| `WithMethods(['...'])` | Define permitted HTTP verbs. |
+| `AllowAnyMethod` | Allow any HTTP verb. |
+| `WithHeaders(['...'])` | Define permitted request headers. |
+| `AllowAnyHeader` | Allow any request header. |
+| `WithExposedHeaders(['...'])` | Headers the client is allowed to see. |
+| `AllowCredentials` | Enable cookie/auth header sharing. |
+| `WithMaxAge(seconds)` | Sets how long preflight results can be cached. |
 
-## Per-Endpoint CORS
+## Important Security Notes
 
-Override global CORS for specific endpoints:
-
-```pascal
-// Disable CORS for this endpoint
-App.MapGet('/internal', Handler)
-  .DisableCors;
-
-// Different CORS policy
-App.MapGet('/public-api', Handler)
-  .Cors(
-    TCorsOptions.Create
-      .AllowAnyOrigin
-      .AllowMethods(['GET'])
-  );
-```
-
-## Preflight Requests
-
-Browsers send `OPTIONS` requests for "non-simple" requests. Dext handles these automatically when CORS is enabled.
-
-A request is "non-simple" if it:
-- Uses methods other than GET, HEAD, POST
-- Has custom headers
-- Uses Content-Type other than form-data, text/plain, application/x-www-form-urlencoded
-
-## Common Issues
-
-### "No 'Access-Control-Allow-Origin' header"
-
-CORS middleware must be **before** your endpoints:
-
-```pascal
-// ✅ Correct order
-App.UseCors(CorsOptions);
-App.MapGet('/api', Handler);
-
-// ❌ Wrong order
-App.MapGet('/api', Handler);
-App.UseCors(CorsOptions);  // Too late!
-```
-
-### Credentials with wildcard origin
-
-```pascal
-// ❌ This fails
-TCorsOptions.Create
-  .AllowAnyOrigin
-  .AllowCredentials;  // Can't use both!
-
-// ✅ Use specific origins
-TCorsOptions.Create
-  .AllowOrigins(['https://myapp.com'])
-  .AllowCredentials;
-```
+1. **`AllowAnyOrigin` vs `AllowCredentials`**: Most browsers will reject a response if it allows *any origin* while also allowing *credentials*. You must specify explicit origins if you need credentials.
+2. **Order Matters**: CORS middleware should be one of the first components in the pipeline to properly handle `OPTIONS` preflight requests.
 
 ---
 
-[← Rate Limiting](rate-limiting.md) | [Next: Caching →](caching.md)
+[← Rate Limiting](rate-limiting.md) | [Next: Response Caching →](cache.md)

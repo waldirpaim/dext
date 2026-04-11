@@ -1,67 +1,62 @@
-# CORS
+# CORS (Cross-Origin Resource Sharing)
 
-Configure Cross-Origin Resource Sharing para clientes de browser.
+Gerencie requisições de origens cruzadas de forma segura usando um configurador fluente.
 
-## Configuração Rápida
+## O que é CORS?
+
+CORS é um mecanismo de segurança que permite que um servidor indique quais origens (domínios) têm permissão para acessar seus recursos. Por padrão, os navegadores bloqueiam requisições cross-origin por segurança.
+
+## Uso Básico
+
+### 1. Permissivo (Desenvolvimento)
+
+Para permitir qualquer origem durante o desenvolvimento:
 
 ```pascal
-App.Configure(procedure(App: IApplicationBuilder)
+App.UseCors(procedure(Builder: TCorsBuilder)
   begin
-    App.UseCors(
-      TCorsOptions.Create
-        .AllowAnyOrigin
-        .AllowAnyMethod
-        .AllowAnyHeader
-    );
-    
-    // Endpoints...
+    Builder
+      .AllowAnyOrigin
+      .AllowAnyMethod
+      .AllowAnyHeader;
   end);
 ```
 
-> ⚠️ `AllowAnyOrigin` é apenas para desenvolvimento. Em produção, especifique origens permitidas.
+### 2. Restritivo (Produção)
 
-## Configuração de Produção
+Para produção, sempre especifique seus domínios:
 
 ```pascal
-App.UseCors(
-  TCorsOptions.Create
-    .AllowOrigins(['https://meuapp.com', 'https://admin.meuapp.com'])
-    .AllowMethods(['GET', 'POST', 'PUT', 'DELETE'])
-    .AllowHeaders(['Content-Type', 'Authorization'])
-    .AllowCredentials
-    .MaxAge(3600)  // Cache de preflight: 1 hora
-);
+App.UseCors(procedure(Builder: TCorsBuilder)
+  begin
+    Builder
+      .WithOrigins(['https://meuapp.com', 'https://www.meuapp.com'])
+      .WithMethods(['GET', 'POST', 'PUT', 'DELETE'])
+      .WithHeaders(['Content-Type', 'Authorization'])
+      .AllowCredentials
+      .WithMaxAge(3600); // Cache da resposta preflight por 1 hora
+  end);
 ```
 
-## Referência de Opções
+## Opções de Configuração
 
 | Método | Descrição |
 |--------|-----------|
-| `.AllowAnyOrigin` | Permitir todas as origens (apenas dev) |
-| `.AllowOrigins([...])` | Permitir origens específicas |
-| `.AllowAnyMethod` | Permitir todos os métodos HTTP |
-| `.AllowMethods([...])` | Permitir métodos específicos |
-| `.AllowAnyHeader` | Permitir todos os headers |
-| `.AllowHeaders([...])` | Permitir headers específicos |
-| `.AllowCredentials` | Permitir cookies/headers de auth |
-| `.MaxAge(segundos)` | Cache da resposta preflight |
+| `WithOrigins(['...'])` | Define domínios permitidos. |
+| `AllowAnyOrigin` | Permite qualquer origem (*). |
+| `WithMethods(['...'])` | Define verbos HTTP permitidos. |
+| `AllowAnyMethod` | Permite qualquer verbo HTTP. |
+| `WithHeaders(['...'])` | Define headers de requisição permitidos. |
+| `AllowAnyHeader` | Permite qualquer header de requisição. |
+| `WithExposedHeaders(['...'])` | Headers que o cliente tem permissão para ler. |
+| `AllowCredentials` | Habilita compartilhamento de cookies/auth. |
+| `WithMaxAge(segundos)` | Define quanto tempo resultados preflight são cacheados. |
 
-## Problemas Comuns
+## Notas Importantes de Segurança
 
-### "No 'Access-Control-Allow-Origin' header"
-
-O middleware CORS deve estar **antes** dos seus endpoints:
-
-```pascal
-// ✅ Ordem correta
-App.UseCors(CorsOptions);
-App.MapGet('/api', Handler);
-
-// ❌ Ordem errada
-App.MapGet('/api', Handler);
-App.UseCors(CorsOptions);  // Tarde demais!
-```
+1. **`AllowAnyOrigin` vs `AllowCredentials`**: A maioria dos navegadores rejeitará uma resposta se ela permitir *qualquer origem* e ao mesmo tempo permitir *credentials*. Você deve especificar origens explícitas se precisar de cookies/auth.
+2. **Ordem Importa**: O middleware CORS deve ser um dos primeiros componentes no pipeline para capturar requisições `OPTIONS` (preflight) corretamente.
 
 ---
 
-[← Rate Limiting](rate-limiting.md) | [Próximo: Health Checks →](health-checks.md)
+[← Rate Limiting](rate-limiting.md) | [Próximo: Cache de Resposta →](cache.md)

@@ -135,6 +135,22 @@ var Pagina := Context.Users
   .ToList;
 ```
 
+## No Tracking Queries (Performance)
+
+Use `.AsNoTracking` para cenários de **Apenas Leitura**. Isso retorna objetos sem adicioná-los ao `IdentityMap` ou `ChangeTracker`, resultando em uma performance ~30-50% superior e menor uso de memória.
+
+> [!IMPORTANT]
+> **Gerenciamento de Memória**: No modo No Tracking, a `IList<T>` retornada **é dona** dos objetos. Eles são liberados automaticamente quando a referência da lista sai de escopo.
+
+```pascal
+// Ideal para APIs e Relatórios
+var Users := Context.Users
+  .AsNoTracking
+  .Where(u.IsActive = True)
+  .ToList; // Os objetos serão liberados quando Users for limpo
+```
+
+
 ## Projeção (Select)
 
 ```pascal
@@ -208,6 +224,33 @@ Queries são lazy (preguiçosas) — executadas apenas quando você chama um mé
 | `.Count` | Executa e retorna contagem |
 | `.Any` | Executa e retorna boolean |
 | `.Find(id)` | Executa e retorna por PK |
+
+## Consultas Avançadas (Joins & Agrupamento)
+
+Para cenários complexos, você pode usar a tipagem forte de Specification ou Joins diretos.
+
+### Joins
+
+Ligue tabelas relacionadas usando `.Join`.
+
+```pascal
+var Resultados := Context.Orders
+  .Join('Customers', 'C', 'Orders.CustomerId = C.Id')
+  .Where(TOrder.Props.Total > 500)
+  .ToList;
+```
+
+### Group By & Having
+
+Agregue dados e filtre resultados agrupados.
+
+```pascal
+var Stats := Context.Orders
+  .GroupBy('CustomerId')
+  .Having(TOrder.Props.Total.Sum > 1000)
+  .Select(['CustomerId', 'Total.Sum'])
+  .ToList;
+```
 
 ## Performance & Cache
 

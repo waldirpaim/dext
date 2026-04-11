@@ -4,11 +4,13 @@ Essential features for building production-ready APIs.
 
 ## Chapters
 
-1. [OpenAPI / Swagger](openapi-swagger.md) - Auto-generated documentation
-2. [Rate Limiting](rate-limiting.md) - Request throttling
-3. [CORS](cors.md) - Cross-origin resource sharing
-4. [Response Caching](cache.md) - Cache headers & strategies
-5. [Health Checks](health-checks.md) - Monitoring endpoints
+1. [Middleware](middleware.md) - Request pipeline components
+2. [Action Filters](filters.md) - Declarative interceptors
+3. [OpenAPI / Swagger](openapi-swagger.md) - Auto-generated documentation
+4. [Rate Limiting](rate-limiting.md) - Request throttling
+5. [CORS](cors.md) - Cross-origin resource sharing
+6. [Response Caching](cache.md) - Cache headers & strategies
+7. [Health Checks](health-checks.md) - Monitoring endpoints
 
 ## Quick Examples
 
