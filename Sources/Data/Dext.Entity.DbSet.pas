@@ -123,7 +123,8 @@ type
     procedure Update(const AEntity: TObject); overload;
     /// <summary>Marks an entity for logical or physical deletion.</summary>
     procedure Remove(const AEntity: TObject); overload;
-    function ListObjects(const AExpression: IExpression): IList<TObject>;
+    function ListObjects(const AExpression: IExpression): IList<TObject>; overload;
+    function ListObjects(const ASpec: ISpecification): IList<TObject>; overload;
     procedure PersistAdd(const AEntity: TObject);
     procedure PersistAddRange(const AEntities: TArray<TObject>);
     procedure PersistUpdate(const AEntity: TObject);
@@ -922,6 +923,15 @@ end;
 function TDbSet<T>.Add(const AEntity: T): IDbSet<T>;
 begin
   FContext.ChangeTracker.Track(AEntity, esAdded);
+  
+  // Ensure the DbSet owns this entity if it's not already tracked
+  var Id := GetEntityId(AEntity);
+  if (Id = '') or (not FIdentityMap.ContainsKey(Id)) then
+  begin
+    if not FOrphans.Contains(AEntity) then
+      FOrphans.Add(AEntity);
+  end;
+  
   Result := Self;
 end;
 
@@ -935,6 +945,15 @@ end;
 function TDbSet<T>.Update(const AEntity: T): IDbSet<T>;
 begin
   FContext.ChangeTracker.Track(AEntity, esModified);
+  
+  // Ensure the DbSet owns this entity if it's not already tracked
+  var Id := GetEntityId(AEntity);
+  if (Id <> '') and (not FIdentityMap.ContainsKey(Id)) then
+  begin
+    if not FOrphans.Contains(AEntity) then
+      FOrphans.Add(AEntity);
+  end;
+  
   Result := Self;
 end;
 
@@ -1167,7 +1186,12 @@ begin
      // Add to identity map using full entity ID
      var NewId := GetEntityId(T(AEntity)); 
      if not FIdentityMap.ContainsKey(NewId) then
-       FIdentityMap.Add(NewId, T(AEntity));
+     begin
+       if FOrphans.Contains(T(AEntity)) then
+         FIdentityMap.Add(NewId, FOrphans.Extract(T(AEntity)))
+       else
+         FIdentityMap.Add(NewId, T(AEntity));
+     end;
     finally
       Ctx.Free;
     end;
@@ -1280,6 +1304,16 @@ begin
       end;
     finally
       Ctx.Free;
+    end;
+
+    // After successful update, ensure it's in the Identity Map and not in Orphans
+    var Id := GetEntityId(T(AEntity));
+    if not FIdentityMap.ContainsKey(Id) then
+    begin
+       if FOrphans.Contains(T(AEntity)) then
+         FIdentityMap.Add(Id, FOrphans.Extract(T(AEntity)))
+       else
+         FIdentityMap.Add(Id, T(AEntity));
     end;
   finally
     Generator.Free;
@@ -1600,6 +1634,7 @@ end;
 procedure TDbSet<T>.Clear;
 begin
   FIdentityMap.Clear;
+  FOrphans.Clear;
 end;
 
 procedure TDbSet<T>.DetachAll;
@@ -1622,17 +1657,51 @@ end;
 
 function TDbSet<T>.ListObjects(const AExpression: IExpression): IList<TObject>;
 var
-  TypedList: IList<T>;
-  Item: T;
-  Obj: TObject;
+  Items: IList<T>;
 begin
+  Items := ToList(AExpression);
   Result := TCollections.CreateList<TObject>;
-  TypedList := ToList(AExpression);
-  for Item in TypedList do
+  for var i := 0 to Items.Count - 1 do
+    Result.Add(TObject(Items[i]));
+end;
+
+function TDbSet<T>.ListObjects(const ASpec: ISpecification): IList<TObject>;
+var
+  TypedSpec: ISpecification<T>;
+  Items: IList<T>;
+begin
+  if ASpec = nil then
+    Exit(ListObjects(IExpression(nil)));
+
+  Result := TCollections.CreateList<TObject>;
+  
+  if Supports(ASpec, ISpecification<T>, TypedSpec) then
   begin
-    Obj := TObject(Item);
-    Result.Add(Obj);
+    Items := ToList(TypedSpec);
+  end
+  else
+  begin
+    TypedSpec := TSpecification<T>.Create;
+    if ASpec.Expression <> nil then
+       TypedSpec.Where(ASpec.Expression);
+       
+    if ASpec.IsPagingEnabled then
+    begin
+      TypedSpec.Skip(ASpec.GetSkip);
+      TypedSpec.Take(ASpec.GetTake);
+    end;
+    
+    for var Order in ASpec.GetOrderBy do
+      TypedSpec.OrderBy(Order);
+      
+    for var Incl in ASpec.GetIncludes do
+      TypedSpec.Include(Incl);
+      
+    Items := ToList(TypedSpec);
   end;
+
+  for var i := 0 to Items.Count - 1 do
+    Result.Add(TObject(Items[i]));
 end;
 
 

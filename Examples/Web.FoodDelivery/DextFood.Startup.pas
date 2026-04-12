@@ -9,11 +9,11 @@ uses
   Dext,
   Dext.Entity,           // Facade para ORM (TDbContext, TSnakeCaseNamingStrategy)
   Dext.Entity.Core,      // Explicitly needed for IDbSet<T>
-  Dext.Web,
   Dext.RateLimiting,
   Dext.RateLimiting.Policy,
   Dext.Caching,
   Dext.Web.DataApi,
+  Dext.Web,
   DextFood.Domain;
 
 type

@@ -15,8 +15,11 @@ uses
   System.SysUtils,
   System.Character,
   System.TypInfo,
+  System.Generics.Collections,
+  Dext.Logging,
   Dext.DI.Interfaces,
   Dext.Entity,
+  Dext.Entity.Context,
   Dext.Entity.Core,
   Dext.Json,
   Dext.Json.Types,
@@ -31,7 +34,13 @@ uses
   Dext.OpenAPI.Extensions,
   Dext.Web.DataApi.Resolver,
   Dext.Web.DataApi.Utils,
-  Dext.Web.ModelBinding;
+  Dext.Web.ModelBinding,
+  Dext.Core.Reflection,
+  Dext.Specifications.Base,
+  Dext.Specifications.Interfaces,
+  Dext.Specifications.Parser,
+  Dext.Collections,
+  Dext.Logging.Global;
 
 type
   TApiMethod = (amGet, amGetList, amPost, amPut, amDelete);
@@ -40,7 +49,6 @@ type
   const AllApiMethods = [amGet, amGetList, amPost, amPut, amDelete];
 
 type
-  /// <summary>Base options for Data API, allowing non-generic configuration.</summary>
   /// <summary>
   ///   Configuration options for a Data API, allowing control over permissions, naming conventions, and Swagger.
   /// </summary>
@@ -72,9 +80,35 @@ type
     property SwaggerDescription: string read FSwaggerDescription write FSwaggerDescription;
     property NamingStrategy: TCaseStyle read FNamingStrategy write FNamingStrategy;
     property EnumStyle: TEnumStyle read FEnumStyle write FEnumStyle;
+    
+    class var FDefaults: TDataApiOptions;
+    class constructor Create;
+    class destructor Destroy;
+    class function Defaults: TDataApiOptions;
   end;
 
-  TDataApiOptions<T> = class(TDataApiOptions)
+  /// <summary>
+  ///   Attribute to mark an entity class for automatic Data API generation.
+  /// </summary>
+  DataApiAttribute = class(TCustomAttribute)
+  private
+    FRoute: string;
+    FDbContext: TClass;
+  public
+    constructor Create(const ARoute: string = ''; ADbContext: TClass = nil);
+    property Route: string read FRoute;
+    property DbContext: TClass read FDbContext;
+  end;
+
+  /// <summary>
+  ///   Attribute to exclude a specific entity class from automatic Data API generation.
+  /// </summary>
+  DataApiIgnoreAttribute = class(TCustomAttribute);
+
+  /// <summary>
+  ///   Strong-typed options for Data API generation.
+  /// </summary>
+  TDataApiOptions<T: class> = class(TDataApiOptions)
   public
     // Fluent configuration
     function Allow(AMethods: TApiMethods): TDataApiOptions<T>;
@@ -95,47 +129,54 @@ type
   end;
 
   /// <summary>
-  ///   Handler responsible for processing HTTP requests for a specific entity, mapping them to the ORM.
+  ///   Base handler for Data APIs using dynamic TClass and IDbSet.
   /// </summary>
-  TDataApiHandler<T: class> = class
-  private
-    FOptions: TDataApiOptions<T>;
-    FPath: string;
-    FDbContext: TDbContext;  // Reference to DbContext (not owned)
-    FUseExplicitContext: Boolean;
-      
-    function GetDbContext(const Context: IHttpContext): TDbContext;
-    function EntityToJson(const Entity: T): string;
-    function CheckAuthorization(const Context: IHttpContext; IsWriteOperation: Boolean): IResult;
-  public
-    constructor Create(const APath: string; AOptions: TDataApiOptions<T>; ADbContext: TDbContext = nil);
-    destructor Destroy; override;
-      
+  TDataApiHandler = class
+  protected
+    FRoutePrefix: string;
+    FOptions: TDataApiOptions;
+    FDbContext: TDbContext;
+    FEntityClass: TClass;
     procedure RegisterRoutes(const ABuilder: IApplicationBuilder);
-      
-    // Option A: Explicit DbContext parameter
-    class procedure Map(const ABuilder: IApplicationBuilder; const APath: string; ADbContext: TDbContext); overload;
-    class procedure Map(const ABuilder: IApplicationBuilder; const APath: string; ADbContext: TDbContext; AOptions: TDataApiOptions<T>); overload;
-    // Option B: Resolve DbContext from DI (Context.Services)
-    class procedure Map(const ABuilder: IApplicationBuilder; const APath: string); overload;
-    class procedure Map(const ABuilder: IApplicationBuilder; const APath: string; AOptions: TDataApiOptions<T>); overload;
-      
-    // Request Handlers
+    function CheckAuthorization(const Context: IHttpContext; AIsWrite: Boolean): IResult;
+    function GetJsonSettings: TJsonSettings;
+    procedure ApplyQueryParameters(const Context: IHttpContext; const ASpec: ISpecification);
+    function ResolvePropertyName(const ASnakeName: string): string;
+    function GetDbContext(const Context: IHttpContext): TDbContext;
+    function ValueToJson(const AValue: TValue): string;
+  public
+    constructor Create(const ARoutePrefix: string; AEntityClass: TClass; AOptions: TDataApiOptions = nil; ADbContext: TDbContext = nil);
+    destructor Destroy; override;
+
+    // Handlers
     function HandleGetList(const Context: IHttpContext): IResult;
     function HandleGet(const Context: IHttpContext): IResult;
-    function HandlePost(const Context: IHttpContext): IResult;
-    function HandlePut(const Context: IHttpContext): IResult;
+    procedure HandlePost(const Context: IHttpContext; var Result: IResult);
+    procedure HandlePut(const Context: IHttpContext; var Result: IResult);
     function HandleDelete(const Context: IHttpContext): IResult;
+
+    class procedure Map(const ABuilder: IApplicationBuilder; const AClass: TClass; const APath: string = ''; ADbContext: TDbContext = nil; AOptions: TDataApiOptions = nil);
   end;
 
-  /// <summary>Non-generic entry point for Data API mapping.</summary>
   /// <summary>
-  ///   Entry point for simplified mapping of Data APIs in the application pipeline.
+  ///   Strong-typed version of DataAPI handler for backward compatibility and fluent API.
+  /// </summary>
+  TDataApiHandler<T: class, constructor> = class(TDataApiHandler)
+  public
+    constructor Create(const ARoutePrefix: string; AOptions: TDataApiOptions<T>; ADbContext: TDbContext = nil);
+    class procedure Map(const ABuilder: IApplicationBuilder; const APath: string; ADbContext: TDbContext = nil; AOptions: TDataApiOptions<T> = nil); overload;
+    class procedure Map(const ABuilder: IApplicationBuilder; const APath: string; AOptions: TDataApiOptions<T>); overload;
+  end;
+
+  /// <summary>
+  ///   Public API for DataAPI registration and automatic scanning.
   /// </summary>
   TDataApi = class
   public
-    class procedure Map(const ABuilder: IApplicationBuilder; const AClass: TClass; const APath: string; AOptions: TDataApiOptions = nil);
+    class procedure Map(const ABuilder: IApplicationBuilder; const AClass: TClass; const APath: string = ''; AOptions: TDataApiOptions = nil);
+    class procedure MapAll(const ABuilder: IApplicationBuilder);
   end;
+
 
 /// <summary>Factory function for Data API options to simplify syntax.</summary>
 function DataApiOptions: TDataApiOptions<TObject>;
@@ -143,38 +184,38 @@ function DataApiOptions: TDataApiOptions<TObject>;
 implementation
 
 uses
-  System.DateUtils,
-  Dext,
-  Dext.Core.Activator,
-  Dext.Collections,
-  Dext.Collections.Dict,
-  Dext.Core.DateUtils,
-  Dext.Specifications.Types,
-  Dext.Specifications.Interfaces,
-  Dext.Specifications.OrderBy,
-  Dext.Specifications.SQL.Generator,
-  Dext.Entity.Query,
+  System.StrUtils,
+  Dext.Http.StatusCodes,
+  Dext.Web.Results,
   Dext.Json.Utf8,
   Dext.Auth.Identity,
-  Dext.Web.Results,
-  Dext.Utils,
-  Dext.Core.Reflection,
-  Dext.Types.UUID;
-
+  Dext.Collections.Base;
 
 { TDataApiOptions }
 
 constructor TDataApiOptions.Create;
 begin
+  inherited Create;
   FAllowedMethods := AllApiMethods;
   FTenantIdRequired := False;
   FNamingStrategy := TCaseStyle.CaseInherit;
   FEnumStyle := TEnumStyle.EnumInherit;
+  FEnableSwagger := True;
 end;
 
-function DataApiOptions: TDataApiOptions<TObject>;
+class constructor TDataApiOptions.Create;
 begin
-  Result := TDataApiOptions<TObject>.Create;
+  FDefaults := TDataApiOptions.Create;
+end;
+
+class destructor TDataApiOptions.Destroy;
+begin
+  FDefaults.Free;
+end;
+
+class function TDataApiOptions.Defaults: TDataApiOptions;
+begin
+  Result := FDefaults;
 end;
 
 { TDataApiOptions<T> }
@@ -273,750 +314,389 @@ begin
   Result := Self;
 end;
 
-{ TDataApiHandler<T> }
-
-constructor TDataApiHandler<T>.Create(const APath: string; AOptions: TDataApiOptions<T>; ADbContext: TDbContext);
+function DataApiOptions: TDataApiOptions<TObject>;
 begin
-  inherited Create;
-  FPath := APath;
-  FOptions := AOptions;
-  FDbContext := ADbContext;
-  FUseExplicitContext := (ADbContext <> nil);
-  if FOptions = nil then
-    FOptions := TDataApiOptions<T>.Create;
+  Result := TDataApiOptions<TObject>.Create;
 end;
 
-destructor TDataApiHandler<T>.Destroy;
+{ DataApiAttribute }
+
+constructor DataApiAttribute.Create(const ARoute: string; ADbContext: TClass);
+begin
+  FRoute := ARoute;
+  FDbContext := ADbContext;
+end;
+
+{ TDataApiHandler }
+
+constructor TDataApiHandler.Create(const ARoutePrefix: string; AEntityClass: TClass; AOptions: TDataApiOptions;
+  ADbContext: TDbContext);
+begin
+  inherited Create;
+  FRoutePrefix := ARoutePrefix;
+  FEntityClass := AEntityClass;
+  FOptions := AOptions;
+  FDbContext := ADbContext;
+  if FOptions = nil then
+    FOptions := TDataApiOptions.Create;
+end;
+
+destructor TDataApiHandler.Destroy;
 begin
   FOptions.Free;
-  // Note: FDbContext is NOT owned by handler - do not free
   inherited;
 end;
 
-function TDataApiHandler<T>.GetDbContext(const Context: IHttpContext): TDbContext;
-var
-  Obj: TObject;
-  TargetClass: TClass;
+function TDataApiHandler.GetDbContext(const Context: IHttpContext): TDbContext;
 begin
-  if FUseExplicitContext then
-    Result := FDbContext
-  else
-  begin
-    // Determine which context class to resolve
-    if (FOptions <> nil) and (FOptions.ContextClass <> nil) then
-      TargetClass := FOptions.ContextClass
-    else
-      TargetClass := TDbContext;
-
-    // Resolve from DI using TServiceType
-    Obj := Context.Services.GetService(TServiceType.FromClass(TargetClass));
-    if Obj = nil then
-      raise Exception.CreateFmt('%s not registered in DI container. Use Map(App, Path, DbContext) or register it in ConfigureServices.', [TargetClass.ClassName]);
+  if FDbContext <> nil then
+    Exit(FDbContext);
     
-    if not (Obj is TDbContext) then
-      raise Exception.CreateFmt('Service resolved for %s is not a TDbContext descendant.', [TargetClass.ClassName]);
-      
-    Result := TDbContext(Obj);
-  end;
-end;
-
-function TDataApiHandler<T>.CheckAuthorization(const Context: IHttpContext; IsWriteOperation: Boolean): IResult;
-var
-  User: IClaimsPrincipal;
-  RequiredRoles: string;
-  RoleArray: TArray<string>;
-  Role: string;
-  HasRole: Boolean;
-begin
-  Result := nil;  // nil = authorized
-  
-  if not FOptions.RequireAuthentication then
-    Exit;  // No auth required
-  
-  // Check if user is authenticated
-  User := Context.User;
-  if (User = nil) or not User.Identity.IsAuthenticated then
-    Exit(Results.StatusCode(401, '{"error":"Authentication required"}'));
-  
-  // Determine which roles to check
-  if IsWriteOperation then
-    RequiredRoles := FOptions.RolesForWrite
+  if FOptions.ContextClass <> nil then
+    Result := Context.Services.GetService(TServiceType.FromClass(FOptions.ContextClass)) as TDbContext
   else
-    RequiredRoles := FOptions.RolesForRead;
-  
-  if RequiredRoles = '' then
-    Exit;  // Auth required but no specific roles
-  
-  // Check roles (comma-separated, user must have at least one)
-  RoleArray := RequiredRoles.Split([',']);
-  HasRole := False;
-  for Role in RoleArray do
-  begin
-    if User.IsInRole(Role.Trim) then
-    begin
-      HasRole := True;
-      Break;
-    end;
-  end;
-  
-  if not HasRole then
-    Result := Results.StatusCode(403, Format('{"error":"Forbidden - requires one of roles: %s"}', [RequiredRoles]));
+    Result := TDextServices.GetServiceObject<TDbContext>(Context.Services);
+    
+  if Result = nil then
+    raise Exception.Create('DbContext not found in DI container for DataAPI');
 end;
 
-function TDataApiHandler<T>.EntityToJson(const Entity: T): string;
+function TDataApiHandler.CheckAuthorization(const Context: IHttpContext; AIsWrite: Boolean): IResult;
 var
-  FinalSettings: TJsonSettings;
+  RequiredRoles: string;
 begin
-  if Entity = nil then
-    Exit('null');
+  Result := nil;
+  if not FOptions.RequireAuthentication then Exit;
 
-  FinalSettings := TDextJson.GetDefaultSettings;
-  if FOptions.NamingStrategy <> TCaseStyle.CaseInherit then
-    FinalSettings.CaseStyle := FOptions.NamingStrategy;
-  if FOptions.EnumStyle <> TEnumStyle.EnumInherit then
-    FinalSettings.EnumStyle := FOptions.EnumStyle;
+  if not Context.User.Identity.IsAuthenticated then
+    Exit(Results.StatusCode(401, '{"error":"Unauthorized"}'));
 
-  var Serializer := TDextSerializer.Create(FinalSettings);
+  RequiredRoles := IfThen(AIsWrite, FOptions.RolesForWrite, FOptions.RolesForRead);
+  if RequiredRoles <> '' then
+  begin
+    var Roles := RequiredRoles.Split([',']);
+    var HasRole := False;
+    for var Role in Roles do
+      if Context.User.IsInRole(Role.Trim) then
+      begin
+        HasRole := True;
+        Break;
+      end;
+      
+    if not HasRole then
+      Result := Results.StatusCode(403, '{"error":"Forbidden"}');
+  end;
+end;
+
+function TDataApiHandler.ValueToJson(const AValue: TValue): string;
+begin
+  var Settings := GetJsonSettings;
+  var Serializer := TDextSerializer.Create(Settings);
   try
-    Result := Serializer.Serialize(TValue.From<T>(Entity));
+    Result := Serializer.Serialize(AValue);
   finally
     Serializer.Free;
   end;
 end;
 
-procedure TDataApiHandler<T>.RegisterRoutes(const ABuilder: IApplicationBuilder);
-var
-  CleanPath, EntityTag: string;
+function TDataApiHandler.GetJsonSettings: TJsonSettings;
 begin
-  CleanPath := FPath.TrimRight(['/']);
-  
-  // B.2: Centralized naming logic
-  EntityTag := TDataApiNaming.GetEntityTag(TypeInfo(T));
-  
-  if FOptions.SwaggerDescription = '' then
-    FOptions.SwaggerDescription := TDataApiNaming.GetEntityDescription(TypeInfo(T));
+  Result := TJsonSettings.Default;
+  Result.CaseStyle := FOptions.NamingStrategy;
+  Result.EnumStyle := FOptions.EnumStyle;
+end;
 
-  // GET List
-  if amGetList in FOptions.AllowedMethods then
+procedure TDataApiHandler.ApplyQueryParameters(const Context: IHttpContext; const ASpec: ISpecification);
+var
+  PropName, BinaryOp, ValStr: string;
+begin
+  for var Param in Context.Request.Query.ToArray do
   begin
-    ABuilder.MapGet(CleanPath, 
-      procedure(Ctx: IHttpContext)
-      begin
-        var Res := HandleGetList(Ctx);
-        Res.Execute(Ctx);
-      end);
+    // Reservas de paginação
+    if Param.Key = '_limit' then begin ASpec.Take(StrToIntDef(Param.Value, 50)); Continue; end;
+    if Param.Key = '_offset' then begin ASpec.Skip(StrToIntDef(Param.Value, 0)); Continue; end;
     
-    // Add Swagger metadata
-    if FOptions.EnableSwagger then
-    begin
-      TEndpointMetadataExtensions.WithSummary(ABuilder, 'List all ' + EntityTag);
-      TEndpointMetadataExtensions.WithDescription(ABuilder, 
-        'Returns a list of ' + EntityTag + '. Supports filtering by property values, ' +
-        'pagination with _limit and _offset query parameters.');
-      TEndpointMetadataExtensions.WithTag(ABuilder, EntityTag);
-      TEndpointMetadataExtensions.WithResponse(ABuilder, 200, 'List of ' + EntityTag, TypeInfo(T));
-      if FOptions.RequireAuthentication then
-        TEndpointMetadataExtensions.RequireAuthorization(ABuilder, 'bearerAuth');
-    end;
-  end;
+    // Filtros dinâmicos
+    BinaryOp := '=';
+    PropName := Param.Key;
 
-  // GET by ID
-  if amGet in FOptions.AllowedMethods then
-  begin
-    ABuilder.MapGet(CleanPath + '/{id}', 
-      procedure(Ctx: IHttpContext)
-      begin
-        var Res := HandleGet(Ctx);
-        Res.Execute(Ctx);
-      end);
-    
-    if FOptions.EnableSwagger then
-    begin
-      TEndpointMetadataExtensions.WithSummary(ABuilder, 'Get ' + EntityTag.TrimRight(['s']) + ' by ID');
-      TEndpointMetadataExtensions.WithDescription(ABuilder, 
-        'Returns a single ' + EntityTag.TrimRight(['s']) + ' by its unique identifier.');
-      TEndpointMetadataExtensions.WithTag(ABuilder, EntityTag);
-      TEndpointMetadataExtensions.WithResponse(ABuilder, 200, EntityTag.TrimRight(['s']) + ' found', TypeInfo(T));
-      TEndpointMetadataExtensions.WithResponse(ABuilder, 404, 'Entity not found');
-      if FOptions.RequireAuthentication then
-        TEndpointMetadataExtensions.RequireAuthorization(ABuilder, 'bearerAuth');
-    end;
-  end;
+    if PropName.EndsWith('_gt') then begin BinaryOp := '>'; PropName := PropName.Substring(0, PropName.Length - 3); end
+    else if PropName.EndsWith('_gte') then begin BinaryOp := '>='; PropName := PropName.Substring(0, PropName.Length - 4); end
+    else if PropName.EndsWith('_lt') then begin BinaryOp := '<'; PropName := PropName.Substring(0, PropName.Length - 3); end
+    else if PropName.EndsWith('_lte') then begin BinaryOp := '<='; PropName := PropName.Substring(0, PropName.Length - 4); end
+    else if PropName.EndsWith('_neq') then begin BinaryOp := '<>'; PropName := PropName.Substring(0, PropName.Length - 4); end
+    else if PropName.EndsWith('_like') then begin BinaryOp := 'LIKE'; PropName := PropName.Substring(0, PropName.Length - 5); end;
 
-  // POST
-  if amPost in FOptions.AllowedMethods then
-  begin
-    ABuilder.MapPost(CleanPath, 
-      procedure(Ctx: IHttpContext)
-      begin
-        var Res := HandlePost(Ctx);
-        Res.Execute(Ctx);
-      end);
-    
-    if FOptions.EnableSwagger then
+    var ActualName := ResolvePropertyName(PropName);
+    if ActualName <> '' then
     begin
-      TEndpointMetadataExtensions.WithSummary(ABuilder, 'Create ' + EntityTag.TrimRight(['s']));
-      TEndpointMetadataExtensions.WithDescription(ABuilder, 
-        'Creates a new ' + EntityTag.TrimRight(['s']) + '. Returns the created entity with its generated ID.');
-      TEndpointMetadataExtensions.WithTag(ABuilder, EntityTag);
-      TEndpointMetadataExtensions.WithRequestType(ABuilder, TypeInfo(T));
-      TEndpointMetadataExtensions.WithResponse(ABuilder, 201, 'Entity created', TypeInfo(T));
-      TEndpointMetadataExtensions.WithResponse(ABuilder, 400, 'Invalid request body');
-      if FOptions.RequireAuthentication then
-        TEndpointMetadataExtensions.RequireAuthorization(ABuilder, 'bearerAuth');
-    end;
-  end;
-
-  // PUT
-  if amPut in FOptions.AllowedMethods then
-  begin
-    ABuilder.MapPut(CleanPath + '/{id}', 
-      procedure(Ctx: IHttpContext)
-      begin
-        var Res := HandlePut(Ctx);
-        Res.Execute(Ctx);
-      end);
-    
-    if FOptions.EnableSwagger then
-    begin
-      TEndpointMetadataExtensions.WithSummary(ABuilder, 'Update ' + EntityTag.TrimRight(['s']));
-      TEndpointMetadataExtensions.WithDescription(ABuilder, 
-        'Updates an existing ' + EntityTag.TrimRight(['s']) + ' by ID.');
-      TEndpointMetadataExtensions.WithTag(ABuilder, EntityTag);
-      TEndpointMetadataExtensions.WithRequestType(ABuilder, TypeInfo(T));
-      TEndpointMetadataExtensions.WithResponse(ABuilder, 200, 'Entity updated', TypeInfo(T));
-      TEndpointMetadataExtensions.WithResponse(ABuilder, 404, 'Entity not found');
-      if FOptions.RequireAuthentication then
-        TEndpointMetadataExtensions.RequireAuthorization(ABuilder, 'bearerAuth');
-    end;
-  end;
-
-  // DELETE
-  if amDelete in FOptions.AllowedMethods then
-  begin
-    ABuilder.MapDelete(CleanPath + '/{id}', 
-      procedure(Ctx: IHttpContext) 
-      begin
-        var Res := HandleDelete(Ctx);
-        Res.Execute(Ctx);
-      end);
-    
-    if FOptions.EnableSwagger then
-    begin
-      TEndpointMetadataExtensions.WithSummary(ABuilder, 'Delete ' + EntityTag.TrimRight(['s']));
-      TEndpointMetadataExtensions.WithDescription(ABuilder, 
-        'Deletes an existing ' + EntityTag.TrimRight(['s']) + ' by ID.');
-      TEndpointMetadataExtensions.WithTag(ABuilder, EntityTag);
-      TEndpointMetadataExtensions.WithResponse(ABuilder, 204, 'Entity deleted');
-      TEndpointMetadataExtensions.WithResponse(ABuilder, 404, 'Entity not found');
-      if FOptions.RequireAuthentication then
-        TEndpointMetadataExtensions.RequireAuthorization(ABuilder, 'bearerAuth');
+       ValStr := Param.Value;
+       var Expr := TStringExpressionParser.Parse(ActualName + ' ' + BinaryOp + ' ' + ValStr);
+       if Expr <> nil then
+         ASpec.Where(Expr);
     end;
   end;
 end;
 
-
-function TDataApiHandler<T>.HandleGetList(const Context: IHttpContext): IResult;
+function TDataApiHandler.ResolvePropertyName(const ASnakeName: string): string;
 var
-  DbCtx: TDbContext;
-  Query: IStringDictionary;
-  i: Integer;
-  ParamName, ParamValue: string;
-  FilterExpr: IExpression;
-  NewExpr: IExpression;
   Ctx: TRttiContext;
   Typ: TRttiType;
   Prop: TRttiProperty;
-  PropType: TRttiType;
-  IntVal: Integer;
-  BoolVal: Boolean;
-  Limit, Offset: Integer;
-  OrderList: IList<IOrderBy>;
-  AuthResult: IResult;
-  Map: TEntityMap;
-  PropMap: TPropertyMap;
-  Qry: TFluentQuery<T>;
 begin
-  // Authorization check
-  AuthResult := CheckAuthorization(Context, False);  // Read operation
-  if AuthResult <> nil then
-    Exit(AuthResult);
-    
+  Result := '';
+  Ctx := TRttiContext.Create;
   try
-    DbCtx := GetDbContext(Context);
-    
-    // Parse query parameters for filtering and ordering
-    Query := Context.Request.Query;
-    FilterExpr := nil;
-    Limit := 0;
-    Offset := 0;
-    
-    OrderList := TCollections.CreateList<IOrderBy>;
-    try
-      var Properties: TArray<TRttiProperty>;
-      Ctx := TRttiContext.Create;
-      try
-        Typ := Ctx.GetType(TypeInfo(T));
-        if Typ = nil then Exit(Results.BadRequest('Entity type not found in RTTI'));
-        Properties := Typ.GetProperties;
-        Map := TModelBuilder.Instance.GetMap(TypeInfo(T));
-        
-        var QueryArray := Query.ToArray;
-        for i := 0 to High(QueryArray) do
-        begin
-          ParamName := QueryArray[i].Key;
-          ParamValue := QueryArray[i].Value;
-          
-          if ParamName = '' then Continue;
-
-          // Pagination
-          if SameText(ParamName, '_limit') then
-          begin
-            TryStrToInt(ParamValue, Limit);
-            Continue;
-          end;
-          if SameText(ParamName, '_offset') then
-          begin
-            TryStrToInt(ParamValue, Offset);
-            Continue;
-          end;
-
-          // Ordering (_orderby=Name desc,Age asc)
-          if SameText(ParamName, '_orderby') then
-          begin
-             var OrderParts := ParamValue.Split([',']);
-             for var Part in OrderParts do
-             begin
-               var P := Part.Trim.Split([' ']);
-               if System.Length(P) > 0 then
-               begin
-                 var Ascending := True;
-                 if (System.Length(P) > 1) and SameText(P[1], 'desc') then
-                   Ascending := False;
-                 OrderList.Add(TOrderBy.Create(P[0], Ascending));
-               end;
-             end;
-             Continue;
-          end;
-          
-          // Filter extraction (PropName_Operator)
-          var ActualPropName := ParamName;
-          var UnderscorePos := ParamName.LastIndexOf('_');
-          var BinaryOp := boEqual;
-          
-          if UnderscorePos > 0 then
-          begin
-            var Suffix := ParamName.Substring(UnderscorePos + 1).ToLower;
-            var Handled := True;
-            if Suffix = 'eq' then BinaryOp := boEqual
-            else if Suffix = 'neq' then BinaryOp := boNotEqual
-            else if Suffix = 'gt' then BinaryOp := boGreaterThan
-            else if Suffix = 'gte' then BinaryOp := boGreaterThanOrEqual
-            else if Suffix = 'lt' then BinaryOp := boLessThan
-            else if Suffix = 'lte' then BinaryOp := boLessThanOrEqual
-            else if (Suffix = 'cont') or (Suffix = 'contains') then BinaryOp := boLike
-            else if Suffix = 'sw' then BinaryOp := boLike
-            else if Suffix = 'ew' then BinaryOp := boLike
-            else if Suffix = 'in' then BinaryOp := boIn
-            else Handled := False;
-
-            if Handled then
-               ActualPropName := ParamName.Substring(0, UnderscorePos);
-          end;
-
-          // Find matching property (case insensitive)
-          Prop := nil;
-          for var P in Properties do
-            if SameText(P.Name, ActualPropName) then
-            begin
-              Prop := P;
-              Break;
-            end;
-          
-          if Prop = nil then
-            Continue;
-            
-          if Map.Properties.TryGetValue(Prop.Name, PropMap) and PropMap.IsIgnored then
-            Continue;
-          
-          PropType := Prop.PropertyType;
-          
-          // Adjust value based on operator
-          var AdjustedValue := ParamValue;
-          if BinaryOp = boLike then
-          begin
-            var Suffix := ParamName.Substring(UnderscorePos + 1).ToLower;
-            if Suffix = 'sw' then AdjustedValue := ParamValue + '%'
-            else if Suffix = 'ew' then AdjustedValue := '%' + ParamValue
-            else AdjustedValue := '%' + ParamValue + '%';
-          end;
-
-          // Create expression
-          if BinaryOp = boIn then
-          begin
-            var InValues := ParamValue.Split([',']);
-            NewExpr := TBinaryExpression.Create(Prop.Name, boIn, TValue.From<TArray<string>>(InValues));
-          end
-          else
-          begin
-              case PropType.TypeKind of
-                tkInteger, tkInt64:
-                  if TryStrToInt(ParamValue, IntVal) then
-                  begin
-                     NewExpr := TBinaryExpression.Create(Prop.Name, BinaryOp, IntVal)
-                  end
-                  else Continue;
-                tkEnumeration:
-                  if PropType.Handle = TypeInfo(Boolean) then
-                  begin
-                    BoolVal := SameText(ParamValue, 'true') or (ParamValue = '1');
-                     NewExpr := TBinaryExpression.Create(Prop.Name, BinaryOp, BoolVal);
-                  end else Continue;
-                tkString, tkUString, tkWString, tkLString:
-                   NewExpr := TBinaryExpression.Create(Prop.Name, BinaryOp, AdjustedValue);
-              else Continue;
-              end;
-          end;
-          
-          if FilterExpr = nil then
-            FilterExpr := NewExpr
-          else
-            FilterExpr := TLogicalExpression.Create(FilterExpr, NewExpr, loAnd);
-        end;
-      finally
-        Ctx.Free;
-      end;
-      
-      if FOptions.Sql <> '' then
-        Qry := DbCtx.Entities<T>.FromSql(FOptions.Sql)
-      else
-        Qry := DbCtx.Entities<T>.QueryAll;
-
-      if FilterExpr <> nil then
-        Qry := Qry.Where(FilterExpr);
-
-      // Use AsNoTracking for DataApi to avoid memory leaks and context overhead.
-      Qry := Qry.AsNoTracking;
-
-      for var OrderItem in OrderList do
-        Qry := Qry.OrderBy(OrderItem);
-
-      if Offset > 0 then Qry := Qry.Skip(Offset);
-      if Limit > 0 then Qry := Qry.Take(Limit);
-
-      var FinalItems := Qry.ToList;
-      try
-        // Build JSON response with high-performance UTF8 writer
-        var Stream := TMemoryStream.Create;
-        try
-          var FinalSettings := TDextJson.GetDefaultSettings;
-          if FOptions.NamingStrategy <> TCaseStyle.CaseInherit then
-            FinalSettings.CaseStyle := FOptions.NamingStrategy;
-          if FOptions.EnumStyle <> TEnumStyle.EnumInherit then
-            FinalSettings.EnumStyle := FOptions.EnumStyle;
-
-          var Writer := TUtf8JsonWriter.Create(Stream, False);
-          Writer.Settings := FinalSettings;
-          Writer.WriteStartArray;
-          for var Item in FinalItems do
-          begin
-            Writer.WriteValue(TValue.From<T>(Item));
-          end;
-          Writer.WriteEndArray;
-
-          Stream.Position := 0;
-          Result := Results.Stream(Stream, 'application/json');
-        except
-          Stream.Free;
-          raise;
-        end;
-      finally
-        FinalItems := nil;
-      end;
-    finally
-      OrderList := nil;
-      FilterExpr := nil;
-      NewExpr := nil;
-      AuthResult := nil;
-      Query := nil;
-      Qry := Default(TFluentQuery<T>);
-    end;
-  except
-    on E: Exception do
-      Result := Results.StatusCode(500, Format('{"error":"[%s] %s"}', [E.ClassName, EscapeJsonString(E.Message)]));
-  end;
-end;
-
-function TDataApiHandler<T>.HandleGet(const Context: IHttpContext): IResult;
-var
-  DbCtx: TDbContext;
-  IdStr: string;
-  PKValue: Variant;
-  Binder: IModelBinder;
-  Entity: T;
-  AuthResult: IResult;
-begin
-  // Authorization check
-  AuthResult := CheckAuthorization(Context, False);  // Read operation
-  if AuthResult <> nil then
-    Exit(AuthResult);
-    
-  try
-    // Get ID from route parameter
-    if not Context.Request.RouteParams.TryGetValue('id', IdStr) then
-      Exit(Results.BadRequest('{"error":"Missing id parameter"}'));
-
-    DbCtx := GetDbContext(Context);
-    
-    // Resolve Strong-Typed ID using metadata and Model Binder (optional service)
-    Binder := TDextServices.GetService<IModelBinder>(Context.Services);
-    PKValue := TEntityIdResolver.Resolve(TEntityMap(DbCtx.GetMapping(TypeInfo(T))), IdStr, Binder);
-
-    Entity := DbCtx.Entities<T>.Find(PKValue);
-    if Entity = nil then
-      Result := Results.NotFound(Format('{"error":"Entity with id %s not found"}', [IdStr]))
-    else
-      Result := Results.Json(EntityToJson(Entity));
-  except
-    on E: Exception do
-      Result := Results.StatusCode(500, Format('{"error":"%s"}', [EscapeJsonString(E.Message)]));
-  end;
-end;
-
-function TDataApiHandler<T>.HandlePost(const Context: IHttpContext): IResult;
-var
-  DbCtx: TDbContext;
-  Entity: T;
-  Stream: TStream;
-  JsonString: string;
-  Bytes: TBytes;
-  JsonNode: IDextJsonNode;
-  AuthResult: IResult;
-begin
-  // Authorization check
-  AuthResult := CheckAuthorization(Context, True);  // Write operation
-  if AuthResult <> nil then
-    Exit(AuthResult);
-    
-  try
-    DbCtx := GetDbContext(Context);
-    
-    // Read JSON body
-    Stream := Context.Request.Body;
-    if (Stream = nil) or (Stream.Size = 0) then
-      Exit(Results.BadRequest('{"error":"Request body is empty"}'));
-    
-    Stream.Position := 0;
-    SetLength(Bytes, Stream.Size);
-    Stream.ReadBuffer(Bytes[0], Stream.Size);
-    JsonString := TEncoding.UTF8.GetString(Bytes);
-    
-    // Parse JSON
-    JsonNode := TDextJson.Provider.Parse(JsonString);
-    if (JsonNode = nil) or (JsonNode.GetNodeType <> jntObject) then
-      Exit(Results.BadRequest('{"error":"Invalid JSON in request body"}'));
-    
-    var FinalSettings := TDextJson.GetDefaultSettings;
-    if FOptions.NamingStrategy <> TCaseStyle.CaseInherit then
-      FinalSettings.CaseStyle := FOptions.NamingStrategy;
-    if FOptions.EnumStyle <> TEnumStyle.EnumInherit then
-      FinalSettings.EnumStyle := FOptions.EnumStyle;
-
-    var Serializer := TDextSerializer.Create(FinalSettings);
-    try
-       Entity := Serializer.Deserialize<T>(JsonString);
-    finally
-       Serializer.Free;
-    end;
-      
-    var TargetSet := DbCtx.Entities<T>;
-    var Map := TEntityMap(DbCtx.GetMapping(TypeInfo(T)));
-
-    // Validation for Manual IDs
-    for var KeyName in Map.Keys do
+    Typ := Ctx.GetType(FEntityClass);
+    for Prop in Typ.GetProperties do
     begin
-      var PropMap := Map.Properties[KeyName];
-      if not PropMap.IsAutoInc then
-      begin
-        var Val := PropMap.Prop.GetValue(TObject(Entity));
-        if Val.IsEmpty or ((Val.Kind = tkInteger) and (Val.AsInteger = 0)) or ((Val.Kind in [tkString, tkUString, tkWString, tkLString]) and (Val.AsString = '')) then
-           Exit(Results.BadRequest(Format('{"error":"Primary key %s is required for this entity"}', [KeyName])));
-      end;
+       if SameText(Prop.Name, ASnakeName) then Exit(Prop.Name);
+       if SameText(ASnakeName.Replace('_', ''), Prop.Name) then Exit(Prop.Name);
     end;
-      
-    TargetSet.Add(Entity);
-    DbCtx.SaveChanges;
-    
-    // Get ID for response. If manual PK, it should be obtainable from the entity.
-    var IdStr := TargetSet.GetEntityId(Entity);
-    
-    // Canonical format for URL (lowercase, no braces)
-    if IdStr.StartsWith('{') and (IdStr.Length = 38) then
-      IdStr := IdStr.Substring(1, 36);
-    IdStr := IdStr.ToLower;
-
-    Result := Results.Created(FPath + '/' + IdStr, EntityToJson(Entity));
-  except
-    on E: Exception do
-      Result := Results.StatusCode(500, Format('{"error":"%s"}', [EscapeJsonString(E.Message)]));
+  finally
+    Ctx.Free;
   end;
 end;
 
-function TDataApiHandler<T>.HandlePut(const Context: IHttpContext): IResult;
+procedure TDataApiHandler.RegisterRoutes(const ABuilder: IApplicationBuilder);
+begin
+  var CleanPath := FRoutePrefix.TrimRight(['/']);
+  if amGetList in FOptions.AllowedMethods then
+    ABuilder.MapGet(CleanPath, procedure(C: IHttpContext) begin HandleGetList(C).Execute(C); end);
+    
+  if amGet in FOptions.AllowedMethods then
+    ABuilder.MapGet(CleanPath + '/{id}', procedure(C: IHttpContext) begin HandleGet(C).Execute(C); end);
+    
+  if amPost in FOptions.AllowedMethods then
+    ABuilder.MapPost(CleanPath, procedure(C: IHttpContext) var R: IResult; begin HandlePost(C, R); R.Execute(C); end);
+    
+  if amPut in FOptions.AllowedMethods then
+    ABuilder.MapPut(CleanPath + '/{id}', procedure(C: IHttpContext) var R: IResult; begin HandlePut(C, R); R.Execute(C); end);
+    
+  if amDelete in FOptions.AllowedMethods then
+    ABuilder.MapDelete(CleanPath + '/{id}', procedure(C: IHttpContext) begin HandleDelete(C).Execute(C); end);
+end;
+
+class procedure TDataApiHandler.Map(const ABuilder: IApplicationBuilder; const AClass: TClass; const APath: string; ADbContext: TDbContext; AOptions: TDataApiOptions);
+var
+  Path: string;
+begin
+  Path := APath;
+  if Path = '' then
+    Path := TDataApiNaming.GetDefaultPath(AClass.ClassInfo);
+    
+  var Handler := TDataApiHandler.Create(Path, AClass, AOptions, ADbContext);
+  Handler.RegisterRoutes(ABuilder);
+  ABuilder.RegisterForDisposal(Handler);
+end;
+
+function TDataApiHandler.HandleGetList(const Context: IHttpContext): IResult;
+var
+  DbCtx: TDbContext;
+  SetObj: IDbSet;
+  List: IList<TObject>;
+  Spec: ISpecification;
+begin
+  Log.Debug('DataApi: Listing {0}', [FEntityClass.ClassName]);
+  try
+    var Auth := CheckAuthorization(Context, False);
+    if Auth <> nil then Exit(Auth);
+
+    DbCtx := GetDbContext(Context);
+    SetObj := DbCtx.DataSet(FEntityClass.ClassInfo);
+
+    Spec := TSpecification<TObject>.Create;
+    ApplyQueryParameters(Context, Spec);
+
+    List := SetObj.ListObjects(Spec);
+    Result := Results.Json(ValueToJson(TValue.From<IObjectList>(List as IObjectList)));
+  except
+    on E: Exception do
+    begin
+      Log.Error(E, 'DataApi: Error listing {0}', [FEntityClass.ClassName]);
+      Result := Results.StatusCode(500, E.Message);
+    end;
+  end;
+end;
+
+function TDataApiHandler.HandleGet(const Context: IHttpContext): IResult;
 var
   DbCtx: TDbContext;
   IdStr: string;
   PKValue: Variant;
-  Entity: T;
-  Stream: TStream;
-  JsonString: string;
-  Bytes: TBytes;
-  JsonNode: IDextJsonNode;
-  AuthResult: IResult;
+  Entity: TObject;
+  Binder: IModelBinder;
 begin
-  // Authorization check
-  AuthResult := CheckAuthorization(Context, True);  // Write operation
-  if AuthResult <> nil then
-    Exit(AuthResult);
-    
+  Log.Debug('DataApi: Getting {0}', [FEntityClass.ClassName]);
   try
+    var Auth := CheckAuthorization(Context, False);
+    if Auth <> nil then Exit(Auth);
+
     if not Context.Request.RouteParams.TryGetValue('id', IdStr) then
-      Exit(Results.BadRequest('{"error":"Missing id parameter"}'));
+      Exit(Results.BadRequest('Missing id'));
 
     DbCtx := GetDbContext(Context);
-
-    // Resolve Strong-Typed ID using metadata and Model Binder (optional service)
-    var Binder := TDextServices.GetService<IModelBinder>(Context.Services);
-    PKValue := TEntityIdResolver.Resolve(TEntityMap(DbCtx.GetMapping(TypeInfo(T))), IdStr, Binder);
-    Entity := DbCtx.Entities<T>.Find(PKValue);
+    Binder := TDextServices.GetService<IModelBinder>(Context.Services);
+    PKValue := TEntityIdResolver.Resolve(DbCtx.GetMapping(FEntityClass.ClassInfo) as TEntityMap, IdStr, Binder);
+    Entity := DbCtx.DataSet(FEntityClass.ClassInfo).FindObject(PKValue);
     
     if Entity = nil then
-      Exit(Results.NotFound(Format('{"error":"Entity with id %s not found"}', [IdStr])));
+      Result := Results.NotFound
+    else
+      Result := Results.Json(ValueToJson(TValue.From<TObject>(Entity)));
+  except
+    on E: Exception do
+    begin
+      Log.Error(E, 'DataApi: Error getting {0}', [FEntityClass.ClassName]);
+      Result := Results.StatusCode(500, E.Message);
+    end;
+  end;
+end;
+
+procedure TDataApiHandler.HandlePost(const Context: IHttpContext; var Result: IResult);
+var
+  DbCtx: TDbContext;
+  Entity: TObject;
+  Stream: TStream;
+  StringStream: TStringStream;
+  JsonString: string;
+begin
+  Log.Debug('DataApi: Creating {0}', [FEntityClass.ClassName]);
+  try
+    var Auth := CheckAuthorization(Context, True);
+    if Auth <> nil then begin Result := Auth; Exit; end;
+
+    DbCtx := GetDbContext(Context);
     
-    // Read JSON body
     Stream := Context.Request.Body;
     if (Stream = nil) or (Stream.Size = 0) then
-      Exit(Results.BadRequest('{"error":"Request body is empty"}'));
-    
-    Stream.Position := 0;
-    SetLength(Bytes, Stream.Size);
-    Stream.ReadBuffer(Bytes[0], Stream.Size);
-    JsonString := TEncoding.UTF8.GetString(Bytes);
-    
-    // Parse JSON
-    JsonNode := TDextJson.Provider.Parse(JsonString);
-    if (JsonNode = nil) or (JsonNode.GetNodeType <> jntObject) then
-      Exit(Results.BadRequest('{"error":"Invalid JSON in request body"}'));
-    
-    var FinalSettings := TDextJson.GetDefaultSettings;
-    if FOptions.NamingStrategy <> TCaseStyle.CaseInherit then
-      FinalSettings.CaseStyle := FOptions.NamingStrategy;
-    if FOptions.EnumStyle <> TEnumStyle.EnumInherit then
-      FinalSettings.EnumStyle := FOptions.EnumStyle;
+      raise Exception.Create('Request body is empty');
 
-    var Serializer := TDextSerializer.Create(FinalSettings);
+    StringStream := TStringStream.Create('', TEncoding.UTF8);
     try
-       Serializer.Populate(TObject(Entity), JsonString);
+      Stream.Position := 0;
+      StringStream.CopyFrom(Stream, Stream.Size);
+      JsonString := StringStream.DataString;
     finally
-       Serializer.Free;
+      StringStream.Free;
     end;
-    
-    DbCtx.Entities<T>.Update(Entity);
+
+    Entity := TDextJson.Deserialize(FEntityClass.ClassInfo, JsonString, GetJsonSettings).AsObject;
+    if Entity = nil then
+      raise Exception.Create('Could not deserialize request body.');
+
+    DbCtx.DataSet(FEntityClass.ClassInfo).Add(Entity);
     DbCtx.SaveChanges;
     
-    Result := Results.Json(EntityToJson(Entity));
+    Result := Results.Json(ValueToJson(TValue.From<TObject>(Entity)), 201);
   except
     on E: Exception do
-      Result := Results.StatusCode(500, Format('{"error":"%s"}', [EscapeJsonString(E.Message)]));
+    begin
+      Log.Error(E, 'DataApi: Error creating {0}', [FEntityClass.ClassName]);
+      Result := Results.StatusCode(500, E.Message);
+    end;
   end;
 end;
 
-function TDataApiHandler<T>.HandleDelete(const Context: IHttpContext): IResult;
+procedure TDataApiHandler.HandlePut(const Context: IHttpContext; var Result: IResult);
+var
+  DbCtx: TDbContext;
+  IdStr: string;
+  Entity: TObject;
+  Stream: TStream;
+  StringStream: TStringStream;
+  JsonString: string;
+begin
+  Log.Debug('DataApi: Updating {0}', [FEntityClass.ClassName]);
+  try
+    var Auth := CheckAuthorization(Context, True);
+    if Auth <> nil then begin Result := Auth; Exit; end;
+
+    if not Context.Request.RouteParams.TryGetValue('id', IdStr) then
+    begin
+      Result := Results.BadRequest('Missing id');
+      Exit;
+    end;
+
+    DbCtx := GetDbContext(Context);
+    
+    Stream := Context.Request.Body;
+    if (Stream = nil) or (Stream.Size = 0) then
+      raise Exception.Create('Request body is empty');
+
+    StringStream := TStringStream.Create('', TEncoding.UTF8);
+    try
+      Stream.Position := 0;
+      StringStream.CopyFrom(Stream, Stream.Size);
+      JsonString := StringStream.DataString;
+    finally
+      StringStream.Free;
+    end;
+
+    Entity := TDextJson.Deserialize(FEntityClass.ClassInfo, JsonString, GetJsonSettings).AsObject;
+    if Entity = nil then
+      raise Exception.Create('Could not deserialize request body.');
+
+    DbCtx.DataSet(FEntityClass.ClassInfo).Update(Entity);
+    DbCtx.SaveChanges;
+    
+    Result := Results.Json(ValueToJson(TValue.From<TObject>(Entity)));
+  except
+    on E: Exception do
+    begin
+      Log.Error(E, 'DataApi: Error updating {0}', [FEntityClass.ClassName]);
+      Result := Results.StatusCode(500, E.Message);
+    end;
+  end;
+end;
+
+function TDataApiHandler.HandleDelete(const Context: IHttpContext): IResult;
 var
   DbCtx: TDbContext;
   IdStr: string;
   PKValue: Variant;
-  Entity: T;
-  AuthResult: IResult;
+  Existing: TObject;
+  Binder: IModelBinder;
 begin
-  // Authorization check
-  AuthResult := CheckAuthorization(Context, True);  // Write operation
-  if AuthResult <> nil then
-    Exit(AuthResult);
-    
   try
+    var Auth := CheckAuthorization(Context, True);
+    if Auth <> nil then Exit(Auth);
+
     if not Context.Request.RouteParams.TryGetValue('id', IdStr) then
-      Exit(Results.BadRequest('{"error":"Missing id parameter"}'));
+      Exit(Results.BadRequest('Missing id'));
 
     DbCtx := GetDbContext(Context);
-
-    // Resolve Strong-Typed ID using metadata and Model Binder (optional service)
-    var Binder := TDextServices.GetService<IModelBinder>(Context.Services);
-    PKValue := TEntityIdResolver.Resolve(TEntityMap(DbCtx.GetMapping(TypeInfo(T))), IdStr, Binder);
-    Entity := DbCtx.Entities<T>.Find(PKValue);
+    Binder := TDextServices.GetService<IModelBinder>(Context.Services);
+    PKValue := TEntityIdResolver.Resolve(DbCtx.GetMapping(FEntityClass.ClassInfo) as TEntityMap, IdStr, Binder);
+    Existing := DbCtx.DataSet(FEntityClass.ClassInfo).FindObject(PKValue);
     
-    if Entity = nil then
-      Exit(Results.NotFound(Format('{"error":"Entity with id %s not found"}', [IdStr])));
+    if Existing <> nil then
+    begin
+      DbCtx.DataSet(FEntityClass.ClassInfo).Remove(Existing);
+      DbCtx.SaveChanges;
+    end;
     
-    DbCtx.Entities<T>.Remove(Entity);
-    DbCtx.SaveChanges;
-    
-    Result := Results.Ok(Format('{"deleted":true,"id":"%s"}', [IdStr]));
+    Result := Results.Ok;
   except
     on E: Exception do
-      Result := Results.StatusCode(500, Format('{"error":"%s"}', [EscapeJsonString(E.Message)]));
+    begin
+      Log.Error(E, 'DataApi: Error deleting {0}', [FEntityClass.ClassName]);
+      Result := Results.StatusCode(500, E.Message);
+    end;
   end;
 end;
 
-// Option A: Explicit DbContext parameter
-class procedure TDataApiHandler<T>.Map(
-  const ABuilder: IApplicationBuilder; 
-  const APath: string;
-  ADbContext: TDbContext);
-var
-  Options: TDataApiOptions<T>;
-  Handler: TDataApiHandler<T>;
+{ TDataApiHandler<T> }
+
+constructor TDataApiHandler<T>.Create(const ARoutePrefix: string; AOptions: TDataApiOptions<T>; ADbContext: TDbContext);
 begin
-  Options := TDataApiOptions<T>.Create;
-  Handler := TDataApiHandler<T>.Create(APath, Options, ADbContext);
-  Handler.RegisterRoutes(ABuilder);
-  
-  // Register handler for disposal when host shuts down
-  ABuilder.RegisterForDisposal(Handler);
+  inherited Create(ARoutePrefix, TClass(T), AOptions, ADbContext);
 end;
 
-class procedure TDataApiHandler<T>.Map(
-  const ABuilder: IApplicationBuilder; 
-  const APath: string; 
-  ADbContext: TDbContext;
+class procedure TDataApiHandler<T>.Map(const ABuilder: IApplicationBuilder; const APath: string; ADbContext: TDbContext;
   AOptions: TDataApiOptions<T>);
-var
-  Handler: TDataApiHandler<T>;
 begin
-  if AOptions = nil then
-    AOptions := TDataApiOptions<T>.Create;
-
-  Handler := TDataApiHandler<T>.Create(APath, AOptions, ADbContext);
-  Handler.RegisterRoutes(ABuilder);
-  
-  // Register handler for disposal when host shuts down
-  ABuilder.RegisterForDisposal(Handler);
-end;
-
-// Option B: Resolve DbContext from DI
-class procedure TDataApiHandler<T>.Map(
-  const ABuilder: IApplicationBuilder; 
-  const APath: string);
-var
-  Options: TDataApiOptions<T>;
-  Handler: TDataApiHandler<T>;
-begin
-  Options := TDataApiOptions<T>.Create;
-  Handler := TDataApiHandler<T>.Create(APath, Options, nil);
-  Handler.RegisterRoutes(ABuilder);
-  
-  // Register handler for disposal when host shuts down
-  ABuilder.RegisterForDisposal(Handler);
+  TDataApiHandler.Map(ABuilder, TClass(T), APath, ADbContext, AOptions);
 end;
 
 class procedure TDataApiHandler<T>.Map(const ABuilder: IApplicationBuilder; const APath: string; AOptions: TDataApiOptions<T>);
@@ -1026,45 +706,51 @@ end;
 
 { TDataApi }
 
-class procedure TDataApi.Map(const ABuilder: IApplicationBuilder; const AClass: TClass;
-  const APath: string; AOptions: TDataApiOptions);
-var
-  Ctx: TRttiContext;
-  Typ: TRttiType;
-  GenericTyp: TRttiType;
-  Method: TRttiMethod;
+class procedure TDataApi.Map(const ABuilder: IApplicationBuilder; const AClass: TClass; const APath: string;
+  AOptions: TDataApiOptions);
 begin
-  Ctx := TRttiContext.Create;
-  try
-    // Find TDataApiHandler<T>
-    GenericTyp := Ctx.FindType('Dext.Web.DataApi.TDataApiHandler<T>');
-    if GenericTyp = nil then
-      GenericTyp := Ctx.FindType('TDataApiHandler<T>');
-      
-    if GenericTyp = nil then
-       raise Exception.Create('Could not find TDataApiHandler<T> type');
+  TDataApiHandler.Map(ABuilder, AClass, APath, nil, AOptions);
+end;
 
-    // Make generic with AClass
-    // TODO: Delphi RTTI does not support generic instantiation at runtime.
-    // This requires a registration-based approach instead.
-    Typ := Ctx.GetType(AClass);
-    
-    // Find Map(ABuilder, APath, AOptions)
-    // Since TDataApiOptions is a base class, we might need to find the right overload
-    for Method in Typ.GetMethods('Map') do
+class procedure TDataApi.MapAll(const ABuilder: IApplicationBuilder);
+var
+  LContext: TRttiContext;
+  LType: TRttiType;
+  LAttr: DataApiAttribute;
+  LPath: string;
+begin
+  LContext := TRttiContext.Create;
+  try
+    for LType in LContext.GetTypes do
     begin
-       var Params := Method.GetParameters;
-       if (Length(Params) = 3) and 
-          (Params[0].ParamType.Handle = TypeInfo(IApplicationBuilder)) and
-           (Params[1].ParamType.TypeKind in [tkString, tkUString, tkWString, tkLString]) then
-       begin
-          Method.Invoke(nil, [TValue.From<IApplicationBuilder>(ABuilder), APath, AOptions]);
-          Exit;
-       end;
+      if LType.IsInstance and (LType.AsInstance.MetaclassType <> nil) and 
+         not LType.Name.EndsWith('Helper') then
+      begin
+        LAttr := nil;
+        for var LAttribute in LType.GetAttributes do
+        begin
+          if LAttribute.ClassName.Contains('DataApi') then
+          begin
+            LAttr := DataApiAttribute(LAttribute);
+            Break;
+          end;
+        end;
+
+        if LAttr <> nil then
+        begin
+          LPath := LAttr.Route;
+          if LPath = '' then
+            LPath := TDataApiNaming.GetDefaultPath(LType.Handle);
+            
+          TDataApiHandler.Map(ABuilder, LType.AsInstance.MetaclassType, LPath, nil, nil);
+        end;
+      end;
     end;
   finally
-    Ctx.Free;
+    LContext.Free;
   end;
 end;
+
+
 
 end.

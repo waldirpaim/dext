@@ -15,6 +15,7 @@ uses
   Dext.DI.Interfaces,
   Dext.DI.Core,
   Dext.Configuration.Interfaces,
+  Dext.Logging.Extensions,
   // {BEGIN_DEXT_USES}
   // Generated Uses
   Dext.Entity.Attributes,
@@ -390,6 +391,11 @@ type
     ///   Registers a DbContext using configuration section.
     /// </summary>
     function AddDbContext<T: TDbContext>(const Configuration: IConfigurationSection): TDextServices; overload;
+
+    /// <summary>
+    ///   Adds logging services to the application.
+    /// </summary>
+    function AddLogging(const AConfigure: TProc<ILoggingBuilder> = nil): TDextServices;
   end;
 
   TPersistence = class
@@ -423,6 +429,12 @@ begin
       begin
         TConfigurationBinder.Bind(Configuration, Options);
       end));
+end;
+
+function TDextPersistenceServicesHelper.AddLogging(const AConfigure: TProc<ILoggingBuilder>): TDextServices;
+begin
+  TServiceCollectionLoggingExtensions.AddLogging(Self.Unwrap, AConfigure);
+  Result := Self;
 end;
 
 { TPersistence }

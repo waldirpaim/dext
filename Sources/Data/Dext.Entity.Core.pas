@@ -87,7 +87,8 @@ type
     procedure Detach(const AEntity: TObject);
     
     // Non-generic query support
-    function ListObjects(const AExpression: IExpression): IList<TObject>;
+    function ListObjects(const AExpression: IExpression): IList<TObject>; overload;
+    function ListObjects(const ASpec: ISpecification): IList<TObject>; overload;
 
     // Tracking Methods (Consistent with IDbSet<T>)
     procedure Update(const AEntity: TObject);

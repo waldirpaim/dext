@@ -140,7 +140,7 @@ try {
     # ═══════════════════════════════════════════════════════════════════════════
     Write-Host "10. GET /api/logs (TUUID PK)" -ForegroundColor Yellow
     Write-Host "    Listing seeded system logs..."
-    $logs = Invoke-DextRequest "$baseUrl/api/logs"
+    $logs = @(Invoke-DextRequest "$baseUrl/api/logs")
     if ($logs.Count -lt 1) { throw "Expected at least 1 seeded log" }
     Write-Host "    [OK] Found $($logs.Count) logs" -ForegroundColor Green
     $firstLogId = $logs[0].id

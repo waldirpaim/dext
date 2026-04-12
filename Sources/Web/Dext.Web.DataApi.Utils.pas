@@ -23,6 +23,11 @@ type
     ///   Gets a human-readable description for an entity type.
     /// </summary>
     class function GetEntityDescription(ATypeInfo: PTypeInfo): string; static;
+    
+    /// <summary>
+    ///   Gets the default route path for an entity type by convention (e.g., TCustomer -> /api/customer).
+    /// </summary>
+    class function GetDefaultPath(ATypeInfo: PTypeInfo): string; static;
   end;
 
 implementation
@@ -57,6 +62,22 @@ begin
     Exit('Entity description not available.');
     
   Result := Format('Manage %s entities via standard REST operations.', [GetEntityTag(ATypeInfo).ToLower]);
+end;
+
+class function TDataApiNaming.GetDefaultPath(ATypeInfo: PTypeInfo): string;
+var
+  LName: string;
+begin
+  if ATypeInfo = nil then
+    Exit('');
+
+  LName := string(ATypeInfo.Name);
+  
+  // Remove 'T' prefix if present
+  if LName.StartsWith('T') and (Length(LName) > 1) and LName[2].IsUpper then
+    LName := LName.Substring(1);
+
+  Result := '/api/' + LName.ToLower;
 end;
 
 end.

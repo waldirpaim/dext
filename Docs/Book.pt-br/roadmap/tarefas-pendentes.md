@@ -5,8 +5,9 @@ Este documento lista as funcionalidades e correções necessárias para o lança
 ## 🟢 Onda 1: Quick Wins & Visibilidade (Imediato)
 Status | Tarefa | Descrição
 :---: | :--- | :---
-🟡 | **Portas Dinâmicas** | Suporte a Porta 0 (SO escolhe porta livre) para Demos e CI.
-🟡 | **Convenções DataAPI (S04)** | Auto-discovery, remover prefixo 'T' e Smart Attributes.
+✅ | **Portas Dinâmicas** | Suporte a Porta 0 (SO escolhe porta livre) para Demos e CI.
+✅ | **Convenções DataAPI (S04)** | Auto-discovery, remover prefixo 'T' e Smart Attributes.
+✅ | **Observabilidade DataAPI** | Logs de diagnóstico CRUD e rastreamento de mapeamento.
 🟡 | **Roadmap de Exemplos** | Criar exemplos de alta fidelidade para features existentes.
 🟡 | **Agent Guidelines** | Finalizar o `CONTRIBUTING_AI.md` e Workflows.
 

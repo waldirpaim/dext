@@ -28,6 +28,7 @@ unit Dext;
 interface
 
 uses
+  System.SysUtils,
   // {BEGIN_DEXT_USES}
   // Generated Uses
   Dext.Collections.Extensions,
@@ -215,6 +216,17 @@ type
   IServiceScope = Dext.DI.Interfaces.IServiceScope;
   TDextServices = Dext.DI.Interfaces.TDextServices;
   TDextDIFactory = Dext.DI.Interfaces.TDextDIFactory;
+
+  /// <summary>
+  ///   Core Helper for TDextServices.
+  /// </summary>
+  TDextCoreServicesHelper = record helper for TDextServices
+  public
+    /// <summary>
+    ///   Adds logging services to the application.
+    /// </summary>
+    function AddLogging(const AConfigure: TProc<ILoggingBuilder> = nil): TDextServices;
+  end;
 
   // Dext.Hosting.ApplicationLifetime
   IHostApplicationLifetime = Dext.Hosting.ApplicationLifetime.IHostApplicationLifetime;
@@ -575,6 +587,14 @@ end;
 function JsonSettings: TJsonSettings;
 begin
   Result := Dext.Json.JsonSettings;
+end;
+
+{ TDextCoreServicesHelper }
+
+function TDextCoreServicesHelper.AddLogging(const AConfigure: TProc<ILoggingBuilder>): TDextServices;
+begin
+  TServiceCollectionLoggingExtensions.AddLogging(Self.Unwrap, AConfigure);
+  Result := Self;
 end;
 
 

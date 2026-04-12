@@ -48,6 +48,15 @@
         <Projects Include="..\Tests\Web\Dext.Web.UnitTests.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="..\Tests\Web.FrameworkTests\Web.FrameworkTests.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="..\Examples\Web.DatabaseAsApi\Web.DatabaseAsApi.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="..\Examples\Web.FoodDelivery\Web.DextFood.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -191,14 +200,41 @@
     <Target Name="Dext_Web_UnitTests:Make">
         <MSBuild Projects="..\Tests\Web\Dext.Web.UnitTests.dproj" Targets="Make"/>
     </Target>
+    <Target Name="Web_FrameworkTests">
+        <MSBuild Projects="..\Tests\Web.FrameworkTests\Web.FrameworkTests.dproj"/>
+    </Target>
+    <Target Name="Web_FrameworkTests:Clean">
+        <MSBuild Projects="..\Tests\Web.FrameworkTests\Web.FrameworkTests.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="Web_FrameworkTests:Make">
+        <MSBuild Projects="..\Tests\Web.FrameworkTests\Web.FrameworkTests.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Web_DatabaseAsApi">
+        <MSBuild Projects="..\Examples\Web.DatabaseAsApi\Web.DatabaseAsApi.dproj"/>
+    </Target>
+    <Target Name="Web_DatabaseAsApi:Clean">
+        <MSBuild Projects="..\Examples\Web.DatabaseAsApi\Web.DatabaseAsApi.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="Web_DatabaseAsApi:Make">
+        <MSBuild Projects="..\Examples\Web.DatabaseAsApi\Web.DatabaseAsApi.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Web_DextFood">
+        <MSBuild Projects="..\Examples\Web.FoodDelivery\Web.DextFood.dproj"/>
+    </Target>
+    <Target Name="Web_DextFood:Clean">
+        <MSBuild Projects="..\Examples\Web.FoodDelivery\Web.DextFood.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="Web_DextFood:Make">
+        <MSBuild Projects="..\Examples\Web.FoodDelivery\Web.DextFood.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="Dext_Core;Dext_AST;Dext_EF_Core;Dext_EF_Components;Dext_EF_Design;Dext_Web_Core;Dext_Testing;Dext_Web_Hubs;Dext_Events;Dext_Net;Dext_Hosting;Dext_UI;DextTool;DextSidecar;Dext_Web_UnitTests"/>
+        <CallTarget Targets="Dext_Core;Dext_AST;Dext_EF_Core;Dext_EF_Components;Dext_EF_Design;Dext_Web_Core;Dext_Testing;Dext_Web_Hubs;Dext_Events;Dext_Net;Dext_Hosting;Dext_UI;DextTool;DextSidecar;Dext_Web_UnitTests;Web_FrameworkTests;Web_DatabaseAsApi;Web_DextFood"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="Dext_Core:Clean;Dext_AST:Clean;Dext_EF_Core:Clean;Dext_EF_Components:Clean;Dext_EF_Design:Clean;Dext_Web_Core:Clean;Dext_Testing:Clean;Dext_Web_Hubs:Clean;Dext_Events:Clean;Dext_Net:Clean;Dext_Hosting:Clean;Dext_UI:Clean;DextTool:Clean;DextSidecar:Clean;Dext_Web_UnitTests:Clean"/>
+        <CallTarget Targets="Dext_Core:Clean;Dext_AST:Clean;Dext_EF_Core:Clean;Dext_EF_Components:Clean;Dext_EF_Design:Clean;Dext_Web_Core:Clean;Dext_Testing:Clean;Dext_Web_Hubs:Clean;Dext_Events:Clean;Dext_Net:Clean;Dext_Hosting:Clean;Dext_UI:Clean;DextTool:Clean;DextSidecar:Clean;Dext_Web_UnitTests:Clean;Web_FrameworkTests:Clean;Web_DatabaseAsApi:Clean;Web_DextFood:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="Dext_Core:Make;Dext_AST:Make;Dext_EF_Core:Make;Dext_EF_Components:Make;Dext_EF_Design:Make;Dext_Web_Core:Make;Dext_Testing:Make;Dext_Web_Hubs:Make;Dext_Events:Make;Dext_Net:Make;Dext_Hosting:Make;Dext_UI:Make;DextTool:Make;DextSidecar:Make;Dext_Web_UnitTests:Make"/>
+        <CallTarget Targets="Dext_Core:Make;Dext_AST:Make;Dext_EF_Core:Make;Dext_EF_Components:Make;Dext_EF_Design:Make;Dext_Web_Core:Make;Dext_Testing:Make;Dext_Web_Hubs:Make;Dext_Events:Make;Dext_Net:Make;Dext_Hosting:Make;Dext_UI:Make;DextTool:Make;DextSidecar:Make;Dext_Web_UnitTests:Make;Web_FrameworkTests:Make;Web_DatabaseAsApi:Make;Web_DextFood:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

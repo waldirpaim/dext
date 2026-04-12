@@ -601,9 +601,31 @@ begin
 end;
 
 procedure TDextIndyHttpResponse.SetContentType(const AValue: string);
+var
+  LParts: TArray<string>;
+  i: Integer;
 begin
-  AddHeader('Content-Type', AValue);
-  FResponseInfo.ContentType := AValue;
+  // Do NOT use AddHeader for Content-Type, Indy handles it natively via properties.
+  // Adding it to CustomHeaders leads to duplicate headers which confuses some HTTP clients.
+  
+  if AValue.Contains(';') then
+  begin
+    LParts := AValue.Split([';']);
+    FResponseInfo.ContentType := LParts[0].Trim;
+    for i := 1 to High(LParts) do
+    begin
+      var LPart := LParts[i].Trim;
+      if LPart.ToLower.StartsWith('charset=') then
+        FResponseInfo.CharSet := LPart.Substring(8).Trim
+      else
+        // Other parameters (like boundary) stay in ContentType
+        FResponseInfo.ContentType := FResponseInfo.ContentType + '; ' + LPart;
+    end;
+  end
+  else
+  begin
+    FResponseInfo.ContentType := AValue;
+  end;
 end;
 
 procedure TDextIndyHttpResponse.SetContentLength(const AValue: Int64);
@@ -626,7 +648,10 @@ begin
     to an empty ContentText is equivalent to assignment. }
   FResponseInfo.ContentText := FResponseInfo.ContentText + AContent;
   if FResponseInfo.ContentType = '' then
-    FResponseInfo.ContentType := 'text/plain; charset=utf-8';
+  begin
+    FResponseInfo.ContentType := 'text/plain';
+    FResponseInfo.CharSet := 'utf-8';
+  end;
 end;
 
 procedure TDextIndyHttpResponse.Write(const ABuffer: TBytes);
@@ -669,7 +694,8 @@ end;
 procedure TDextIndyHttpResponse.Json(const AJson: string);
 begin
   FResponseInfo.ContentText := AJson;
-  FResponseInfo.ContentType := 'application/json; charset=utf-8';
+  FResponseInfo.ContentType := 'application/json';
+  FResponseInfo.CharSet := 'utf-8';
 end;
 
 procedure TDextIndyHttpResponse.Json(const AValue: TValue);

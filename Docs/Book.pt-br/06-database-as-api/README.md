@@ -8,6 +8,7 @@ Gere APIs REST automaticamente a partir das suas entidades - sem código necess�
 
 ```pascal
 type
+  [DataApi] // Auto-registra como /api/products
   [Table('products')]
   TProduct = class
   private
@@ -21,12 +22,31 @@ type
     property Price: Double read FPrice write FPrice;
   end;
 
-// Uma linha para expor CRUD completo!
-App.Configure(procedure(App: IApplicationBuilder)
-  begin
-    TDataApiHandler<TProduct>.Map(App, '/api/products');
-  end);
+// No pipeline de configuração (Global):
+App.MapDataApis; 
 ```
+
+### Formas de Registro
+
+O Dext oferece flexibilidade total para expor seus dados, suportando três abordagens que podem coexistir:
+
+1.  **Automática (Atributo)**: Basta adicionar `[DataApi]` na classe e chamar `App.MapDataApis` no startup.
+2.  **Manual por tipo**: `TDataApiHandler<TProduct>.Map(App, '/api/products')`.
+3.  **Manual Fluente**:
+    ```pascal
+    App.Builder.MapDataApi<TProduct>('/api/products', DataApiOptions
+      .AllowRead
+      .RequireAuth
+    );
+    ```
+
+## Convenções e Mapeamento Inteligente
+
+O Data API segue convenções modernas para minimizar a configuração:
+
+-   **Nomenclatura**: Por padrão, o prefixo `T` é removido e o nome da classe é pluralizado (ex: `TCustomer` -> `/api/customers`).
+-   **Rotas Customizadas**: Use `[DataApi('/meu/caminho')]` para sobrescrever a convenção.
+-   **Case Mapping**: Propriedades em PascalCase no Delphi são automaticamente mapeadas para snake_case na URL (ex: `PriceValue` -> `?price_value_gt=100`).
 
 ## Endpoints Gerados
 
@@ -82,6 +102,27 @@ App.Builder.MapDataApi<TProduct>('/api/products', DataApiOptions
 );
 ```
 
+## Diagnóstico e Observabilidade
+
+Para facilitar a depuração de APIs geradas automaticamente, o Data API integra-se ao sistema de logging do Dext.
+
+### Ativando Logs de Depuração
+
+Se você encontrar comportamentos inesperados (como filtros que não funcionam ou erros de banco), você pode ativar o nível de log `Debug` no seu startup:
+
+```pascal
+App.Configure(procedure(App: IApplicationBuilder)
+  begin
+    // Define o nível mínimo como Debug para ver detalhes do DataAPI
+    TDextServices.GetService<ILoggerFactory>(App.Services)
+      .SetMinimumLevel(TLogLevel.Debug);
+  end);
+```
+
+**O que será logado em modo Debug:**
+- Entrada das requisições com os parâmetros brutos da QueryString.
+- Mapeamento de propriedades e filtros aplicados.
+- Exceções detalhadas com stack trace (se configurado).
 
 ---
 

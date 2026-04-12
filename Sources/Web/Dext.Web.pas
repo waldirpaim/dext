@@ -613,8 +613,8 @@ type
     /// <summary>
     ///   Registers a DbContext with the dependency injection container.
     /// </summary>
-    function AddDbContext<T: TDbContext, constructor>(Config: TProc<TDbContextOptions>): TDextServices; overload;
-    function AddDbContext<T: TDbContext, constructor>(const AConfig: IConfigurationSection): TDextServices; overload;
+    function AddDbContext<T: TDbContext>(Config: TProc<TDbContextOptions>): TDextServices; overload;
+    function AddDbContext<T: TDbContext>(const AConfig: IConfigurationSection): TDextServices; overload;
     {$ENDIF}
 
     /// <summary>
@@ -631,6 +631,11 @@ type
     ///   Starts the Background Service builder chain.
     /// </summary>
     function AddBackgroundServices: TBackgroundServiceBuilder;
+
+    /// <summary>
+    ///   Adds logging services to the application.
+    /// </summary>
+    function AddLogging(const AConfigure: TProc<ILoggingBuilder> = nil): TDextServices;
 
     /// <summary>
     ///   Configures a settings class (IOptions&lt;T&gt;) from the root configuration.
@@ -677,7 +682,7 @@ type
   /// <summary>
   ///   Helper for AppBuilder to provide factory methods and extensions for middleware configuration.
   /// </summary>
-  THttpAppBuilderHelper = record helper for AppBuilder
+  THttpAppBuilderHelper = record helper for TAppBuilder
   public
     // ?? Factory Methods
     
@@ -813,7 +818,8 @@ type
     function UseResponseCache(AConfigurator: TResponseCacheBuilderProc): AppBuilder; overload;
     function UseResponseCache(const ACacheBuilder: TResponseCacheBuilder): AppBuilder; overload;
 
-    function MapEndpoints(AMapper: TProc<TAppBuilder>): AppBuilder;
+    function MapEndpoints(AMapper: TProc<TAppBuilder>): TAppBuilder;
+    function MapDataApis: TAppBuilder;
     // -------------------------------------------------------------------------
     // ??? Routing - POST
     // -------------------------------------------------------------------------
@@ -941,8 +947,8 @@ type
     /// <summary>
     ///  Configures a Database as API endpoint for the specified entity type. 
     /// </summary>
-    function MapDataApi<T: class>(const APath: string): AppBuilder; overload;
-    function MapDataApi<T: class>(const APath: string; AOptions: TDataApiOptions): AppBuilder; overload;
+    function MapDataApi<T: class, constructor>(const APath: string): AppBuilder; overload;
+    function MapDataApi<T: class, constructor>(const APath: string; AOptions: TDataApiOptions): AppBuilder; overload;
     function MapDataApi(const AEntityClass: TClass; const APath: string; AOptions: TDataApiOptions = nil): AppBuilder; overload;
     {$ENDIF}
   end;
@@ -1061,6 +1067,12 @@ end;
 function TWebServicesHelper.AddBackgroundServices: TBackgroundServiceBuilder;
 begin
   Result := TBackgroundServiceBuilder.Create(Self.Unwrap);
+end;
+
+function TWebServicesHelper.AddLogging(const AConfigure: TProc<ILoggingBuilder>): TDextServices;
+begin
+  TServiceCollectionLoggingExtensions.AddLogging(Self.Unwrap, AConfigure);
+  Result := Self;
 end;
 
 function TWebServicesHelper.Configure<T>(Configuration: IConfiguration): TDextServices;
@@ -1355,6 +1367,12 @@ end;
 function THttpAppBuilderHelper.MapGetResult<T, TResult>(const Path: string; Handler: THandlerResultFunc<T, TResult>): AppBuilder;
 begin
   TApplicationBuilderExtensions.MapGetResult<T, TResult>(Self.Unwrap, Path, Handler);
+  Result := Self;
+end;
+
+function THttpAppBuilderHelper.MapDataApis: TAppBuilder;
+begin
+  TDataApi.MapAll(Self.Unwrap);
   Result := Self;
 end;
 

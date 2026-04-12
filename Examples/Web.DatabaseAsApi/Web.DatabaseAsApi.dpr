@@ -11,14 +11,6 @@ uses
   // Dext Framework
   Dext,
   Dext.Entity,
-  Dext.Entity.Context,
-  Dext.Entity.Attributes,
-  Dext.Entity.Dialects,
-  Dext.Entity.Drivers.Interfaces,
-  Dext.Entity.Drivers.FireDAC,
-  Dext.Entity.Drivers.FireDAC.Links,
-  Dext.Entity.Setup,
-  Dext.Entity.Mapping,
   Dext.Web,
   Dext.Web.DataApi,
   Dext.Web.Results,
@@ -33,7 +25,12 @@ uses
   Dext.Swagger.Middleware,
 
   // Storage
-  FireDAC.Comp.Client;
+  FireDAC.Comp.Client,
+  
+  // Logging
+  Dext.Logging,
+  Dext.Logging.Extensions,
+  Dext.Logging.Console;
 
 type
   { --- ENTITY 1: Simple Integer PK (AutoInc) --- }
@@ -92,6 +89,13 @@ end;
 
 procedure TStartup.ConfigureServices(const Services: TDextServices; const Configuration: IConfiguration);
 begin
+  Services.AddLogging(
+    procedure(Builder: ILoggingBuilder)
+    begin
+      Builder.AddConsole;
+      Builder.SetMinimumLevel(TLogLevel.Debug);
+    end);
+
   { --- Standard Dext Scoped DbContext with Physical SQLite DB --- }
   { UseSQLite is a fluent extension that creates the connection pool properly. }
   { To avoid closure capture issues (AV), we call the extension with a literal string. }
@@ -108,11 +112,11 @@ procedure TStartup.Configure(const App: IWebApplication);
 begin
   App.Builder
     {$IFDEF DEBUG}
-    .UseDeveloperExceptionPage
+    .UseDeveloperExceptionPage()
     {$ELSE}
-    .UseHttpLogging
+    .UseHttpLogging()
     {$ENDIF}
-    .UseExceptionHandler
+    .UseExceptionHandler()
     .MapGet('/', 
       procedure(Ctx: IHttpContext)
       begin
@@ -166,6 +170,13 @@ begin
         Customer := TCustomer.Create;
         Customer.Name := 'John Doe';
         Customer.Email := 'john@example.com';
+        Customer.Active := True;
+        Customer.CreatedAt := Now;
+        Db.Entities<TCustomer>.Add(Customer);
+
+        Customer := TCustomer.Create;
+        Customer.Name := 'Jane Smith';
+        Customer.Email := 'jane@example.com';
         Customer.Active := True;
         Customer.CreatedAt := Now;
         Db.Entities<TCustomer>.Add(Customer);

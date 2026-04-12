@@ -180,7 +180,7 @@ type
       Handler: THandlerResultFunc<T1, T2, T3, TResult>): IApplicationBuilder; overload;
   end;
 
-  TDextAppBuilderHelper = record helper for TDextAppBuilder
+  TDextAppBuilderHelper = record helper for TAppBuilder
   public
     // 1 Argument Handlers
     function MapGet<T>(const Path: string; Handler: THandlerProc<T>): IApplicationBuilder; overload;
@@ -241,8 +241,9 @@ type
     function UseSwagger(const AOptions: TOpenAPIOptions): IApplicationBuilder; overload;
     function UseSwagger(const ABuilder: TOpenAPIBuilder): IApplicationBuilder; overload;
 
-    function UseExceptionHandler: IApplicationBuilder; overload;
-    function UseHttpLogging: IApplicationBuilder; overload;
+    function UseExceptionHandler: TAppBuilder; overload;
+    function UseDeveloperExceptionPage: TAppBuilder; overload;
+    function UseHttpLogging: TAppBuilder; overload;
   end;
 
 
@@ -467,14 +468,22 @@ begin
   Result := TSwaggerExtensions.UseSwagger(Self.Unwrap, ABuilder.Build);
 end;
 
-function TDextAppBuilderHelper.UseExceptionHandler: IApplicationBuilder;
+function TDextAppBuilderHelper.UseExceptionHandler: TAppBuilder;
 begin
-  Result := TApplicationBuilderMiddlewareExtensions.UseExceptionHandler(Self.Unwrap);
+  TApplicationBuilderMiddlewareExtensions.UseExceptionHandler(Self.Unwrap);
+  Result := Self;
 end;
 
-function TDextAppBuilderHelper.UseHttpLogging: IApplicationBuilder;
+function TDextAppBuilderHelper.UseDeveloperExceptionPage: TAppBuilder;
 begin
-  Result := TApplicationBuilderMiddlewareExtensions.UseHttpLogging(Self.Unwrap);
+  TApplicationBuilderMiddlewareExtensions.UseDeveloperExceptionPage(Self.Unwrap);
+  Result := Self;
+end;
+
+function TDextAppBuilderHelper.UseHttpLogging: TAppBuilder;
+begin
+  TApplicationBuilderMiddlewareExtensions.UseHttpLogging(Self.Unwrap);
+  Result := Self;
 end;
 
 

@@ -54,9 +54,14 @@ type
     
     class procedure Error(const AMessage: string); overload;
     class procedure Error(const AMessage: string; const AArgs: array of const); overload;
+    class procedure Error(const AException: Exception; const AMessage: string; const AArgs: array of const); overload;
     
     class procedure Critical(const AMessage: string); overload;
     class procedure Critical(const AMessage: string; const AArgs: array of const); overload;
+    class procedure Critical(const AException: Exception; const AMessage: string; const AArgs: array of const); overload;
+    
+    class procedure LogGeneric(ALevel: TLogLevel; const AMessage: string; const AArgs: array of const); overload;
+    class procedure LogGeneric(ALevel: TLogLevel; const AException: Exception; const AMessage: string; const AArgs: array of const); overload;
     // ... add more as needed
   end;
 
@@ -164,6 +169,11 @@ begin
   Logger.Error(AMessage, AArgs);
 end;
 
+class procedure Log.Error(const AException: Exception; const AMessage: string; const AArgs: array of const);
+begin
+  Logger.Error(AException, AMessage, AArgs);
+end;
+
 class procedure Log.Critical(const AMessage: string);
 begin
   Logger.Critical(AMessage, []);
@@ -172,6 +182,21 @@ end;
 class procedure Log.Critical(const AMessage: string; const AArgs: array of const);
 begin
   Logger.Critical(AMessage, AArgs);
+end;
+
+class procedure Log.Critical(const AException: Exception; const AMessage: string; const AArgs: array of const);
+begin
+  Logger.Critical(AException, AMessage, AArgs);
+end;
+
+class procedure Log.LogGeneric(ALevel: TLogLevel; const AMessage: string; const AArgs: array of const);
+begin
+  Logger.Log(ALevel, AMessage, AArgs);
+end;
+
+class procedure Log.LogGeneric(ALevel: TLogLevel; const AException: Exception; const AMessage: string; const AArgs: array of const);
+begin
+  Logger.Log(ALevel, AException, AMessage, AArgs);
 end;
 
 end.
