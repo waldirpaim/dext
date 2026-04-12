@@ -6,7 +6,8 @@ This document tracks all features and fixes required for the V1.0 Stable release
 Status | Task | Description
 :---: | :--- | :---
 ✅ | **Dynamic Port Binding** | Support for Port 0 (OS chooses free port) for Demos and CI.
-🟡 | **DataAPI Conventions (S04)** | Auto-discovery, 'T' prefix stripping, and Smart Attributes.
+✅ | **DataAPI Conventions (S04)** | Auto-discovery, 'T' prefix stripping, and Smart Attributes.
+✅ | **DataAPI Observability** | CRUD diagnostic logs and mapping tracking.
 🟡 | **Examples Roadmap** | Create high-fidelity examples for existing features.
 🟡 | **Agent Guidelines** | Finalize `CONTRIBUTING_AI.md` and related Workflows.
 
