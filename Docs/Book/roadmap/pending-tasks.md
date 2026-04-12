@@ -7,11 +7,9 @@ This document centralizes the technical and ecosystem tasks required to declare 
 ## 🛠️ Code Quality & Ecosystem
 Status | Task | Description
 :---: | :--- | :---
-🟡 | **Installation Automation** | Explore Boss packages or TMS Smart Setup to automate environment setup.
-🟡 | **Versioning Strategy** | Implement `LIBSUFFIX AUTO` in packages for multi-IDE version support.
-🟡 | **Generics Optimization** | Review heavy Generics usage to reduce "code bloat" and compilation time.
-🟡 | **Code Standardization** | Final audit based on the Object Pascal Style Guide.
-🟡 | **Agent Guidelines** | Finalize `CONTRIBUTING_AI.md` to guide AI assistants in framework development.
+🟡 | **Advanced Scaffolding** | New template engine for Startup, Entities, Endpoints, and Controllers.
+🟡 | **Template Parity** | High-fidelity templates for both Web Stencils and Native Delphi.
+🟡 | **Agent Guidelines** | Finalize `CONTRIBUTING_AI.md` to guide AI assistants.
 
 ---
 
@@ -41,10 +39,20 @@ Status | Task | Description
 
 ---
 
-## 🔮 Post-V1 (Near Future)
+## 📡 Modernization & Services (The Modernizer)
+Status | Task | Description
+:---: | :--- | :---
+🟡 | **gRPC & Protobuf** | Initial implementation of the binary transport layer.
+🔴 | **TEntityDataSet Provider** | Pluggable providers (REST/gRPC) for EntityDataSet.
+🔴 | **Distributed Tracing** | Instrumentation UI and dynamic proxy-based tracing.
+🟡 | **PDF Signing Engine** | Module for signed PDF generation.
+
+---
+
+## 🔮 Future / Post-V1
 - [ ] **OData Support**: Full support for OData queries.
 - [ ] **GraphQL**: Native layer for exposing data graphs.
-- [ ] **Feature Toggle**: Flag system to enable/disable features at runtime.
+- [ ] **Skia UI (Revolutionary)**: Exploration of high-performance custom UI engine.
 - [ ] **Background Jobs (Redis/RabbitMQ)**: Persistent queue system with retries.
 - [ ] **CancellationToken Timeout**: Native support for `.WithTimeout(Duration)`.
 

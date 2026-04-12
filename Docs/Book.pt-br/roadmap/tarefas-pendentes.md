@@ -7,11 +7,9 @@ Este documento centraliza as pendências técnicas e de ecossistema necessárias
 ## 🛠️ Qualidade de Código & Ecossistema
 Status | Tarefa | Descrição
 :---: | :--- | :---
-🟡 | **Automação de Instalação** | Explorar pacotes Boss ou TMS Smart Setup para automatizar o ambiente.
-🟡 | **Estratégia de Versionamento** | Implementar `LIBSUFFIX AUTO` nos packages para suporte a múltiplas versões de IDE.
-🟡 | **Otimização de Generics** | Revisar o uso de Generics pesados para reduzir o "code bloat" e tempo de compilação.
-🟡 | **Padronização de Código** | Auditoria final baseada no Object Pascal Style Guide.
-🟡 | **Agent Guidelines** | Finalizar o `CONTRIBUTING_AI.md` para orientar assistentes de IA no desenvolvimento do framework.
+🟡 | **Scaffolding Avançado** | Novo motor de templates para Startup, Entidades, Endpoints e Controllers.
+🟡 | **Paridade de Templates** | Templates de alta fidelidade para Web Stencils e Delphi Nativo.
+🟡 | **Agent Guidelines** | Finalizar o `CONTRIBUTING_AI.md` para orientar assistentes de IA.
 
 ---
 
@@ -41,10 +39,20 @@ Status | Tarefa | Descrição
 
 ---
 
-## 🔮 Pós-V1 (Futuro Próximo)
-- [ ] **OData Support**: Suporte completo a queries OData.
+## 📡 Modernização & Serviços (O Modernizador)
+Status | Tarefa | Descrição
+:---: | :--- | :---
+🟡 | **gRPC & Protobuf** | Implementação inicial da camada de transporte binário.
+🔴 | **Provider de EntityDataSet** | Providers plugáveis (REST/gRPC) para o EntityDataSet.
+🔴 | **Tracing Distribuído** | UI de instrumentação e tracing baseado em proxies dinâmicos.
+🟡 | **Motor de PDF & Assinatura** | Módulo para geração de PDFs assinados.
+
+---
+
+## 🔮 Futuro / Pós-V1
+- [ ] **Suporte a OData**: Suporte completo a queries OData.
 - [ ] **GraphQL**: Camada nativa para exposição de grafos de dados.
-- [ ] **Feature Toggle**: Sistema de flags para habilitar/desabilitar funcionalidades em runtime.
+- [ ] **Skia UI (Revolucionário)**: Exploração de motor de UI customizado de alta performance.
 - [ ] **Background Jobs (Redis/RabbitMQ)**: Sistema de filas persistentes com retentativas.
 - [ ] **CancellationToken Timeout**: Suporte nativo a `.WithTimeout(Duration)`.
 
