@@ -32,6 +32,7 @@ To support critical enterprise applications, Dext must prove stability across a 
 - [ ] **The "Matrix" (Docker-Compose)**: A standardized Docker environment to spin up all supported databases (SQL Server, Postgre, MySQL, Firebird) simultaneously for local development and CI.
 - [ ] **Cross-Database Integration Testing**: Execute the 165+ test suite against the entire matrix automatically.
 - [ ] **End-to-End (E2E) Web Scenarios**: Validate real-world HTTP traffic including large binary uploads, GZip compression, and complex Cookie/JWT auth flows.
+- [ ] **Dynamic Port Support**: Implement Port 0 support for headless integration testing and CI environments.
 - [ ] **The 24h Soak Test**: Run an Indy/WebBroker server under sustained load for 24 hours to monitor memory heap and handle fragmentation.
 
 ---
@@ -69,11 +70,27 @@ Disrupting the legacy Delphi connectivity market by providing high-speed, modern
 
 ---
 
+## 🔐 Pillar 6: The "Enterprise" (Security & Advanced Tooling)
+Safety and productivity are the final requirements for professional commercial adoption.
+
+### 📋 Key Objectives:
+- [ ] **Native OAuth2/OIDC**: Implementation of JWT-based authentication and Identity providers (Google/Microsoft).
+- [ ] **Policy-Based Auth**: Flexible authorization logic inspired by ASP.NET Core.
+- [ ] **IDE Wizards**: Visual tools for Migrations and Scaffolding inside the Delphi environment (Dext Explorer).
+- [ ] **The Production Middleware Pack**: Deliver a suite of essential production middlewares: 
+    - **CORS** (Safe Multi-origin).
+    - **SPA Fallback** (HTML5 History Mode support).
+    - **Forwarded Headers** (Nginx/Cloudflare/IIS Proxy integration).
+    - **Resilience & Polices** (Retries and Circuit Breakers).
+    - **Localization (i18n)** (Auto-culture detection).
+
+---
+
 ## 📅 Roadmap to Stable
 
 1.  **Phase A (The Evidence)**: Pillar 1 (Benchmarks) + Pillar 2 (Matrix Setup).
-2.  **Phase B (The Experience)**: Pillar 3 (Advanced Scaffolding) + Documentation Technical Review.
-3.  **Phase C (The Modernizer)**: Pillar 5 (Protobuf/gRPC Alpha) + Distributed Tracing MVP.
+2.  **Phase B (The Experience)**: Pillar 3 (Advanced Scaffolding) + Pillar 5 (Modernizer Alpha).
+3.  **Phase C (The Professionalization)**: Pillar 6 (Security & Tooling) + Middleware Pack.
 4.  **Phase D (The Polish)**: Pillar 4 (UI Refresh) + Final RC Audit.
 
 ---

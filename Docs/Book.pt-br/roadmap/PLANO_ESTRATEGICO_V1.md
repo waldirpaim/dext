@@ -32,6 +32,7 @@ Para suportar aplicações críticas de enterprise, o Dext deve provar estabilid
 - [ ] **A "Matrix" (Docker-Compose)**: Um ambiente Docker padronizado para subir todos os bancos suportados (SQL Server, Postgre, MySQL, Firebird) simultaneamente para desenvolvimento local e CI.
 - [ ] **Testes de Integração Cruzados**: Executar a suíte de 165+ testes contra toda a Matrix automaticamente.
 - [ ] **Cenários Web End-to-End (E2E)**: Validar tráfego HTTP real incluindo grandes uploads binários, compressão GZip e fluxos complexos de autenticação via Cookies/JWT.
+- [ ] **Suporte a Portas Dinâmicas**: Implementar suporte a Porta 0 para testes de integração headless e ambientes de CI.
 - [ ] **O Soak Test de 24h**: Rodar um servidor Indy/WebBroker sob carga sustentada por 24 horas para monitorar o heap de memória e fragmentação.
 
 ---
@@ -69,11 +70,27 @@ Desafiando o mercado legatário de conectividade Delphi ao fornecer alternativas
 
 ---
 
+## 🔐 Pilar 6: O "Enterprise" (Security & Advanced Tooling)
+Segurança e produtividade são os requisitos finais para a adoção comercial profissional.
+
+### 📋 Objetivos Chave:
+- [ ] **OAuth2/OIDC Nativo**: Implementação de autenticação baseada em JWT e provedores de Identidade (Google/Microsoft).
+- [ ] **Auth Baseada em Políticas**: Lógica de autorização flexível inspirada no ASP.NET Core.
+- [ ] **IDE Wizards**: Ferramentas visuais para Migrations e Scaffolding dentro do ambiente Delphi (Dext Explorer).
+- [ ] **O Middleware Pack de Produção**: Entregar uma suíte de middlewares essenciais: 
+    - **CORS** (Suporte multiorigem seguro).
+    - **SPA Fallback** (Suporte ao History Mode de Vue/React).
+    - **Forwarded Headers** (Integração com Nginx/Cloudflare/IIS).
+    - **Resiliência & Políticas** (Retentativas e Circuit Breakers).
+    - **Localização (i18n)** (Detecção automática de cultura).
+
+---
+
 ## 📅 Roadmap para o Stable
 
 1.  **Fase A (A Evidência)**: Pilar 1 (Benchmarks) + Pilar 2 (Matrix Setup).
-2.  **Fase B (A Experiência)**: Pilar 3 (Scaffolding Avançado) + Revisão Técnica da Documentação.
-3.  **Fase C (O Modernizador)**: Pilar 5 (Alpha do Protobuf/gRPC) + MVP de Tracing Distribuído.
+2.  **Fase B (A Experiência)**: Pilar 3 (Scaffolding Avançado) + Pilar 5 (Alpha do Modernizador).
+3.  **Fase C (A Profissionalização)**: Pilar 6 (Security & Tooling) + Middleware Pack.
 4.  **Fase D (O Polimento)**: Pilar 4 (Refinamento de UI) + Auditoria Final de RC.
 
 ---

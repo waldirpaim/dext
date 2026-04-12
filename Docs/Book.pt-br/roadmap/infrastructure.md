@@ -17,6 +17,7 @@ A infraestrutura base está estabilizada, com drivers plugáveis para alta perfo
 Estratégia de servidores plugáveis (`Server Adapters`) para permitir estabilidade imediata e performance extrema futura, sem quebrar a API pública.
 
 ### 1. V1: Driver Indy (Estabilidade) - ✅ Concluído
+
 - [x] **TDextIndyWrapper**: Wrapper para compatibilidade Indy. Renomeado para clareza de licenciamento.
 - [x] **Avaliação Preguiçosa (Lazy)**: Headers e Query String processados sob demanda.
 - [x] **Encapsulamento de Stream**: Manipulação de buffers sem cópia de memória (Zero-Copy).
@@ -27,7 +28,7 @@ Estratégia para performance "estado da arte" usando o motor do ASP.NET Core via
 
 - [ ] **Wrapper NativeAOT**: Biblioteca C# compilada como Native Library (`.dll`/`.so`) exportando interface C.
 - [ ] **Ponte Zero-Copy**: Passagem de ponteiros de memória (Pinned Memory) do .NET para o Delphi.
-- [ ] **TSpan<T>**: Implementação de `Span<T>` no Delphi para ler os buffers do Kestrel sem alocação de strings intermediárias.
+- [x] **TSpan<T>**: Implementação de `Span<T>` no Delphi para ler os buffers do Kestrel sem alocação de strings intermediárias.
 
 ### 3. V3: Native Drivers (Bare Metal) - 🔮 Futuro
 
@@ -69,19 +70,23 @@ Eliminar o custo de conversão `UTF-8` <-> `UTF-16` (UnicodeString) no core do f
 ## 🛠️ Infraestrutura Core
 
 ### 1. Otimização de Memória
+
 - [x] **TSpan<T>**: Estrutura para fatiamento de arrays/memória sem alocação (essencial para o JSON Parser V2).
 - [x] **JSON Zero-Allocation**: Parser JSON baseado em `TSpan<Byte>` (UTF-8) para evitar transcoding para UTF-16.
 
 ### 2. Melhorias em Configurações JSON
+
 - [x] **Configurações Globais Padrão**: Via `TDextJson.SetDefaultSettings` para aplicar case-insensitivity e outras opções globalmente.
 - [ ] **Configurações por Contexto**: Permitir configuração de JSON settings por contexto/endpoint via middleware ou atributos.
 
 ### 3. Fundação de Telemetria & Observabilidade
+
 - [ ] **API de Activity/Span**: Abstração para rastreamento distribuído (Tracing).
 - [ ] **API de Métricas**: Contadores, Histogramas e Gauges de alta performance.
 - [ ] **Abstração de Logging**: Interface de logging com foco em zero-allocation.
 
 ### 4. Assincronia Avançada & Concorrência
+
 - [x] **Tasks Fluentes Core**: Implementação base (`TAsyncTask`, `ThenBy`, `WithCancellation`).
 - [x] **Callbacks Não-Sincronizados**: Execução de callbacks em thread de background (evitando gargalos na Main Thread).
 - [ ] **Testing Scheduler**: Scheduler para permitir testes unitários determinísticos de código assíncrono.

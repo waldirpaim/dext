@@ -9,6 +9,9 @@ Status | Tarefa | Descrição
 :---: | :--- | :---
 🟡 | **Scaffolding Avançado** | Novo motor de templates para Startup, Entidades, Endpoints e Controllers.
 🟡 | **Paridade de Templates** | Templates de alta fidelidade para Web Stencils e Delphi Nativo.
+🟡 | **Dext IDE Explorer** | Ferramenta visual para Migrations e Scaffolding na IDE.
+🟡 | **OAuth2 & OIDC** | Suporte nativo a JWT e Social Login (Google/Microsoft).
+🟡 | **Portas Dinâmicas** | Suporte a Porta 0 (SO escolhe porta livre) com descoberta pós-bind.
 🟡 | **Agent Guidelines** | Finalizar o `CONTRIBUTING_AI.md` para orientar assistentes de IA.
 
 ---
@@ -43,9 +46,21 @@ Status | Tarefa | Descrição
 Status | Tarefa | Descrição
 :---: | :--- | :---
 🟡 | **gRPC & Protobuf** | Implementação inicial da camada de transporte binário.
+🔴 | **High-Perf Reflection** | Substituir RTTI genérico por Handlers de tipo acelerados.
 🔴 | **Provider de EntityDataSet** | Providers plugáveis (REST/gRPC) para o EntityDataSet.
 🔴 | **Tracing Distribuído** | UI de instrumentação e tracing baseado em proxies dinâmicos.
 🟡 | **Motor de PDF & Assinatura** | Módulo para geração de PDFs assinados.
+
+---
+
+## 🛡️ Production Middleware Pack
+Status | Tarefa | Descrição
+:---: | :--- | :---
+🟡 | **Middleware de CORS** | Suporte a múltiplas origens para frontends SPA.
+🟡 | **SPA Fallback** | Suporte ao History Mode (index.html redirection).
+🟡 | **Forwarded Headers** | Confiar em X-Forwarded-* vindo de Proxies.
+🔴 | **Resiliência (Tipo Polly)** | Políticas de Retry e Circuit Breaker.
+🔴 | **Localização (i18n)** | Detecção automática de cultura via Headers.
 
 ---
 

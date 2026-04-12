@@ -9,6 +9,9 @@ Status | Task | Description
 :---: | :--- | :---
 🟡 | **Advanced Scaffolding** | New template engine for Startup, Entities, Endpoints, and Controllers.
 🟡 | **Template Parity** | High-fidelity templates for both Web Stencils and Native Delphi.
+🟡 | **Dext IDE Explorer** | Visual tool for Migrations and Scaffolding inside Delphi.
+🟡 | **OAuth2 & OIDC** | Native JWT and Social Login (Google/Microsoft) support.
+🟡 | **Dynamic Port Binding** | Support for Port 0 (OS chooses free port) with post-bind discovery.
 🟡 | **Agent Guidelines** | Finalize `CONTRIBUTING_AI.md` to guide AI assistants.
 
 ---
@@ -46,6 +49,17 @@ Status | Task | Description
 🔴 | **TEntityDataSet Provider** | Pluggable providers (REST/gRPC) for EntityDataSet.
 🔴 | **Distributed Tracing** | Instrumentation UI and dynamic proxy-based tracing.
 🟡 | **PDF Signing Engine** | Module for signed PDF generation.
+
+---
+
+## 🛡️ Production Middleware Pack
+Status | Task | Description
+:---: | :--- | :---
+🟡 | **CORS Middleware** | Multi-origin support for SPA frontends.
+🟡 | **SPA Fallback** | HTML5 History Mode (index.html redirection).
+🟡 | **Forwarded Headers** | Trust X-Forwarded-* headers from Proxies.
+🔴 | **Resilience (Polly-like)** | Retry and Circuit Breaker policies.
+🔴 | **Localization (i18n)** | Auto-detect culture from Accept-Language.
 
 ---
 
