@@ -26,5 +26,13 @@ Every new feature MUST:
 - **Bilingual Source**: Comments in English. Identifier names in English.
 - **Attributes**: Use PascalCase for Attribute names.
 
+## 5. Standard Development Workflow
+To ensure consistency and avoid "stale DCU" or path mismatch issues, all contributors MUST follow this workflow:
+
+1.  **Environment Setup**: Always run `setenv.bat` in a fresh terminal session before building. This ensures the correct SDK (currently 37.0) and environment variables are active.
+2.  **Core Build**: NEVER modify the Framework's source paths inside an Example's `.dproj`. If you change the Framework code, rebuild the Core using the provided build scripts or by running `msbuild` on the Framework project directly.
+3.  **Clean State**: If you encounter strange "Access Violations" or "Identifier not found" errors after a refactor, run the `manual_build.md` workflow to perform a full cleanup of DCU files.
+4.  **No Manual Path Edits**: Do not add local absolute paths to `.dproj` files. Use relative paths or rely on the global library path configured via `setenv`.
+
 ---
 *Created: April 2026*

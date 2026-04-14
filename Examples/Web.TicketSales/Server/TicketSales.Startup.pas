@@ -54,12 +54,21 @@ uses
 procedure TStartup.ConfigureDatabase(Options: TDbContextOptions);
 begin
   Options.UseSQLite('TicketSales.db');
-  Options.UseSnakeCaseNamingConvention;
+  // Options.UseSnakeCaseNamingConvention;
 end;
 
 procedure TStartup.ConfigureServices(const Services: TDextServices; const Configuration: IConfiguration);
 begin
   Services
+    // Logging infrastructure with Telemetry Bridge
+    .AddLogging(
+      procedure(Builder: ILoggingBuilder)
+      begin
+        Builder
+          .SetMinimumLevel(TLogLevel.Information)
+          .AddConsole
+          .AddTelemetry;
+      end)
     // Database Context
     .AddDbContext<TTicketSalesDbContext>(ConfigureDatabase)
     // JWT Token Handler

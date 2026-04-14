@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -39,6 +39,7 @@ type
     function AddProvider(const AProvider: ILoggerProvider): ILoggingBuilder;
     function SetMinimumLevel(ALevel: TLogLevel): ILoggingBuilder;
     function AddConsole: ILoggingBuilder;
+    function AddTelemetry: ILoggingBuilder;
   end;
 
   TServiceCollectionLoggingExtensions = class
@@ -50,8 +51,10 @@ implementation
 
 uses
   System.TypInfo,
+  System.Math,
   Dext.Collections,
-  Dext.Logging.Console;
+  Dext.Logging.Console,
+  Dext.Logging.Telemetry;
 
 type
   TLoggerFactoryOwner = class
@@ -69,6 +72,7 @@ type
     FServices: IServiceCollection;
     FProviders: IList<ILoggerProvider>;
     FMinLevel: TLogLevel;
+    FTelemetryEnabled: Boolean;
   public
     constructor Create(AServices: IServiceCollection);
     destructor Destroy; override;
@@ -77,9 +81,11 @@ type
     function AddProvider(const AProvider: ILoggerProvider): ILoggingBuilder;
     function SetMinimumLevel(ALevel: TLogLevel): ILoggingBuilder;
     function AddConsole: ILoggingBuilder;
+    function AddTelemetry: ILoggingBuilder;
     
     function ExtractProviders: IList<ILoggerProvider>;
     function GetMinLevel: TLogLevel;
+    function GetTelemetryEnabled: Boolean;
   end;
 
 { TLoggerFactoryOwner }
@@ -109,6 +115,7 @@ begin
   FServices := AServices;
   FProviders := TCollections.CreateList<ILoggerProvider>;
   FMinLevel := TLogLevel.Information;
+  FTelemetryEnabled := False;
 end;
 
 destructor TLoggingBuilder.Destroy;
@@ -139,6 +146,12 @@ begin
   Result := AddProvider(TConsoleLoggerProvider.Create);
 end;
 
+function TLoggingBuilder.AddTelemetry: ILoggingBuilder;
+begin
+  FTelemetryEnabled := True;
+  Result := Self;
+end;
+
 function TLoggingBuilder.ExtractProviders: IList<ILoggerProvider>;
 begin
   Result := FProviders;
@@ -148,6 +161,11 @@ end;
 function TLoggingBuilder.GetMinLevel: TLogLevel;
 begin
   Result := FMinLevel;
+end;
+
+function TLoggingBuilder.GetTelemetryEnabled: Boolean;
+begin
+  Result := FTelemetryEnabled;
 end;
 
 { TServiceCollectionLoggingExtensions }
@@ -170,9 +188,11 @@ begin
   LProvidersArray := LProvidersList.ToArray;
   LProvidersList := nil;
   LMinLevel := LBuilderObj.GetMinLevel;
+  var LTelemetryEnabled := LBuilderObj.GetTelemetryEnabled;
   
   // Capture state for factory delegate
   var CapturedMinLevel := LMinLevel;
+  var CapturedTelemetryEnabled := LTelemetryEnabled;
   // Dynamic arrays are managed types, so they are safely captured by value (copy-on-write reference)
   var CapturedProviders := LProvidersArray;
 
@@ -192,6 +212,13 @@ begin
         for P in CapturedProviders do
           Factory.AddProvider(P);
           
+        // If Telemetry is enabled, start the bridge
+        if CapturedTelemetryEnabled then
+        begin
+           var L := Factory.CreateLogger('Telemetry');
+           TDiagnosticSource.Instance.Subscribe(TLoggingTelemetryObserver.Create(L));
+        end;
+        
         Owner := TLoggerFactoryOwner.Create(Factory);
         Result := Owner;
       except

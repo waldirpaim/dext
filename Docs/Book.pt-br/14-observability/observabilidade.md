@@ -21,6 +21,28 @@ initialization
     end);
 ```
 
+## A Ponte para o ILogger
+
+O Dext vem com uma "ponte" integrada que roteia automaticamente os eventos de telemetria para o sistema de logs (`ILogger`). Isso é extremamente útil durante o desenvolvimento para ver o que está acontecendo sem precisar de um dashboard externo.
+
+Para ativar, basta garantir que a telemetria esteja habilitada na configuração:
+
+```json
+{
+  "Logging": {
+    "CaptureTelemetry": true
+  }
+}
+```
+
+No console, você verá saídas como:
+```text
+info: Telemetry
+      [SQL] SELECT "Id", "Name" FROM "Customers" (2ms)
+info: Telemetry
+      [HTTP] GET /api/orders - 200 (15ms)
+```
+
 ## Instrumentação Nativa
 
 ### Banco de Dados (ORM)

@@ -34,27 +34,35 @@ Web.TicketSales/
     └── TicketSales.Tests.Validation.pas
 ```
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Standard Workflow)
 
-### 1. Create Projects in Delphi IDE
+To ensure the best development experience and avoid build errors (like stale DCUs or missing units), follow the standardized Dext workflow:
 
-1. Open Delphi
-2. Create a new **Console Application** project in `Server/`
-3. Add all `.pas` files to the project
-4. Configure the **Unit Search Path** to include:
-   ```
-   ..\Domain;..\Data;..\Services;..\..\Output\$(ProductVersion)_$(Platform)_$(Config)
-   ```
-5. Save as `Web.TicketSales.dpr`
+### 1. Environment Setup
+Open a terminal (PowerShell or CMD) and run:
+```powershell
+.\setenv.bat
+```
+*This sets the correct SDK paths and environment variables.*
 
-### 2. Build and Run
+### 2. Building the Core
+Ensure the Dext Framework core is built. From the root:
+```powershell
+msbuild Dext.Core.dproj /p:Configuration=Debug
+```
+(Or use the global `build_framework.bat` if available).
 
-1. Build the framework first: `build_framework.bat`
-2. Build and run `Web.TicketSales`
-3. Server starts at `http://localhost:9000`
+### 3. Build and Run Example
+From this folder:
+```powershell
+msbuild Server\Web.TicketSales.dproj
+.\Server\Win32\Debug\Web.TicketSales.exe
+```
 
-### 3. Access the API
+> [!IMPORTANT]
+> **NO MANUAL PATH EDITS**: Avoid adding local absolute paths to the Project Options in Delphi. The project is pre-configured to find units via relative paths and the `Output` directory populated by `setenv`.
 
+### 4. Access the API
 - **Swagger UI**: http://localhost:9000/swagger
 - **Health Check**: http://localhost:9000/api/health
 

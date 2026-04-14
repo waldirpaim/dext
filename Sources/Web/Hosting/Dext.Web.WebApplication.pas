@@ -251,6 +251,9 @@ begin
   FServiceProvider := FServices.BuildServiceProvider;
   // Ensure AppBuilder is updated or created with the new provider
   GetApplicationBuilder.SetServiceProvider(FServiceProvider);
+  // Force logger resolution to initialize Telemetry Bridge
+  ResolveLogger;
+
   Result := FServiceProvider;
 end;
 
@@ -323,6 +326,7 @@ begin
   // Build ServiceProvider now - this is the correct place to do it,
   // AFTER all services have been registered (including HealthChecks, etc.)
   FServiceProvider := FServices.BuildServiceProvider;
+  ResolveLogger; // Force telemetry subscription early
   
   // Update ApplicationBuilder with the final ServiceProvider
   GetApplicationBuilder.SetServiceProvider(FServiceProvider);

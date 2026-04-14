@@ -31,7 +31,8 @@ uses
   System.SysUtils,
   System.Classes,
   System.JSON,
-  Dext.Collections;
+  Dext.Collections,
+  Dext.Logging;
 
 type
   /// <summary>
@@ -49,6 +50,19 @@ type
 
   ITelemetryObserver = interface
     ['{30000000-0000-0000-0000-000000000001}']
+    procedure OnEvent(const AEvent: TTelemetryEvent);
+  end;
+
+  /// <summary>
+  ///   Bridge that routes telemetry events to the logging system.
+  /// </summary>
+  TLoggingTelemetryObserver = class(TInterfacedObject, ITelemetryObserver)
+  private class var
+    FIsSubscribed: Boolean;
+  private
+    FLogger: ILogger;
+  public
+    constructor Create(const ALogger: ILogger);
     procedure OnEvent(const AEvent: TTelemetryEvent);
   end;
 
@@ -126,6 +140,44 @@ begin
       Observer.OnEvent(Ev);
   finally
     Ev.Data.Free;
+  end;
+end;
+
+{ TLoggingTelemetryObserver }
+
+constructor TLoggingTelemetryObserver.Create(const ALogger: ILogger);
+begin
+  inherited Create;
+  FLogger := ALogger;
+end;
+
+procedure TLoggingTelemetryObserver.OnEvent(const AEvent: TTelemetryEvent);
+begin
+  if AEvent.Category = 'SQL' then
+  begin
+    var SqlCmd := AEvent.Data.GetValue<string>('sql');
+    if SqlCmd = '' then SqlCmd := AEvent.Name;
+    
+    FLogger.Info( 
+      Format('[SQL] Executed in %dms (%s affected): %s', [
+        AEvent.DurationMs, 
+        AEvent.Status,
+        SqlCmd
+      ]));
+  end
+  else if AEvent.Category = 'HTTP' then
+  begin
+    FLogger.Info(
+      Format('[HTTP] %s %s - %s (%dms)', [
+        AEvent.Data.GetValue<string>('Method'),
+        AEvent.Data.GetValue<string>('Path'),
+        AEvent.Data.GetValue<string>('StatusCode'),
+        AEvent.DurationMs
+      ]));
+  end
+  else
+  begin
+    FLogger.Info(Format('[%s] %s', [AEvent.Category, AEvent.Name]));
   end;
 end;
 

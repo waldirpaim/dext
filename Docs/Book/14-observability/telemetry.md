@@ -21,6 +21,28 @@ initialization
     end);
 ```
 
+## The ILogger Bridge
+
+Dext comes with a built-in "bridge" that automatically routes telemetry events to the logging system (`ILogger`). This is extremely useful during development to see what is happening without needing an external dashboard.
+
+To activate it, ensure that telemetry is enabled in your configuration:
+
+```json
+{
+  "Logging": {
+    "CaptureTelemetry": true
+  }
+}
+```
+
+In the console, you will see output like:
+```text
+info: Telemetry
+      [SQL] SELECT "Id", "Name" FROM "Customers" (2ms)
+info: Telemetry
+      [HTTP] GET /api/orders - 200 (15ms)
+```
+
 ## Built-in Instrumentation
 
 ### Database (ORM)

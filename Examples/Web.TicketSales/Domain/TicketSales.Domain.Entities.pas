@@ -100,7 +100,7 @@ type
     [PK, AutoInc]
     property Id: IntType read FId write FId;
     
-    [ForeignKey('Event')]
+    [ForeignKey('Event'), Column('EventId')]
     property EventId: IntType read FEventId write FEventId;
     
     [Required, MaxLength(100)]
@@ -193,7 +193,7 @@ type
     [PK, AutoInc]
     property Id: IntType read FId write FId;
     
-    [ForeignKey('Customer')]
+    [ForeignKey('Customer'), Column('CustomerId')]
     property CustomerId: IntType read FCustomerId write FCustomerId;
     
     property Status: TOrderStatusType read FStatus write FStatus;
@@ -239,10 +239,10 @@ type
     [PK, AutoInc]
     property Id: IntType read FId write FId;
     
-    [ForeignKey('Order')]
+    [ForeignKey('Order'), Column('OrderId')]
     property OrderId: IntType read FOrderId write FOrderId;
     
-    [ForeignKey('TicketType')]
+    [ForeignKey('TicketType'), Column('TicketTypeId')]
     property TicketTypeId: IntType read FTicketTypeId write FTicketTypeId;
     
     [Required]
@@ -285,7 +285,7 @@ type
     [PK, AutoInc]
     property Id: IntType read FId write FId;
     
-    [ForeignKey('OrderItem')]
+    [ForeignKey('OrderItem'), Column('OrderItemId')]
     property OrderItemId: IntType read FOrderItemId write FOrderItemId;
     
     /// <summary>Unique ticket code (for QR code)</summary>

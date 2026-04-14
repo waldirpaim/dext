@@ -1,6 +1,8 @@
 ﻿program Web.TicketSales.Tests;
 
-{$APPTYPE CONSOLE}
+{$IFNDEF TESTINSIGHT}
+  {$APPTYPE CONSOLE}
+{$ENDIF}
 
 {***************************************************************************}
 {                                                                           }
@@ -29,15 +31,18 @@ uses
 begin
   SetConsoleCharSet;
   try
-    WriteLn('');
-    WriteLn('========================================');
-    WriteLn('   🧪 Ticket Sales Unit Tests');
-    WriteLn('========================================');
-    WriteLn('');
+    SafeWriteLn('');
+    SafeWriteLn('========================================');
+    SafeWriteLn('   🧪 Ticket Sales Unit Tests');
+    SafeWriteLn('========================================');
+    SafeWriteLn('');
 
     TTest.SetExitCode(
       TTest.Configure
         .Verbose
+        {$IFDEF TESTINSIGHT}
+        .UseTestInsight
+        {$ENDIF}
         .RegisterFixtures([
           TEventEntityTests,
           TCustomerEntityTests,
@@ -49,11 +54,10 @@ begin
         ])
         .Run
     );
-
   except
     on E: Exception do
     begin
-      WriteLn('❌ Test Error: ' + E.ClassName + ': ' + E.Message);
+      SafeWriteLn('❌ Test Error: ' + E.ClassName + ': ' + E.Message);
       ExitCode := 1;
     end;
   end;

@@ -97,6 +97,15 @@ Infraestrutura de testes integrada para garantia de qualidade.
 
 ---
 
+## 🔍 8. Observabilidade & Telemetria (Sources\Core\Base)
+
+Infraestrutura de tracing e monitoramento de baixo acoplamento.
+
+- **TDiagnosticSource**: Publicador de eventos centralizado baseado em payloads JSON, garantindo desacoplamento entre produtores (ORM, Web) e consumidores.
+- **Telemetry Bridge**: Integração automática com o sistema de `ILogger`, permitindo visualizar telemetria HTTP e SQL diretamente no console ou arquivos de log.
+- **SQL Capture**: Extração e formatação de instruções SQL nativas do ORM para auditoria em tempo real.
+- **HTTP Life-cycle**: Tracing de latência, códigos de status e rotas do framework web.
+
 ---
 
-*Dext Framework - Exhaustive Technical Map & Features Index. (Revision: April 08, 2026).*
+*Dext Framework - Exhaustive Technical Map & Features Index. (Revision: April 14, 2026).*

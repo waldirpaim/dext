@@ -34,6 +34,7 @@ Status | Task | Spec | Description
 🟡 | **gRPC & Protobuf** | [S02](Specs/S02-Modernizer-gRPC.md) | Native IOCP/EPOLL engine for high-speed binary communication.
 🟡 | **OAuth2 & OIDC** | [S06](Specs/S06-Security-Identity.md) | Native support for JWT, Google, and Microsoft Login.
 ✅ | **Live Tracing (Core)** | [S03](Specs/S03-Live-Observability.md) | Real-time instrumentation infrastructure (TDiagnosticSource).
+🟡 | **Observability Dashboard**| - | Built-in web UI for real-time log and SQL visualization.
 🔴 | **EntityDataSet Providers** | - | Pluggable providers (REST/gRPC) for EntityDataSet.
 
 ## 🔮 Future / Post-V1
@@ -70,6 +71,7 @@ Status | Tarefa | Spec | Descrição
 🟡 | **gRPC & Protobuf** | [S02](Specs/S02-Modernizer-gRPC.md) | Motor nativo IOCP/EPOLL para comunicação binária.
 🟡 | **OAuth2 & OIDC** | [S06](Specs/S06-Security-Identity.md) | Suporte nativo a JWT, Google/Microsoft Login.
 ✅ | **Live Tracing (Core)** | [S03](Specs/S03-Live-Observability.md) | Infraestrutura de instrumentação em tempo real.
+🟡 | **Dashboard Log Live** | - | Interface web para visualização de logs e SQL em tempo real.
 🔴 | **Provider de EntityDataSet** | - | Providers plugáveis (REST/gRPC) para o EntityDataSet.
 
 ## 🔮 Futuro / Pós-V1
