@@ -58,8 +58,10 @@ uses
   {$ENDIF}
   System.IOUtils,
   Dext.Utils,
-  Dext.Core.Writers,
-  Dext.Testing.TestInsight;
+  {$IFDEF DEXT_TESTINSIGHT}
+  Dext.Testing.TestInsight,
+  {$ENDIF}
+  Dext.Core.Writers;
 
 procedure RunTests(const Config: TTestConfigurator);
 begin
@@ -136,6 +138,7 @@ begin
     end;
     
     {$IFDEF MSWINDOWS}
+    {$IFDEF DEXT_TESTINSIGHT}
     if IsUI then
     begin
       var ListenerObj := TTestInsightListener.Create;
@@ -177,6 +180,15 @@ begin
       end;
     end
     else
+    {$ELSE}
+    if IsUI then
+    begin
+       SafeWriteLn('Warning: TestInsight support is disabled in this build.');
+       SafeAttachConsole;
+       Config.Run;
+    end
+    else
+    {$ENDIF}
     {$ENDIF}
     begin
       SafeWriteLn('Dext Test Host - Console Mode');

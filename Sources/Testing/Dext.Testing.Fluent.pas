@@ -249,7 +249,9 @@ uses
   {$ENDIF}
   Dext.Testing.Report,
   Dext.Testing.Dashboard,
+  {$IFDEF DEXT_TESTINSIGHT}
   Dext.Testing.TestInsight,
+  {$ENDIF}
   Dext.Utils;
 
 function ConfigureTests: TTestConfigurator;
@@ -443,7 +445,11 @@ begin
   begin
     // This is a fallback for when TTest.Run is used without TTestHost.
     // We register the listener here ONLY if it's not already active.
+    {$IFDEF DEXT_TESTINSIGHT}
     TTestRunner.RegisterListener(TTestInsightListener.Create);
+    {$ELSE}
+    SafeWriteLn('Warning: TestInsight support is disabled in this build.');
+    {$ENDIF}
   end;
 
   // Start Dashboard

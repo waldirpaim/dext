@@ -1,0 +1,55 @@
+unit @Model.ClassName;
+
+interface
+
+uses
+  Dext.Entity,
+  Dext.Types.Nullable,
+  Dext.Types.Lazy,
+  System.SysUtils,
+  System.Classes;
+
+type
+  @Model.DelphiClassName = class
+  private
+@foreach(var col in Model.Columns) {
+    F@col.DelphiName: @col.DelphiType;
+}
+
+@foreach(var fk in Model.ForeignKeys) {
+    F@fk.PropertyName: ILazy<@fk.ReferencedClass>;
+    function Get@fk.PropertyName: @fk.ReferencedClass;
+    procedure Set@fk.PropertyName(const Value: @fk.ReferencedClass);
+}
+  public
+    [Table('@Model.Name')]
+@foreach(var col in Model.Columns) {
+    @col.GetAttributeString
+    property @col.DelphiName: @col.DelphiType read F@col.DelphiName write F@col.DelphiName;
+}
+
+@foreach(var fk in Model.ForeignKeys) {
+    [ForeignKey('@fk.ColumnName')]
+    property @fk.PropertyName: @fk.ReferencedClass read Get@fk.PropertyName write Set@fk.PropertyName;
+}
+  end;
+
+implementation
+
+@foreach(var fk in Model.ForeignKeys) {
+function @Model.ClassName.Get@fk.PropertyName: @fk.ReferencedClass;
+begin
+  if F@fk.PropertyName <> nil then
+    Result := F@fk.PropertyName.Value
+  else
+    Result := nil;
+end;
+
+procedure @Model.ClassName.Set@fk.PropertyName(const Value: @fk.ReferencedClass);
+begin
+  F@fk.PropertyName := TValueLazy<@fk.ReferencedClass>.Create(Value);
+end;
+
+}
+
+end.

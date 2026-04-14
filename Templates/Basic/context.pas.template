@@ -1,0 +1,35 @@
+unit Dext.Context;
+
+interface
+
+uses
+  Dext.Entity,
+  Dext.Entity.Context,
+@foreach(var table in Model.Tables) {
+  @table.ClassName,
+}
+  System.SysUtils;
+
+type
+  TAppDbContext = class(TDbContext)
+  private
+@foreach(var table in Model.Tables) {
+    function Get@table.ClassName.Substring(1)s: IDbSet<@table.ClassName>;
+}
+  public
+@foreach(var table in Model.Tables) {
+    property @table.ClassName.Substring(1)s: IDbSet<@table.ClassName> read Get@table.ClassName.Substring(1)s;
+}
+  end;
+
+implementation
+
+@foreach(var table in Model.Tables) {
+function TAppDbContext.Get@table.ClassName.Substring(1)s: IDbSet<@table.ClassName>;
+begin
+  Result := Entities<@table.ClassName>;
+end;
+
+}
+
+end.

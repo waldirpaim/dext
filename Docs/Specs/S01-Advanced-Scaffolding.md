@@ -101,6 +101,22 @@ Capacidades (detalhadas):
 
 ## 2. Proposta: Evolução da CLI `dext` com Motor de Templates
 
+```
+No doc C:\dev\Dext\DextRepository\Docs\Specs\S01-Advanced-Scaffolding.md
+temos:
+""""
+### 2.2 Análise Técnica do Motor de Templates (`Dext.Templating.pas`)
+
+O motor atual é uma implementação inspirada em Handlebars/Mustache, mas focada em relatórios. Para scaffolding, identificamos os seguintes pontos:
+"""
+
+O motor de templates deve ser inspirado no modelo do motor de templates padrão do .Net, esta foi especificamente minhas instruções.
+
+Precisamos nos certificar que temos um plano definido de como será implementado o motor de templates, pois teremos níveis diferentes de necessidades de templates, antes de nos dedicar completamente a isso, temos de garantir um modelo e especificação a ser seguida.
+
+Atue como project manager do dext, me ajude a planejar isso corretamente para não desviamos no caminho, para cobrir buraco em uma atividade intermediária que necessite de recursos de templates.
+```
+
 ### 2.1 Estratégia: Evoluir, Não Recriar
 
 A base já existe em `dext_gen.exe`. O plano é:
@@ -110,7 +126,16 @@ A base já existe em `dext_gen.exe`. O plano é:
 3. **Adicionar** motor de templates externo para `new` e `add`
 4. **Manter** a arquitetura `IConsoleCommand` plugável que já existe
 
-### 2.2 Arquitetura (Evolução)
+### 2.2 Motor de Templates T4/Razor (`Dext.Templating.pas`)
+
+Conforme a infraestrutura moderna detalhada oficialmente em **`S09-Template-Engine.md`**, o Dext abandona a abstração focada em relatórios (logic-less como Mustache) para adotar um Parser AST com sintaxe estruturada baseada no Razor (`@`), elevando a Developer Experience (DX).
+
+Isso endereça especificamente os gaps:
+1. **Controle Implícito**: Loops e condições que agora são processados nativamente pelo scaffolding sem sujar variáveis Delphi.
+2. **Escaping**: O modo para scaffolding atua puramente como *Raw Output*.
+3. **Sinergia S07**: Integração com Meta-Registry para evitar overhead the RTTI Tradicional nos `.GetProperty`.
+
+### 2.3 Arquitetura (Evolução)
 
 ```
 ┌───────────────────────────────────────────────┐
@@ -157,15 +182,26 @@ Templates Directory:
       └── startup.pas.template
 ```
 
-### 2.2 Fases de Implementação
+---
 
-**Fase 1: Motor de Templates (Fundação)**
+## 3. Plano de Implementação
 
-- `TTemplateEngine`: Leitura de `.template`, substituição de variáveis `{{VarName}}`, geração de arquivos
+### Fase 0: Templating Boost (Pré-requisito)
+
+Antes de iniciar a CLI, o motor `Dext.Templating.pas` deve ser atualizado:
+
+1. **Suporte a Partials:** Implementar a sintaxe `{{> NomeTemplate }}` permitindo que o `ITemplateLoader` resolva sub-templates.
+2. **Case Filters Built-in:** Adicionar filtros nativos (`pascal`, `camel`, `snake`, `plural`, `singular`).
+3. **Raw Mode por Default:** Criar uma flag no `ITemplateEngine` para desativar HTML encoding em templates de código.
+4. **Otimização de Performance (Sinergia S07):** Migrar a resolução de propriedades (`ResolveObjectProperty`) para utilizar o `TTypeHandlerRegistry` (S07), eliminando o overhead de RTTI e `GetProperty` strings durante loops de geração maciça de código.
+
+### Fase 1: Motor de Scaffolding (Fundação)
+
+- `TTemplateEngine`: Atualizar com as melhorias da Fase 0.
+- `TScaffoldingContext`: Um contexto especializado que pré-injeta variáveis globais (`{{Timestamp}}`, `{{DextVersion}}`).
 - Variáveis padrão: `{{EntityName}}`, `{{TableName}}`, `{{ProjectName}}`, `{{UnitName}}`, `{{Timestamp}}`
-- Reutilizar o `Dext.Templating.pas` existente se possível
 
-**Fase 2: CLI Application (`dext.exe`)**
+**Fase 2: Evolução da CLI (`dext_gen` → `dext`)**
 
 - Projeto console Delphi em `Tools/CLI/`
 - Parsing de argumentos: `dext <command> <subcommand> [options]`

@@ -1,23 +1,36 @@
 # CLI Scaffolding
 
-Generate entity classes from existing database schema.
+Generate entity classes from existing database schema using the built-in AST-based template engine.
 
 ## Quick Start
 
+### Scaffold Entire Database
 ```bash
-dext scaffold -c "mydb.db" -d sqlite -o Entities.pas
+dext scaffold db -c "mydb.db" -d sqlite
 ```
 
-## Options
+### Add Specific Entity
+```bash
+dext add entity User -c "mydb.db" -d sqlite
+```
+
+## Template Resolution
+
+The CLI uses a 3-level resolution strategy to find templates:
+1. **Local**: `./Templates/` folder in your project.
+2. **User Global**: `~/.dext/Templates/` (Home directory).
+3. **Framework**: `$(DEXT)/Templates/` (Installation directory).
+
+## Options (scaffold db / add entity)
 
 | Option | Alias | Description |
 |--------|-------|-------------|
 | `--connection` | `-c` | Connection string or file path |
 | `--driver` | `-d` | Database driver: `sqlite`, `pg`, `mssql`, `firebird` |
-| `--output` | `-o` | Output file (default: `Entities.pas`) |
-| `--unit` | `-u` | Unit name (default: from filename) |
+| `--output` | `-o` | Output directory or file |
+| `--template` | `-t` | Custom template name (e.g., `entity.pas.template`) |
 | `--fluent` | | Generate fluent mapping instead of attributes |
-| `--tables` | `-t` | Specific tables (comma-separated) |
+| `--tables` | `-t` | Specific tables (comma-separated for scaffold db) |
 
 ## Examples
 

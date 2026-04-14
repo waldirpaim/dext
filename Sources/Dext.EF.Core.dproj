@@ -153,6 +153,8 @@
         <DCCReference Include="Data\Dext.Specifications.Parser.pas"/>
         <DCCReference Include="Data\Dext.Entity.Metadata.pas"/>
         <DCCReference Include="Data\Dext.Entity.LazyLoader.pas"/>
+        <DCCReference Include="Data\Dext.Entity.TemplatedScaffolding.pas"/>
+        <DCCReference Include="Data\Dext.Scaffolding.Models.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

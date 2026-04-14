@@ -10,6 +10,7 @@ O framework possui **4 contextos RTTI independentes**, cada um com sua instânci
 |---|---|---|---|
 | `TReflection.FContext` | `Dext.Core.Reflection.pas` | `class var` | Global (singleton) |
 | `TActivator.FRttiContext` | `Dext.Core.Activator.pas` | `class var` | Global (singleton) |
+| `TDextTemplateEngine.FRttiCtx` | `Dext.Templating.pas` | Instance field | Per-Rendering |
 | `TEventBus.FRttiCtx` | `Dext.Events.Bus.pas` | Instance field | Per-EventBus |
 | `TControllerScanner.FCtx` | `Dext.Web.ControllerScanner.pas` | Instance field | Per-WebApp |
 
@@ -40,11 +41,12 @@ Estes são os caminhos que executam **por requisição HTTP** ou **por operaçã
 
 1. **`TDbSet<T>.PersistAdd/PersistUpdate`** — Cria `TRttiContext`, faz `GetType`, itera propriedades, aplica `TReflection.SetValue` (que faz outro GetType/GetProperty interno)
 2. **`TDataApiHandler.HandleGetList/HandleGet`** — `ValueToJson` usa RTTI para serializar cada propriedade
-3. **`THandlerInvoker`** — Resolve parâmetros de ação MVC via RTTI em cada request
-4. **`TActivator.CreateInstance`** — Enumeração de construtores e parâmetros via RTTI
-5. **`TEntityProxyFactory`** — Cria proxies de lazy loading via RTTI
-6. **`TSqlGenerator`** — Gera SQL iterando propriedades via RTTI
-7. **`TPropertyInfo.GetValue/SetValue`** — Cria `TRttiContext` + `GetType` + `GetProperty` **por chamada**
+3. **`THandlerInvoker`** — Resolve parâmetros de ação MVC via RTTI em cada request.
+4. **`TDextTemplateEngine.ResolveObjectProperty`** — Faz lookups de tipo e propriedade em cada loop `{{#each}}`.
+5. **`TActivator.CreateInstance`** — Enumeração de construtores e parâmetros via RTTI.
+6. **`TEntityProxyFactory`** — Cria proxies de lazy loading via RTTI
+7. **`TSqlGenerator`** — Gera SQL iterando propriedades via RTTI
+8. **`TPropertyInfo.GetValue/SetValue`** — Cria `TRttiContext` + `GetType` + `GetProperty` **por chamada**
 
 > **CUIDADO**: `TPropertyInfo.GetValue/SetValue` (TypeSystem.pas linhas 161-193) é o caso mais grave: cria e destrói um `TRttiContext` a cada acesso de propriedade. Isso faz lookup duplo (GetType + GetProperty) em cada Set/Get de cada propriedade de cada entidade.
 
@@ -66,50 +68,54 @@ Estes são os caminhos que executam **por requisição HTTP** ou **por operaçã
 Criar um **Type Handler Registry** centralizado que pré-computa e cacheia todo o metadata RTTI **uma única vez** (no startup ou no primeiro acesso), eliminando o overhead de lookup repetitivo nos hot-paths.
 
 ```
-┌─────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────┐
 │                TTypeHandlerRegistry              │
 │  (Singleton Thread-Safe)                         │
 │                                                  │
-│  FHandlers: IDictionary<PTypeInfo, TTypeHandler>  │
+│  FHandlers: IDictionary<PTypeInfo, TTypeHandler> │
 │                                                  │
 │  ┌─────────────────────────────────────────────┐ │
-│  │            TTypeHandler                      │ │
-│  │  TypeInfo: PTypeInfo                         │ │
-│  │  Properties: TArray<TPropertyHandler>        │ │
-│  │  Constructors: TArray<TConstructorInfo>      │ │
-│  │  EntityMap: TEntityMap (ref)                 │ │
-│  │  Metadata: TTypeMetadata (ref)               │ │
+│  │            TTypeHandler                     │ │
+│  │  TypeInfo: PTypeInfo                        │ │
+│  │  Properties: TArray<TPropertyHandler>       │ │
+│  │  Constructors: TArray<TConstructorInfo>     │ │
+│  │  EntityMap: TEntityMap (ref)                │ │
+│  │  Metadata: TTypeMetadata (ref)              │ │
 │  └─────────────────────────────────────────────┘ │
 │                                                  │
 │  ┌─────────────────────────────────────────────┐ │
-│  │          TPropertyHandler                    │ │
-│  │  Name: string                                │ │
-│  │  RttiProperty: TRttiProperty (cached ref)    │ │
-│  │  TypeInfo: PTypeInfo                         │ │
-│  │  Converter: IValueConverter                  │ │
-│  │  IsPK, IsAutoInc, IsNullable: Boolean        │ │
-│  │  ColumnName: string                          │ │
+│  │          TPropertyHandler                   │ │
+│  │  Name: string                               │ │
+│  │  RttiProperty: TRttiProperty (cached ref)   │ │
+│  │  TypeInfo: PTypeInfo                        │ │
+│  │  Converter: IValueConverter                 │ │
+│  │  IsPK, IsAutoInc, IsNullable: Boolean       │ │
+│  │  ColumnName: string                         │ │
 │  └─────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────┘
 ```
 
 ### 2.2 Fases de Implementação
 
 **Fase 1: Unificação de RTTI Context (Baixo Risco)**
+
 - Eliminar todas as 60+ instâncias locais de `TRttiContext.Create`
 - Usar `TReflection.Context` como o contexto global compartilhado
 - Corrigir `TPropertyInfo.GetValue/SetValue` para usar o contexto global
 
 **Fase 2: Property Handler Cache (Médio Risco)**
+
 - Criar `TPropertyHandler` que pré-cacheia `TRttiProperty` + metadata
 - Migrar `TDbSet`, `TSqlGenerator`, `TEntityProxyFactory` para usar handlers cacheados
 - Eliminar loops `GetProperties` + `GetAttributes` em hot-paths
 
 **Fase 3: Constructor Cache (Baixo Risco)**
+
 - Pré-cachear seleção de construtores no `TActivator`
 - Cachear resultado da estratégia "Greedy" por tipo
 
 **Fase 4: Unificação de Duplicações**
+
 - Consolidar `GetCollectionItemType` / `GetListElementType`
 - Consolidar `NormalizeFieldName` / `TDataApiNaming`
 - Remover `TReflection.CreateInstance` (delegar para TActivator)

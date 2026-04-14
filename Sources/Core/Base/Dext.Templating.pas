@@ -36,6 +36,8 @@ uses
   System.StrUtils,
   System.SysUtils,
   System.TypInfo,
+  System.Character,
+  System.Generics.Collections,
   Dext.Collections,
   Dext.Collections.Dict,
   Dext.Text.Escaping;
@@ -98,15 +100,68 @@ type
     function CreateChildScope: ITemplateContext;
   end;
 
+  // --- Razor-style AST Nodes ---
+
+  TTemplateNode = class
+  public
+    function Render(const AContext: ITemplateContext): string; virtual; abstract;
+  end;
+
+  TTextNode = class(TTemplateNode)
+  private
+    FText: string;
+  public
+    constructor Create(const AText: string);
+    function Render(const AContext: ITemplateContext): string; override;
+  end;
+
+  TExpressionNode = class(TTemplateNode)
+  private
+    FExpression: string;
+    FIsRaw: Boolean;
+  public
+    constructor Create(const AExpression: string; AIsRaw: Boolean);
+    function Render(const AContext: ITemplateContext): string; override;
+  end;
+
+  TConditionalNode = class(TTemplateNode)
+  private
+    FCondition: string;
+    FTrueNodes: System.Generics.Collections.TObjectList<TTemplateNode>;
+    FFalseNodes: System.Generics.Collections.TObjectList<TTemplateNode>;
+  public
+    constructor Create(const ACondition: string);
+    destructor Destroy; override;
+    function Render(const AContext: ITemplateContext): string; override;
+    property TrueNodes: System.Generics.Collections.TObjectList<TTemplateNode> read FTrueNodes;
+    property FalseNodes: System.Generics.Collections.TObjectList<TTemplateNode> read FFalseNodes;
+  end;
+
+  TLoopNode = class(TTemplateNode)
+  private
+    FItemName: string;
+    FListExpr: string;
+    FNodes: System.Generics.Collections.TObjectList<TTemplateNode>;
+  public
+    constructor Create(const AItemName, AListExpr: string);
+    destructor Destroy; override;
+    function Render(const AContext: ITemplateContext): string; override;
+    property Nodes: System.Generics.Collections.TObjectList<TTemplateNode> read FNodes;
+  end;
+  
+  TTemplateNodeList = System.Generics.Collections.TObjectList<TTemplateNode>;
+
   TDextTemplateEngine = class(TInterfacedObject, ITemplateEngine, ITemplateFilterRegistry)
   private
     FFilters: IDictionary<string, System.SysUtils.TFunc<string, string>>;
     FRttiCtx: TRttiContext;
+    FIsHtmlMode: Boolean;
 
     function ResolveExpression(const AExpr: string; const AContext: ITemplateContext): string;
+    function ResolveObjectValue(AObj: TObject; const APropPath: string): TValue;
     function ResolveObjectProperty(AObj: TObject; const APropPath: string): string;
-    function ProcessBlock(const ATemplate: string; const AContext: ITemplateContext;
-      var APos: Integer): string;
+    function Parse(const ATemplate: string): TTemplateNodeList;
+    function EvaluateCondition(const ACond: string; const AContext: ITemplateContext): Boolean;
   public
     constructor Create;
     destructor Destroy; override;
@@ -115,6 +170,8 @@ type
 
     procedure RegisterFilter(const AName: string; const AFilter: System.SysUtils.TFunc<string, string>);
     function ApplyFilter(const AName: string; const AValue: string): string;
+
+    property IsHtmlMode: Boolean read FIsHtmlMode write FIsHtmlMode;
   end;
 
   TTemplating = record
@@ -127,6 +184,81 @@ implementation
 
 uses
   Dext.Collections.Comparers;
+
+{ TTextNode }
+
+constructor TTextNode.Create(const AText: string);
+begin
+  inherited Create;
+  FText := AText;
+end;
+
+function TTextNode.Render(const AContext: ITemplateContext): string;
+begin
+  Result := FText;
+end;
+
+{ TExpressionNode }
+
+constructor TExpressionNode.Create(const AExpression: string; AIsRaw: Boolean);
+begin
+  inherited Create;
+  FExpression := AExpression;
+  FIsRaw := AIsRaw;
+end;
+
+function TExpressionNode.Render(const AContext: ITemplateContext): string;
+begin
+  // This will be handled by the engine's ResolveExpression
+  // For the node itself, we need to know the engine or pass a resolver
+  // To keep it clean, let's assume the context or a global resolver handles it
+  // Actually, I'll pass the resolution logic later or make the node more independent.
+  Result := FExpression; // Placeholder, the engine will replace this call
+end;
+
+{ TConditionalNode }
+
+constructor TConditionalNode.Create(const ACondition: string);
+begin
+  inherited Create;
+  FCondition := ACondition;
+  FTrueNodes := TObjectList<TTemplateNode>.Create(True);
+  FFalseNodes := TObjectList<TTemplateNode>.Create(True);
+end;
+
+destructor TConditionalNode.Destroy;
+begin
+  FTrueNodes.Free;
+  FFalseNodes.Free;
+  inherited;
+end;
+
+function TConditionalNode.Render(const AContext: ITemplateContext): string;
+begin
+  // Real implementation will evaluate FCondition
+  Result := ''; 
+end;
+
+{ TLoopNode }
+
+constructor TLoopNode.Create(const AItemName, AListExpr: string);
+begin
+  inherited Create;
+  FItemName := AItemName;
+  FListExpr := AListExpr;
+  FNodes := TObjectList<TTemplateNode>.Create(True);
+end;
+
+destructor TLoopNode.Destroy;
+begin
+  FNodes.Free;
+  inherited;
+end;
+
+function TLoopNode.Render(const AContext: ITemplateContext): string;
+begin
+  Result := '';
+end;
 
 { TTemplateContext }
 
@@ -211,6 +343,38 @@ begin
   inherited Create;
   FFilters := TCollections.CreateDictionaryIgnoreCase<string, System.SysUtils.TFunc<string, string>>;
   FRttiCtx := TRttiContext.Create;
+  FIsHtmlMode := False;
+
+  // Register default filters
+  RegisterFilter('ToPascalCase', 
+    function(S: string): string 
+    var
+      Parts: TArray<string>;
+      I: Integer;
+    begin
+      Result := S.DeQuotedString;
+      Parts := Result.Split(['_', ' ', '-'], TStringSplitOptions.ExcludeEmpty);
+      if Length(Parts) > 1 then
+      begin
+        Result := '';
+        for I := 0 to High(Parts) do
+          Result := Result + UpperCase(Copy(Parts[I], 1, 1)) + LowerCase(Copy(Parts[I], 2, MaxInt));
+      end
+      else
+        Result := UpperCase(Copy(Result, 1, 1)) + Copy(Result, 2, MaxInt);
+    end);
+
+  RegisterFilter('ToCamelCase', 
+    function(S: string): string 
+    var
+      Pascal: string;
+    begin
+      Pascal := ApplyFilter('ToPascalCase', S);
+      if Pascal = '' then
+        Result := ''
+      else
+        Result := LowerCase(Copy(Pascal, 1, 1)) + Copy(Pascal, 2, MaxInt);
+    end);
 end;
 
 destructor TDextTemplateEngine.Destroy;
@@ -237,228 +401,399 @@ begin
     Result := AValue;
 end;
 
-function TDextTemplateEngine.ResolveObjectProperty(AObj: TObject;
-  const APropPath: string): string;
+function TDextTemplateEngine.ResolveObjectValue(AObj: TObject;
+  const APropPath: string): TValue;
 var
-  LType: TRttiType;
-  LProp: TRttiProperty;
-  LParts: TArray<string>;
-  LCurrent: TObject;
-  LVal: TValue;
+  TypeRtti: TRttiType;
+  PropRtti: TRttiProperty;
+  Parts: TArray<string>;
+  Current: TObject;
   I: Integer;
 begin
-  Result := '';
+  Result := TValue.Empty;
   if not Assigned(AObj) then
     Exit;
 
-  LParts := System.StrUtils.SplitString(APropPath, '.');
-  LCurrent := AObj;
+  Parts := System.StrUtils.SplitString(APropPath, '.');
+  Current := AObj;
 
-  for I := 0 to High(LParts) do
+  for I := 0 to High(Parts) do
   begin
-    LType := FRttiCtx.GetType(LCurrent.ClassInfo);
-    if not Assigned(LType) then
+    TypeRtti := FRttiCtx.GetType(Current.ClassInfo);
+    if not Assigned(TypeRtti) then Exit;
+
+    PropRtti := TypeRtti.GetProperty(System.SysUtils.Trim(Parts[I]));
+    if not Assigned(PropRtti) then Exit;
+
+    Result := PropRtti.GetValue(Current);
+
+    if I = High(Parts) then
       Exit;
 
-    LProp := LType.GetProperty(System.SysUtils.Trim(LParts[I]));
-    if not Assigned(LProp) then
-      Exit;
+    if Result.Kind <> tkClass then Exit;
 
-    LVal := LProp.GetValue(LCurrent);
-
-    if I = High(LParts) then
-    begin
-      if LVal.Kind = tkClass then
-        Result := LVal.AsObject.ToString
-      else
-        Result := LVal.ToString;
-      Exit;
-    end;
-
-    if LVal.Kind <> tkClass then
-      Exit;
-
-    LCurrent := LVal.AsObject;
-    if not Assigned(LCurrent) then
-      Exit;
+    Current := Result.AsObject;
+    if not Assigned(Current) then Exit;
   end;
+end;
+
+function TDextTemplateEngine.ResolveObjectProperty(AObj: TObject;
+  const APropPath: string): string;
+var
+  Val: TValue;
+begin
+  Val := ResolveObjectValue(AObj, APropPath);
+  if Val.IsEmpty then
+    Result := ''
+  else if Val.Kind = tkClass then
+    Result := Val.AsObject.ToString
+  else
+    Result := Val.ToString;
 end;
 
 function TDextTemplateEngine.ResolveExpression(const AExpr: string;
   const AContext: ITemplateContext): string;
 var
-  Expr, FilterName: string;
-  PipePos, DotPos: Integer;
+  Expr: string;
+  DotPos: Integer;
   Obj: TObject;
   ObjKey, PropPath: string;
 begin
   Expr := System.SysUtils.Trim(AExpr);
 
-  PipePos := System.Pos('|', Expr);
-  if PipePos > 0 then
+  // Handle common mutators
+  if Expr.EndsWith('.ToPascalCase()', True) then
   begin
-    FilterName := System.SysUtils.Trim(System.Copy(Expr, PipePos + 1, MaxInt));
-    Expr := System.SysUtils.Trim(System.Copy(Expr, 1, PipePos - 1));
-    Result := ApplyFilter(FilterName, ResolveExpression(Expr, AContext));
+    Result := ApplyFilter('ToPascalCase', ResolveExpression(Expr.Substring(0, Expr.Length - 15), AContext));
+    Exit;
+  end;
+  
+  if Expr.EndsWith('.ToCamelCase()', True) then
+  begin
+    Result := ApplyFilter('ToCamelCase', ResolveExpression(Expr.Substring(0, Expr.Length - 14), AContext));
     Exit;
   end;
 
+  // Handle nested properties (Model.Table.Name)
   DotPos := System.Pos('.', Expr);
   if DotPos > 0 then
   begin
     ObjKey := System.Copy(Expr, 1, DotPos - 1);
     PropPath := System.Copy(Expr, DotPos + 1, MaxInt);
+    
+    // Check if it's a known object in context
     Obj := AContext.GetObject(ObjKey);
     if Assigned(Obj) then
       Result := ResolveObjectProperty(Obj, PropPath)
     else
-      Result := '';
+    begin
+      // Fallback: try to get value from context for the whole expression
+      if not AContext.TryGetValue(Expr, Result) then
+        Result := '';
+    end;
     Exit;
   end;
 
   Result := AContext.GetValue(Expr);
 end;
 
-function TDextTemplateEngine.ProcessBlock(const ATemplate: string;
-  const AContext: ITemplateContext; var APos: Integer): string;
+function TDextTemplateEngine.EvaluateCondition(const ACond: string;
+  const AContext: ITemplateContext): Boolean;
 var
-  SB: TStringBuilder;
-  InnerPos, EndPos: Integer;
-  TagContent, BlockType, BlockKey, BlockContent, MatchTag: string;
-  Items: TArray<TObject>;
-  Item: TObject;
-  ChildScope: ITemplateContext;
-  Condition: Boolean;
-  IsRaw: Boolean;
-  I: Integer;
+  Val: string;
 begin
-  SB := TStringBuilder.Create;
-  try
-    while APos <= Length(ATemplate) do
+  Val := ResolveExpression(ACond, AContext);
+  // Truthy logic:
+  // 1. Any string that is exactly 'true' (case-insensitive)
+  // 2. Any non-empty string that is NOT 'false', '0', or 'null'
+  Val := Val.ToLower;
+  if Val = 'true' then
+    Exit(True);
+    
+  if (Val = '') or (Val = 'false') or (Val = '0') or (Val = 'null') then
+    Exit(False);
+    
+  Result := True;
+end;
+
+function TDextTemplateEngine.Parse(const ATemplate: string): TTemplateNodeList;
+var
+  Pos, NextAt, EndTagPos: Integer;
+  TagContent: string;
+
+  procedure ParseBlock(TargetNodes: TTemplateNodeList);
+  begin
+    while Pos <= Length(ATemplate) do
     begin
-      InnerPos := System.Pos('{{', ATemplate, APos);
-      if InnerPos < 1 then
+      NextAt := System.Pos('@', ATemplate, Pos);
+      if NextAt = 0 then
       begin
-        SB.Append(System.Copy(ATemplate, APos, MaxInt));
-        APos := Length(ATemplate) + 1;
+        TargetNodes.Add(TTextNode.Create(System.Copy(ATemplate, Pos, MaxInt)));
+        Pos := Length(ATemplate) + 1;
         Break;
       end;
 
-      SB.Append(System.Copy(ATemplate, APos, InnerPos - APos));
-      APos := InnerPos + 2;
+      if NextAt > Pos then
+        TargetNodes.Add(TTextNode.Create(System.Copy(ATemplate, Pos, NextAt - Pos)));
 
-      IsRaw := False;
-      if (APos <= Length(ATemplate)) and (ATemplate[APos] = '{') then
-      begin
-        IsRaw := True;
-        Inc(APos);
-      end;
+      Pos := NextAt + 1;
 
-      if IsRaw then MatchTag := '}}}' else MatchTag := '}}';
-      EndPos := System.Pos(MatchTag, ATemplate, APos);
-      if EndPos < 1 then
+      // Handle @@ literals
+      if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = '@') then
       begin
-        if IsRaw then SB.Append('{{{') else SB.Append('{{');
+        TargetNodes.Add(TTextNode.Create('@'));
+        Inc(Pos);
         Continue;
       end;
 
-      TagContent := System.SysUtils.Trim(System.Copy(ATemplate, APos, EndPos - APos));
-      APos := EndPos + Length(MatchTag);
-
-      if (Length(TagContent) > 0) and (TagContent[1] = '#') then
+      // Check for keywords
+      if System.StrUtils.StartsText('if', System.Copy(ATemplate, Pos, MaxInt)) then
       begin
-        BlockType := System.SysUtils.LowerCase(System.StrUtils.SplitString(System.Copy(TagContent, 2, MaxInt), ' ')[0]);
-        BlockKey := System.SysUtils.Trim(System.Copy(TagContent, BlockType.Length + 2, MaxInt));
-
-        InnerPos := APos;
-        BlockContent := '';
-        I := 1;
-        while APos <= Length(ATemplate) do
+        // @if (condition)
+        Inc(Pos, 2); 
+        // Skip whitespace
+        while (Pos <= Length(ATemplate)) and System.Character.TCharacter.IsWhiteSpace(ATemplate[Pos]) do
+          Inc(Pos);
+          
+        if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = '(') then
         begin
-          EndPos := System.Pos('{{', ATemplate, APos);
-          if EndPos < 1 then Break;
-
-          APos := EndPos + 2;
-          if System.StrUtils.StartsText('#' + BlockType, System.Copy(ATemplate, APos, MaxInt)) then
-            Inc(I)
-          else if System.StrUtils.StartsText('/' + BlockType, System.Copy(ATemplate, APos, MaxInt)) then
+          var Depth := 1;
+          var StartPos := Pos + 1;
+          Inc(Pos);
+          while (Pos <= Length(ATemplate)) and (Depth > 0) do
           begin
-            Dec(I);
-            if I = 0 then
-            begin
-              BlockContent := System.Copy(ATemplate, InnerPos, EndPos - InnerPos);
-              EndPos := System.Pos('}}', ATemplate, APos);
-              APos := EndPos + 2;
-              Break;
-            end;
+            if ATemplate[Pos] = '(' then Inc(Depth)
+            else if ATemplate[Pos] = ')' then Dec(Depth);
+            if Depth > 0 then Inc(Pos);
           end;
-        end;
-
-        if BlockType = 'if' then
-        begin
-          Condition := (System.SysUtils.LowerCase(AContext.GetValue(BlockKey)) = 'true') or
-                       (AContext.GetObject(BlockKey) <> nil);
-          if Condition then
-          begin
-            I := 1;
-            SB.Append(ProcessBlock(BlockContent, AContext, I));
-          end;
+          
+          TagContent := System.SysUtils.Trim(System.Copy(ATemplate, StartPos, Pos - StartPos));
+          if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = ')') then Inc(Pos);
         end
-        else if BlockType = 'unless' then
-        begin
-          Condition := (System.SysUtils.LowerCase(AContext.GetValue(BlockKey)) = 'true') or
-                       (AContext.GetObject(BlockKey) <> nil);
-          if not Condition then
-          begin
-            I := 1;
-            SB.Append(ProcessBlock(BlockContent, AContext, I));
-          end;
-        end
-        else if BlockType = 'each' then
-        begin
-          Items := AContext.GetList(BlockKey);
-          if Length(Items) > 0 then
-          begin
-            for I := 0 to High(Items) do
-            begin
-              Item := Items[I];
-              ChildScope := AContext.CreateChildScope;
-              ChildScope.SetObject('this', Item);
-              ChildScope.SetValue('@index', System.SysUtils.IntToStr(I));
-              ChildScope.SetValue('@first', System.StrUtils.IfThen(I = 0, 'true', 'false'));
-              ChildScope.SetValue('@last', System.StrUtils.IfThen(I = High(Items), 'true', 'false'));
-              
-              InnerPos := 1;
-              SB.Append(ProcessBlock(BlockContent, ChildScope, InnerPos));
-            end;
-          end;
-        end;
-      end
-      else if (Length(TagContent) > 0) and (TagContent[1] = '/') then
-      begin
-      end
-      else
-      begin
-        if IsRaw then
-          SB.Append(ResolveExpression(TagContent, AContext))
         else
-          SB.Append(TDextEscaping.Html(ResolveExpression(TagContent, AContext)));
-      end;
-    end;
+        begin
+          // Fallback to end of line if no parenthesis
+          EndTagPos := Pos;
+          while (EndTagPos <= Length(ATemplate)) and (ATemplate[EndTagPos] <> #13) and (ATemplate[EndTagPos] <> #10) do
+            Inc(EndTagPos);
+          TagContent := System.SysUtils.Trim(System.Copy(ATemplate, Pos, EndTagPos - Pos));
+          Pos := EndTagPos;
+        end;
+        
+        // Skip possible newline after @if
+        if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = #13) then Inc(Pos);
+        if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = #10) then Inc(Pos);
 
-    Result := SB.ToString;
-  finally
-    SB.Free;
+        var IfNode := TConditionalNode.Create(TagContent);
+        TargetNodes.Add(IfNode);
+        ParseBlock(IfNode.TrueNodes);
+        Continue;
+      end;
+
+      if System.StrUtils.StartsText('endif', System.Copy(ATemplate, Pos, MaxInt)) then
+      begin
+        Inc(Pos, 5);
+        // Skip possible newline after @endif
+        if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = #13) then Inc(Pos);
+        if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = #10) then Inc(Pos);
+        Break; 
+      end;
+
+      if System.StrUtils.StartsText('foreach', System.Copy(ATemplate, Pos, MaxInt)) then
+      begin
+        // @foreach (item in list)
+        Inc(Pos, 7);
+        // Skip whitespace
+        while (Pos <= Length(ATemplate)) and System.Character.TCharacter.IsWhiteSpace(ATemplate[Pos]) do
+          Inc(Pos);
+
+        if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = '(') then
+        begin
+          var Depth := 1;
+          var StartPos := Pos + 1;
+          Inc(Pos);
+          while (Pos <= Length(ATemplate)) and (Depth > 0) do
+          begin
+            if ATemplate[Pos] = '(' then Inc(Depth)
+            else if ATemplate[Pos] = ')' then Dec(Depth);
+            if Depth > 0 then Inc(Pos);
+          end;
+          
+          TagContent := System.SysUtils.Trim(System.Copy(ATemplate, StartPos, Pos - StartPos));
+          if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = ')') then Inc(Pos);
+        end
+        else
+        begin
+          EndTagPos := Pos;
+          while (EndTagPos <= Length(ATemplate)) and (ATemplate[EndTagPos] <> #13) and (ATemplate[EndTagPos] <> #10) do
+            Inc(EndTagPos);
+          TagContent := System.SysUtils.Trim(System.Copy(ATemplate, Pos, EndTagPos - Pos));
+          Pos := EndTagPos;
+        end;
+        
+        // Skip possible newline after @foreach
+        if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = #13) then Inc(Pos);
+        if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = #10) then Inc(Pos);
+
+        var CleanExpr := TagContent;
+        var Parts := CleanExpr.Split([' '], TStringSplitOptions.ExcludeEmpty);
+        
+        if Length(Parts) >= 3 then
+        begin
+          var ItemName := '';
+          var ListExpr := '';
+          
+          if (Length(Parts) >= 4) and (Parts[0] = 'var') then
+          begin
+            ItemName := Parts[1];
+            ListExpr := Parts[3];
+          end
+          else
+          begin
+            ItemName := Parts[0];
+            ListExpr := Parts[2];
+          end;
+          
+          var ForNode := TLoopNode.Create(ItemName, ListExpr);
+          TargetNodes.Add(ForNode);
+          ParseBlock(ForNode.Nodes);
+        end;
+        Continue;
+      end;
+
+      if System.StrUtils.StartsText('endforeach', System.Copy(ATemplate, Pos, MaxInt)) then
+      begin
+        Inc(Pos, 10);
+        // Skip possible newline after @endforeach
+        if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = #13) then Inc(Pos);
+        if (Pos <= Length(ATemplate)) and (ATemplate[Pos] = #10) then Inc(Pos);
+        Break;
+      end;
+
+      // Normal Expression
+      EndTagPos := Pos;
+      while (EndTagPos <= Length(ATemplate)) and 
+            (ATemplate[EndTagPos] <> '@') and
+            (not System.Character.TCharacter.IsWhiteSpace(ATemplate[EndTagPos])) and
+            (not System.SysUtils.CharInSet(ATemplate[EndTagPos], [';', ':', ',', '{', '}', '<', '>', '/', '\'])) do
+      begin
+        // Allow parentheses if they come in pairs (for filter calls like .ToPascalCase())
+        if ATemplate[EndTagPos] = '(' then
+        begin
+          var Depth := 1;
+          Inc(EndTagPos);
+          while (EndTagPos <= Length(ATemplate)) and (Depth > 0) do
+          begin
+             if ATemplate[EndTagPos] = '(' then Inc(Depth)
+             else if ATemplate[EndTagPos] = ')' then Dec(Depth);
+             Inc(EndTagPos);
+          end;
+        end
+        else
+          Inc(EndTagPos);
+      end;
+      
+      TagContent := System.Copy(ATemplate, Pos, EndTagPos - Pos);
+      TargetNodes.Add(TExpressionNode.Create(TagContent, False));
+      Pos := EndTagPos;
+    end;
   end;
+
+begin
+  Result := TTemplateNodeList.Create(True);
+  Pos := 1;
+  ParseBlock(Result);
 end;
 
 function TDextTemplateEngine.Render(const ATemplate: string;
   const AContext: ITemplateContext): string;
 var
-  Pos: Integer;
+  Nodes: TTemplateNodeList;
+  SB: TStringBuilder;
+
+  procedure RenderNodeList(ANodes: TTemplateNodeList; AContext: ITemplateContext);
+  begin
+    for var Node in ANodes do
+    begin
+      if Node is TTextNode then
+        SB.Append(TTextNode(Node).FText)
+      else if Node is TExpressionNode then
+      begin
+        var ExprNode := TExpressionNode(Node);
+        var Val := ResolveExpression(ExprNode.FExpression, AContext);
+        if FIsHtmlMode and (not ExprNode.FIsRaw) then
+          SB.Append(TDextEscaping.Html(Val))
+        else
+          SB.Append(Val);
+      end
+      else if Node is TConditionalNode then
+      begin
+        var IfNode := TConditionalNode(Node);
+        if EvaluateCondition(IfNode.FCondition, AContext) then
+          RenderNodeList(IfNode.TrueNodes, AContext)
+        else
+          RenderNodeList(IfNode.FalseNodes, AContext);
+      end
+      else if Node is TLoopNode then
+      begin
+        var ForNode := TLoopNode(Node);
+        var Items: TArray<TObject> := [];
+        
+        var DotPos := Pos('.', ForNode.FListExpr);
+        if DotPos > 0 then
+        begin
+          var ObjKey := ForNode.FListExpr.Substring(0, DotPos - 1);
+          var PropPath := ForNode.FListExpr.Substring(DotPos);
+          var RootObj := AContext.GetObject(ObjKey);
+          if Assigned(RootObj) then
+          begin
+            var Val := ResolveObjectValue(RootObj, PropPath);
+            if not Val.IsEmpty and (Val.Kind = tkClass) then
+            begin
+              var ListObj := Val.AsObject;
+              if Assigned(ListObj) then
+              begin
+                var ListType := FRttiCtx.GetType(ListObj.ClassInfo);
+                var CountProp := ListType.GetProperty('Count');
+                var ItemsProp := ListType.GetIndexedProperty('Items');
+                
+                if Assigned(CountProp) and Assigned(ItemsProp) then
+                begin
+                  var Count := CountProp.GetValue(ListObj).AsInteger;
+                  SetLength(Items, Count);
+                  for var J := 0 to Count - 1 do
+                    Items[J] := ItemsProp.GetValue(ListObj, [J]).AsObject;
+                end;
+              end;
+            end;
+          end;
+        end
+        else
+          Items := AContext.GetList(ForNode.FListExpr);
+        
+        for var I := 0 to High(Items) do
+        begin
+          var ChildScope := AContext.CreateChildScope;
+          ChildScope.SetObject(ForNode.FItemName, Items[I]);
+          RenderNodeList(ForNode.Nodes, ChildScope);
+        end;
+      end;
+    end;
+  end;
+
 begin
-  Pos := 1;
-  Result := ProcessBlock(ATemplate, AContext, Pos);
+  Nodes := Parse(ATemplate);
+  try
+    SB := TStringBuilder.Create;
+    try
+      RenderNodeList(Nodes, AContext);
+      Result := SB.ToString;
+    finally
+      SB.Free;
+    end;
+  finally
+    Nodes.Free;
+  end;
 end;
 
 class function TTemplating.CreateContext: ITemplateContext;
