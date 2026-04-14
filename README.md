@@ -58,16 +58,18 @@ A lightweight and powerful HTTP framework for building REST APIs and microservic
 * **Dynamic Specification Mapping**: Automatic QueryString filtering integration (`_gt`, `_lt`, `_sort`, etc).
 * **WebBroker Server Adapter** ⭐ NEW: Deploy as ISAPI/CGI via WebBroker in IIS/Apache with zero code changes, running alongside Indy.
 * **DCS Server Adapter** ⭐ NEW: High-performance non-blocking HTTP engine (epoll/IOCP) powered by Delphi-Cross-Socket.
-* **Real-Time Communication** ⭐ NEW: SignalR-compatible Hubs for real-time messaging. Supports groups, user targeting, and broadcast with `Dext.Web.Hubs`. [Learn more](Docs/Book/07-real-time/hubs-signalr.md)
-* **SSR & View Engines** ⭐ NEW: Agnostic Server-Side Rendering support with Flyweight Iterators for O(1) memory loops and native integration with **Web Stencils** (Delphi 12.2+) with optimized fluent DSL.
+* **Real-Time Communication** ⭐ NOVO: SignalR-compatible Hubs for real-time messaging. Supports groups, user targeting, and broadcast with `Dext.Web.Hubs`. [Learn more](Docs/Book/07-real-time/hubs-signalr.md)
+* **SSR & View Engines** ⭐ NOVO: Agnostic Server-Side Rendering support with Flyweight Iterators for O(1) memory loops and native integration with **Web Stencils** (Delphi 12.2+) with optimized fluent DSL.
+* **Observability & Telemetry (S03)** ⭐ NOVO: Real-time instrumentation infrastructure via `TDiagnosticSource`. Includes `Telemetry Bridge` for logging HTTP and SQL events directly to the console.
+* **Auto-Migrations (S11)** ⭐ NOVO: Automatic schema synchronization during web server startup with intelligent renaming detection.
 
 ### 🗄️ Dext.Entity (ORM)
 
 A modern ORM focused on productivity and performance.
 
 * **Code-First**: Define your database using Delphi classes.
-* **Scaffolding**: Database-First support to generate entities from existing schemas.
-* **Migrations**: Database schema version control (`migrate:up`, `migrate:down`, `migrate:generate`).
+* **Scaffolding**: Database-First support to generate entities from existing schemas and CLI-based project scaffolding.
+* **Migrations (S11)**: Database schema version control (`migrate:up`, `migrate:down`, `migrate:generate`) with attribute-based renaming detection.
 * **Fluent Query API**: Strongly typed and expressive queries.
 * **Smart Properties**: Type-safe query expressions without magic strings. Write `u.Age > 18` and get compile-time checks, IntelliSense, and automatic SQL generation. [Learn more](Docs/Book/05-orm/smart-properties.md)
 * **Change Tracking**: Automatic change tracking and optimized persistence.
@@ -136,7 +138,8 @@ The definitive, modern testing framework for Delphi, inspired by NUnit, FluentAs
 * **Test-Centric DI**: Specialized `TTestServiceProvider` to easily swap production services with mocks during integration tests.
 * **CI/CD Integration** ⭐ NEW: Export reports to JUnit XML, JSON, xUnit, TRX (Azure DevOps), SonarQube, and beautiful standalone HTML.
 * **Live Dashboard** ⭐ NEW: Monitor your tests in real-time with a beautiful dark-themed web dashboard and historical analysis.
-* **Code Coverage & CLI**: Run tests and generate SonarQube-ready coverage reports with `dext test --coverage`. Enforce quality gates with thresholds.
+* **Code Coverage & CLI (S01)**: Run tests and generate SonarQube-ready coverage reports with `dext test --coverage`. Enforce quality gates with thresholds.
+* **Advanced Scaffolding (S01)** ⭐ NOVO: Powerful CLI motor for generating projects and components (`dext new`, `dext add`) utilizing the integrated template engine.
 
 ### 🧩 Dext.Collections ⭐ **NEW**
 

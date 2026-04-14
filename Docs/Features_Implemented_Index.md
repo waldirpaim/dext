@@ -48,7 +48,9 @@ Framework web modular baseado em pipeline de middlewares e arquitetura Controlle
 - **Middleware Pipeline Nativo**: Logger, Compression (GZip/Brotli), Exception Handling (**ProblemDetails**), **DeveloperExceptionPage**, CORS e StartupLock.
 - **Rate Limiting**: Políticas de Fixed/Sliding Window, Token Bucket e Concurrency Limiter.
 - **Caching & Observability**: Suporte a In-Memory/Redis, **Health Checks** detalhados e geração automática de **OpenAPI / Swagger**.
-- **Real-time & Hubs**: Suporte nativo a **SSE (Server-Sent Events)** e infraestrutura de Hubs inspirada no SignalR com `IHubContext` e protocolos JSON.
+- **Real-time & Hubs**: Suporte nativo a **SSE (Server-Sent Events)** e infraestrutura de **Hubs (SignalR-compatible)** com suporte a grupos, targeting por usuário e broadcast via JSON.
+- **Server Adapters**: Suporte multi-servidor via **WebBroker Adapter** (ISAPI/CGI para IIS/Apache) e **DCS Adapter** (High-performance non-blocking HTTP engine via Delphi-Cross-Socket).
+- **Multipart/Form-Data**: Suporte nativo para processamento de arquivos e uploads complexos via abstração `IFormFile`.
 - **Object Lifecycle Management**: Tracking robusto de objetos criados por Model Binding, com integração ao **ChangeTracker** do ORM para transferência automática de ownership (evita memory leaks em entidades persistidas).
 
 ---
@@ -65,6 +67,10 @@ Persistência poliglota com foco em produtividade Code-First e performance.
 - **Poliglota (Dialetos)**: Suporte nativo a PostgreSQL, SQL Server, MySQL, SQLite, Oracle e Firebird.
 - **EntityDataSet**: Componente especializado para VCL/FMX com suporte a **Design-Time Data Preview**, Sorting e Filtering inline.
 - **Performance & Normalization**: **Streaming Iterators** (Flyweight pattern) para grandes volumes e conversores automáticos para GUID, Enums, JSONB e UUID v7.
+- **Inheritance Mapping**: Suporte total a **TPH (Table-Per-Hierarchy)** com hidratação polimórfica automática baseada em discriminadores via atributos.
+- **Advanced Querying**: Suporte a **Pessimistic Locking** (`FOR UPDATE`), **Multi-Mapping** estilo Dapper (recursive hydration via `[Nested]`) e execução declarativa de **Stored Procedures**.
+- **Multi-Tenancy**: Estratégias nativas de isolamento por **Banco Compartilhado** (TenantId), **Isolamento por Schema** (search_path) e **Tenant per Database**.
+- **Legacy Paging**: Envelopamento de queries automático para suporte a `ROWNUM` em versões legadas do Oracle e SQL Server.
 
 ---
 
@@ -83,8 +89,11 @@ Cliente HTTP de alto desempenho com suporte a autenticação plugável.
 
 Infraestrutura de testes integrada para garantia de qualidade.
 
-- **Test Runner & Dashboard**: Executor CLI de alta velocidade e host visual interno para monitoramento de execução.
-- **Assertions & Mocking**: API fluente de asserções rica e framework de **Mocking dinâmico** via Proxies com interceptores de chamada.
+- **Test Runner & Dashboard**: Executor CLI de alta velocidade e host visual interno para monitoramento de execução em tempo real com histórico de falhas.
+- **Attribute-Based Runner**: Escrita de testes baseada em atributos (`[Fixture]`, `[Test]`, `[Setup]`) sem necessidade de herança de classes base.
+- **Assertions & Mocking**: API fluente de asserções rica e framework de **Mocking dinâmico** via Proxies. Suporte a **Soft Asserts** via `Assert.Multiple`.
+- **Auto-Mocking Container**: Injeção automática de mocks via `TAutoMocker` para testes de integração e unitários complexos.
+- **Snapshot Testing**: Verificação de objetos complexos e payloads via comparação de baselines JSON (`MatchSnapshot`).
 - **Integração IDE**: Suporte nativo ao **TestInsight** e geração de relatórios em HTML, JSON e XML (JUnit).
 
 ---

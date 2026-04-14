@@ -60,14 +60,16 @@ Um framework HTTP leve e poderoso para construir REST APIs e microserviços.
 * **DCS Server Adapter** ⭐ NOVO: Motor HTTP não bloqueante de altíssima performance (epoll/IOCP) usando Delphi-Cross-Socket.
 * **Comunicação em Tempo Real** ⭐ NOVO: Hubs compatíveis com SignalR para messaging em tempo real. Suporta grupos, targeting por usuário e broadcast com `Dext.Web.Hubs`. [Saiba mais](Docs/Book.pt-br/07-tempo-real/hubs-signalr.md)
 * **SSR & View Engines** ⭐ NOVO: Renderização Server-Side agnóstica com Flyweight Iterators para O(1) de memória em loops e integração nativa com **Web Stencils** (Delphi 12.2+) via DSL fluente otimizada.
+* **Observabilidade & Telemetria (S03)** ⭐ NOVO: Infraestrutura de instrumentação em tempo real via `TDiagnosticSource`. Inclui `Telemetry Bridge` para log direto de eventos HTTP e SQL no console.
+* **Auto-Migrations (S11)** ⭐ NOVO: Sincronização automática de schema durante o startup do servidor web com detecção inteligente de renomeação.
 
 ### 🗄️ Dext.Entity (ORM)
 
 Um ORM moderno focado em produtividade e performance.
 
 * **Code-First**: Defina seu banco de dados usando classes Delphi.
-* **Scaffolding**: Suporte a Database-First para gerar entidades a partir de esquemas existentes.
-* **Migrations**: Controle de versão do esquema (`migrate:up`, `migrate:down`, `migrate:generate`).
+* **Scaffolding**: Suporte a Database-First para gerar entidades a partir de esquemas existentes e scaffolding de projetos via CLI.
+* **Migrations (S11)**: Controle de versão do esquema (`migrate:up`, `migrate:down`, `migrate:generate`) com detecção de renomeação via atributos.
 * **Fluent Query API**: Consultas fortemente tipadas e expressivas.
 * **Smart Properties**: Expressões de query type-safe sem magic strings. Escreva `u.Age > 18` e ganhe checagem em tempo de compilação, IntelliSense e geração automática de SQL. [Saiba mais](Docs/Book.pt-br/05-orm/smart-properties.md)
 * **Change Tracking**: Controle automático de mudanças e persistência otimizada.
@@ -136,7 +138,8 @@ O framework de testes definitivo e moderno para Delphi, inspirado em NUnit, Flue
 * **DI Orientada a Testes**: `TTestServiceProvider` especializado para substituir facilmente serviços de produção por mocks durante testes de integração.
 * **Integração CI/CD** ⭐ NOVO: Exporte relatórios para JUnit XML, JSON, xUnit, TRX (Azure DevOps), SonarQube e HTML standalone moderno.
 * **Live Dashboard** ⭐ NOVO: Monitore seus testes em tempo real com um dashboard web dark-theme moderno e histórico de execuções.
-* **Code Coverage & CLI**: Rode testes e gere relatórios de cobertura prontos para o SonarQube com `dext test --coverage`. Garanta qualidade com thresholds (Quality Gates).
+* **Code Coverage & CLI (S01)**: Rode testes e gere relatórios de cobertura prontos para o SonarQube com `dext test --coverage`. Garanta qualidade com thresholds (Quality Gates).
+* **Advanced Scaffolding (S01)** ⭐ NOVO: Potente motor CLI para geração de projetos e componentes (`dext new`, `dext add`) utilizando o motor de templates integrado.
 
 ### 🧩 Dext.Collections ⭐ **NOVO**
 
