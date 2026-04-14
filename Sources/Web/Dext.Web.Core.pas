@@ -457,6 +457,33 @@ begin
     end;
 end;
 
+// Helper function to wrap pipeline with telemetry without capturing Build's stack/Self
+function CreateTelemetryDelegate(const Pipeline: TRequestDelegate): TRequestDelegate;
+begin
+  Result := 
+    procedure(AContext: IHttpContext)
+    var
+      Start: TDateTime;
+      Data: TJSONObject;
+    begin
+      Start := Now;
+      try
+        Pipeline(AContext);
+      finally
+        Data := TJSONObject.Create;
+        try
+          Data.AddPair('Method', AContext.Request.Method);
+          Data.AddPair('Path', AContext.Request.Path);
+          Data.AddPair('StatusCode', TJSONNumber.Create(AContext.Response.StatusCode));
+          
+          TDiagnosticSource.Instance.Write('HTTP.Request', Data, 'HTTP', Round((Now - Start) * 86400000));
+        except
+          Data.Free;
+        end;
+      end;
+    end;
+end;
+
 function TApplicationBuilder.Build: TRequestDelegate;
 var
   FinalPipeline: TRequestDelegate;
@@ -488,30 +515,8 @@ begin
     RoutingHandler := CreateMiddlewarePipeline(FMiddlewares[I], RoutingHandler);
   end;
 
-  // Wrap final pipeline with telemetry
-  var PreTelemetryPipeline := RoutingHandler;
-  Result := 
-    procedure(AContext: IHttpContext)
-    var
-      Start: TDateTime;
-      Data: TJSONObject;
-    begin
-      Start := Now;
-      try
-        PreTelemetryPipeline(AContext);
-      finally
-        Data := TJSONObject.Create;
-        try
-          Data.AddPair('Method', AContext.Request.Method);
-          Data.AddPair('Path', AContext.Request.Path);
-          Data.AddPair('StatusCode', TJSONNumber.Create(AContext.Response.StatusCode));
-          
-          TDiagnosticSource.Instance.Write('HTTP.Request', Data, 'HTTP', Round((Now - Start) * 86400000));
-        except
-          Data.Free;
-        end;
-      end;
-    end;
+  // Wrap final pipeline with telemetry using isolated function to break Self capture
+  Result := CreateTelemetryDelegate(RoutingHandler);
 end;
 
 
