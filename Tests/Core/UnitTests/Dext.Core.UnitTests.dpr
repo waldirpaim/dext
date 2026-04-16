@@ -1,4 +1,4 @@
-﻿program Dext.Core.UnitTests;
+program Dext.Core.UnitTests;
 
 {$IFNDEF TESTINSIGHT}
   {$APPTYPE CONSOLE}
@@ -17,7 +17,8 @@ uses
   Dext.Configuration.Features.Tests in 'Dext.Configuration.Features.Tests.pas',
   Dext.Configuration.Hashing.Tests in 'Dext.Configuration.Hashing.Tests.pas',
   Dext.Hosting.Events.Tests in 'Dext.Hosting.Events.Tests.pas',
-  Dext.Logging.Telemetry.Tests in 'Dext.Logging.Telemetry.Tests.pas';
+  Dext.Logging.Telemetry.Tests in 'Dext.Logging.Telemetry.Tests.pas',
+  Dext.Json.Utf8.Serializer.Tests in 'Dext.Json.Utf8.Serializer.Tests.pas';
 
 begin
   {$IFDEF TESTINSIGHT}
@@ -40,7 +41,8 @@ begin
         TConfigurationHashingTests,
         THostingEventsTests,
         TJsonInterfaceListTests,
-        TTelemetryTests
+        TTelemetryTests,
+        TUtf8SerializerCurrencyTests
       ]));
   except
     on E: Exception do

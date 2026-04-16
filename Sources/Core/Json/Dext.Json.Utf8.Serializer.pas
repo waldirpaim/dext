@@ -196,8 +196,8 @@ begin
       PInt64(P)^ := AReader.GetInt64;
       
     tkFloat:
-      if (FieldInfo.TypeInfo = TypeInfo(TDateTime)) or 
-         (FieldInfo.TypeInfo = TypeInfo(TDate)) or 
+      if (FieldInfo.TypeInfo = TypeInfo(TDateTime)) or
+         (FieldInfo.TypeInfo = TypeInfo(TDate)) or
          (FieldInfo.TypeInfo = TypeInfo(TTime)) then
       begin
          var DateStr := AReader.GetString;
@@ -207,6 +207,12 @@ begin
          else
            PDateTime(P)^ := 0;
       end
+      else if FieldInfo.TypeInfo = TypeInfo(Currency) then
+        // Bug #93: Currency is stored as Int64 * 10000 (fixed-point, ftCurr).
+        // Writing raw IEEE-754 Double bits via PDouble^ produces wildly incorrect
+        // values. Assigning via PCurrency^ lets the compiler emit the correct
+        // FILD/FISTP pair that converts Double → Int64*10000 properly.
+        PCurrency(P)^ := AReader.GetDouble
       else
         PDouble(P)^ := AReader.GetDouble;
       
