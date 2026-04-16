@@ -29,6 +29,7 @@ interface
 
 uses
   System.Rtti,
+  System.SyncObjs,
   System.SysUtils,
   System.TypInfo,
   Dext.Collections,
@@ -84,6 +85,7 @@ type
     class var FInterfaceDefaultImpl: IDictionary<PTypeInfo, TClass>;
     class var FConstructorCache: IDictionary<TClass, TConstructorEntry>;
     class var FHybridConstructorCache: IDictionary<string, TConstructorEntry>;
+    class var FLock: TCriticalSection;
     class constructor Create;
     class destructor Destroy;
     class function TryResolveService(AProvider: IServiceProvider; AParamType: TRttiType; out AResolvedService: TValue): Boolean;
@@ -104,6 +106,7 @@ begin
   FInterfaceDefaultImpl := TCollections.CreateDictionary<PTypeInfo, TClass>;
   FConstructorCache := TCollections.CreateDictionary<TClass, TConstructorEntry>;
   FHybridConstructorCache := TCollections.CreateDictionary<string, TConstructorEntry>;
+  FLock := TCriticalSection.Create;
   // Default framework mappings
   RegisterDefault(TStrings, TStringList);
 end;
@@ -114,6 +117,7 @@ begin
   FInterfaceDefaultImpl := nil;
   FConstructorCache := nil;
   FHybridConstructorCache := nil;
+  FLock.Free;
 end;
 
 class function TActivator.GetRttiContext: TRttiContext;
@@ -269,12 +273,20 @@ begin
   TargetClass := ResolveImplementation(AClass);
   
   // 0. Check cache for parameterless constructor
-  if (Length(AArgs) = 0) and FConstructorCache.TryGetValue(TargetClass, Entry) then
+  if Length(AArgs) = 0 then
   begin
-    if Length(Entry.ParamTypes) = 0 then
-    begin
-      Result := Entry.Method.Invoke(TargetClass, []).AsObject;
-      Exit;
+    FLock.Enter;
+    try
+      if FConstructorCache.TryGetValue(TargetClass, Entry) then
+      begin
+        if Length(Entry.ParamTypes) = 0 then
+        begin
+          Result := Entry.Method.Invoke(TargetClass, []).AsObject;
+          Exit;
+        end;
+      end;
+    finally
+      FLock.Leave;
     end;
   end;
 
@@ -356,7 +368,12 @@ begin
        begin
          Entry.Method := BestMethod;
          Entry.ParamTypes := nil;
-         FConstructorCache.AddOrSetValue(TargetClass, Entry);
+         FLock.Enter;
+         try
+           FConstructorCache.AddOrSetValue(TargetClass, Entry);
+         finally
+           FLock.Leave;
+         end;
        end;
 
        Result := BestMethod.Invoke(TargetClass, BestArgs).AsObject;
@@ -393,7 +410,13 @@ begin
   TargetClass := ResolveImplementation(AClass);
 
   // 0. Check Cache
-  if FConstructorCache.TryGetValue(TargetClass, Entry) then
+  FLock.Enter;
+  try
+    FConstructorCache.TryGetValue(TargetClass, Entry);
+  finally
+    FLock.Leave;
+  end;
+  if Entry.Method <> nil then
   begin
     SetLength(Args, Length(Entry.ParamTypes));
     Matched := True;
@@ -406,7 +429,7 @@ begin
       end;
       Args[I] := ResolvedService;
     end;
-    
+
     if Matched then
     begin
       Result := Entry.Method.Invoke(TargetClass, Args).AsObject;
@@ -463,7 +486,12 @@ begin
             SetLength(Entry.ParamTypes, Length(Params));
             for I := 0 to High(Params) do
               Entry.ParamTypes[I] := Params[I].ParamType.Handle;
-            FConstructorCache.AddOrSetValue(TargetClass, Entry);
+            FLock.Enter;
+            try
+              FConstructorCache.AddOrSetValue(TargetClass, Entry);
+            finally
+              FLock.Leave;
+            end;
 
             // Use this constructor
             Result := Method.Invoke(TargetClass, Args).AsObject;
@@ -515,7 +543,12 @@ begin
       SetLength(Entry.ParamTypes, Length(WinnerParams));
       for I := 0 to High(WinnerParams) do
         Entry.ParamTypes[I] := WinnerParams[I].ParamType.Handle;
-      FConstructorCache.AddOrSetValue(TargetClass, Entry);
+      FLock.Enter;
+      try
+        FConstructorCache.AddOrSetValue(TargetClass, Entry);
+      finally
+        FLock.Leave;
+      end;
 
       Result := BestMethod.Invoke(AClass, BestArgs).AsObject;
       InjectFields(AProvider, Result, TypeObj);
@@ -552,7 +585,13 @@ begin
 
   // 0. Check Hybrid Cache
   CacheKey := TargetClass.ClassName + '-' + Length(AArgs).ToString;
-  if FHybridConstructorCache.TryGetValue(CacheKey, Entry) then
+  FLock.Enter;
+  try
+    FHybridConstructorCache.TryGetValue(CacheKey, Entry);
+  finally
+    FLock.Leave;
+  end;
+  if Entry.Method <> nil then
   begin
     SetLength(Args, Length(Entry.ParamTypes));
     Matched := True;
@@ -624,8 +663,13 @@ begin
         SetLength(Entry.ParamTypes, Length(Params));
         for I := 0 to High(Params) do
           Entry.ParamTypes[I] := Params[I].ParamType.Handle;
-        
-        FHybridConstructorCache.AddOrSetValue(CacheKey, Entry);
+
+        FLock.Enter;
+        try
+          FHybridConstructorCache.AddOrSetValue(CacheKey, Entry);
+        finally
+          FLock.Leave;
+        end;
 
         Result := Method.Invoke(TargetClass, Args).AsObject;
         InjectFields(AProvider, Result, TypeObj);

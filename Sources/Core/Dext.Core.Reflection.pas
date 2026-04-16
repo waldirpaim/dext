@@ -87,6 +87,8 @@ type
   private
     FHandlers: IDictionary<string, IPropertyHandler>;
     FSnakeMap: IDictionary<string, IPropertyHandler>;
+    /// <summary>Multi-read exclusive-write lock for thread-safe lazy init of FHandlers and FSnakeMap.</summary>
+    FLock: TMREWSync;
     function GetHandlers: IDictionary<string, IPropertyHandler>;
     function GetSnakeMap: IDictionary<string, IPropertyHandler>;
   public
@@ -317,6 +319,7 @@ end;
 constructor TTypeMetadata.Create;
 begin
   inherited Create;
+  FLock := TMREWSync.Create;
 end;
 
 procedure TTypeMetadata.Initialize(AType: PTypeInfo);
@@ -497,66 +500,158 @@ destructor TTypeMetadata.Destroy;
 begin
   FHandlers := nil;
   FSnakeMap := nil;
+  FLock.Free;
   inherited;
 end;
 
 function TTypeMetadata.GetHandlers: IDictionary<string, IPropertyHandler>;
 begin
-  if FHandlers = nil then
-    FHandlers := TCollections.CreateDictionary<string, IPropertyHandler>(True);
-  Result := FHandlers;
+  // Fast path: read under shared lock
+  FLock.BeginRead;
+  try
+    Result := FHandlers;
+  finally
+    FLock.EndRead;
+  end;
+
+  if Result = nil then
+  begin
+    // Slow path: upgrade to exclusive lock and initialize
+    FLock.BeginWrite;
+    try
+      if FHandlers = nil then
+        FHandlers := TCollections.CreateDictionary<string, IPropertyHandler>(True);
+      Result := FHandlers;
+    finally
+      FLock.EndWrite;
+    end;
+  end;
 end;
 
 function TTypeMetadata.GetSnakeMap: IDictionary<string, IPropertyHandler>;
 begin
-  if FSnakeMap = nil then
-    FSnakeMap := TCollections.CreateDictionary<string, IPropertyHandler>(True);
-  Result := FSnakeMap;
+  // Fast path
+  FLock.BeginRead;
+  try
+    Result := FSnakeMap;
+  finally
+    FLock.EndRead;
+  end;
+
+  if Result = nil then
+  begin
+    FLock.BeginWrite;
+    try
+      if FSnakeMap = nil then
+        FSnakeMap := TCollections.CreateDictionary<string, IPropertyHandler>(True);
+      Result := FSnakeMap;
+    finally
+      FLock.EndWrite;
+    end;
+  end;
 end;
 
 function TTypeMetadata.GetHandlerBySnakeCase(const ASnakeName: string): IPropertyHandler;
+var
+  SnakeMap: IDictionary<string, IPropertyHandler>;
+  LSnake: string;
+  LHandler: IPropertyHandler;
+  Prop: TRttiProperty;
 begin
-  if not GetSnakeMap.TryGetValue(ASnakeName, Result) then
-  begin
-    // Initial population of the snake map if empty but property handlers are known, 
-    // or just search once and cache.
-    for var Prop in RttiType.GetProperties do
+  // Fast read path
+  FLock.BeginRead;
+  try
+    SnakeMap := FSnakeMap;
+    if (SnakeMap <> nil) and SnakeMap.TryGetValue(ASnakeName, Result) then
+      Exit;
+  finally
+    FLock.EndRead;
+  end;
+
+  // Slow write path: populate snake map and cache the result
+  FLock.BeginWrite;
+  try
+    if FSnakeMap = nil then
+      FSnakeMap := TCollections.CreateDictionary<string, IPropertyHandler>(True);
+    // Check again after acquiring write lock (another thread may have beaten us)
+    if FSnakeMap.TryGetValue(ASnakeName, Result) then
+      Exit;
+
+    // Populate entire snake map from the RTTI type properties
+    if RttiType <> nil then
     begin
-       var LHandler := GetHandler(Prop.Name);
-       // Simple snake_case detection (this is a simplified logic for the cache)
-       // In a real app, this should match the naming strategy used.
-       var LSnake := Prop.Name.ToLower; // Basic fallback
-       if not FSnakeMap.ContainsKey(LSnake) then
-         FSnakeMap.Add(LSnake, LHandler);
+      for Prop in RttiType.GetProperties do
+      begin
+        LSnake := Prop.Name.ToLower;
+        if not FSnakeMap.ContainsKey(LSnake) then
+        begin
+          // Ensure the handler is in FHandlers first
+          if FHandlers = nil then
+            FHandlers := TCollections.CreateDictionary<string, IPropertyHandler>(True);
+          if not FHandlers.TryGetValue(Prop.Name, LHandler) then
+          begin
+            LHandler := TPropertyHandler.Create(Prop);
+            FHandlers.Add(Prop.Name, LHandler);
+          end;
+          FSnakeMap.Add(LSnake, LHandler);
+        end;
+      end;
     end;
-    
-    GetSnakeMap.TryGetValue(ASnakeName, Result);
+    FSnakeMap.TryGetValue(ASnakeName, Result);
+  finally
+    FLock.EndWrite;
   end;
 end;
 
 function TTypeMetadata.GetHandler(const APropName: string): IPropertyHandler;
+var
+  Member: TRttiMember;
 begin
-  if not GetHandlers.TryGetValue(APropName, Result) then
-  begin
-    var Member: TRttiMember := RttiType.GetProperty(APropName);
-    if Member = nil then
-      Member := RttiType.GetField(APropName);
-      
+  // Fast read path
+  FLock.BeginRead;
+  try
+    if (FHandlers <> nil) and FHandlers.TryGetValue(APropName, Result) then
+      Exit;
+  finally
+    FLock.EndRead;
+  end;
+
+  // Slow write path
+  FLock.BeginWrite;
+  try
+    if FHandlers = nil then
+      FHandlers := TCollections.CreateDictionary<string, IPropertyHandler>(True);
+    // Double-checked locking: another thread may have populated it already
+    if FHandlers.TryGetValue(APropName, Result) then
+      Exit;
+
+    Member := nil;
+    if RttiType <> nil then
+    begin
+      Member := RttiType.GetProperty(APropName);
+      if Member = nil then
+        Member := RttiType.GetField(APropName);
+    end;
+
     if Member <> nil then
     begin
       Result := TPropertyHandler.Create(Member);
       FHandlers.Add(APropName, Result);
     end;
+  finally
+    FLock.EndWrite;
   end;
 end;
 
 function TTypeMetadata.GetPropertyHandlers: TArray<IPropertyHandler>;
 var
   LHandlers: IList<IPropertyHandler>;
+  Prop: TRttiProperty;
 begin
   LHandlers := TCollections.CreateList<IPropertyHandler>;
-  for var Prop in RttiType.GetProperties do
-    LHandlers.Add(GetHandler(Prop.Name));
+  if RttiType <> nil then
+    for Prop in RttiType.GetProperties do
+      LHandlers.Add(GetHandler(Prop.Name));
   Result := LHandlers.ToArray;
 end;
 
