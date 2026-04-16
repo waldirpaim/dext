@@ -85,7 +85,7 @@ type
     class var FInterfaceDefaultImpl: IDictionary<PTypeInfo, TClass>;
     class var FConstructorCache: IDictionary<TClass, TConstructorEntry>;
     class var FHybridConstructorCache: IDictionary<string, TConstructorEntry>;
-    class var FLock: TCriticalSection;
+    class var FLock: TMREWSync;
     class constructor Create;
     class destructor Destroy;
     class function TryResolveService(AProvider: IServiceProvider; AParamType: TRttiType; out AResolvedService: TValue): Boolean;
@@ -106,7 +106,7 @@ begin
   FInterfaceDefaultImpl := TCollections.CreateDictionary<PTypeInfo, TClass>;
   FConstructorCache := TCollections.CreateDictionary<TClass, TConstructorEntry>;
   FHybridConstructorCache := TCollections.CreateDictionary<string, TConstructorEntry>;
-  FLock := TCriticalSection.Create;
+  FLock := TMREWSync.Create;
   // Default framework mappings
   RegisterDefault(TStrings, TStringList);
 end;
@@ -272,10 +272,10 @@ var
 begin
   TargetClass := ResolveImplementation(AClass);
   
-  // 0. Check cache for parameterless constructor
+  // 0. Check cache for parameterless constructor (read-only path)
   if Length(AArgs) = 0 then
   begin
-    FLock.Enter;
+    FLock.BeginRead;
     try
       if FConstructorCache.TryGetValue(TargetClass, Entry) then
       begin
@@ -286,7 +286,7 @@ begin
         end;
       end;
     finally
-      FLock.Leave;
+      FLock.EndRead;
     end;
   end;
 
@@ -366,14 +366,14 @@ begin
        // Only cache if it is a parameterless constructor
        if Length(AArgs) = 0 then
        begin
-         Entry.Method := BestMethod;
-         Entry.ParamTypes := nil;
-         FLock.Enter;
-         try
-           FConstructorCache.AddOrSetValue(TargetClass, Entry);
-         finally
-           FLock.Leave;
-         end;
+       Entry.Method := BestMethod;
+       Entry.ParamTypes := nil;
+       FLock.BeginWrite;
+       try
+         FConstructorCache.AddOrSetValue(TargetClass, Entry);
+       finally
+         FLock.EndWrite;
+       end;
        end;
 
        Result := BestMethod.Invoke(TargetClass, BestArgs).AsObject;
@@ -409,12 +409,12 @@ var
 begin
   TargetClass := ResolveImplementation(AClass);
 
-  // 0. Check Cache
-  FLock.Enter;
+  // 0. Check Cache (read path)
+  FLock.BeginRead;
   try
     FConstructorCache.TryGetValue(TargetClass, Entry);
   finally
-    FLock.Leave;
+    FLock.EndRead;
   end;
   if Entry.Method <> nil then
   begin
@@ -486,11 +486,11 @@ begin
             SetLength(Entry.ParamTypes, Length(Params));
             for I := 0 to High(Params) do
               Entry.ParamTypes[I] := Params[I].ParamType.Handle;
-            FLock.Enter;
+            FLock.BeginWrite;
             try
               FConstructorCache.AddOrSetValue(TargetClass, Entry);
             finally
-              FLock.Leave;
+              FLock.EndWrite;
             end;
 
             // Use this constructor
@@ -543,11 +543,11 @@ begin
       SetLength(Entry.ParamTypes, Length(WinnerParams));
       for I := 0 to High(WinnerParams) do
         Entry.ParamTypes[I] := WinnerParams[I].ParamType.Handle;
-      FLock.Enter;
+      FLock.BeginWrite;
       try
         FConstructorCache.AddOrSetValue(TargetClass, Entry);
       finally
-        FLock.Leave;
+        FLock.EndWrite;
       end;
 
       Result := BestMethod.Invoke(AClass, BestArgs).AsObject;
@@ -583,13 +583,13 @@ begin
   if Length(AArgs) = 0 then
     Exit(CreateInstance(AProvider, TargetClass));
 
-  // 0. Check Hybrid Cache
+  // 0. Check Hybrid Cache (read path)
   CacheKey := TargetClass.ClassName + '-' + Length(AArgs).ToString;
-  FLock.Enter;
+  FLock.BeginRead;
   try
     FHybridConstructorCache.TryGetValue(CacheKey, Entry);
   finally
-    FLock.Leave;
+    FLock.EndRead;
   end;
   if Entry.Method <> nil then
   begin
@@ -664,11 +664,11 @@ begin
         for I := 0 to High(Params) do
           Entry.ParamTypes[I] := Params[I].ParamType.Handle;
 
-        FLock.Enter;
+        FLock.BeginWrite;
         try
           FHybridConstructorCache.AddOrSetValue(CacheKey, Entry);
         finally
-          FLock.Leave;
+          FLock.EndWrite;
         end;
 
         Result := Method.Invoke(TargetClass, Args).AsObject;

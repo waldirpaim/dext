@@ -10,6 +10,7 @@ uses
   System.SyncObjs,
   System.SysUtils,
   System.TypInfo,
+  System.Variants,
   Dext.Collections,
   Dext.Collections.Dict,
   Dext.Types.Lazy,
@@ -89,6 +90,10 @@ type
     FSnakeMap: IDictionary<string, IPropertyHandler>;
     /// <summary>Multi-read exclusive-write lock for thread-safe lazy init of FHandlers and FSnakeMap.</summary>
     FLock: TMREWSync;
+    /// <summary>Set to 1 (via TInterlocked) once FHandlers is fully populated. Enables lock-free reads.</summary>
+    FHandlersReady: Integer;
+    /// <summary>Set to 1 (via TInterlocked) once FSnakeMap is fully populated. Enables lock-free reads.</summary>
+    FSnakeReady: Integer;
     function GetHandlers: IDictionary<string, IPropertyHandler>;
     function GetSnakeMap: IDictionary<string, IPropertyHandler>;
   public
@@ -506,88 +511,73 @@ end;
 
 function TTypeMetadata.GetHandlers: IDictionary<string, IPropertyHandler>;
 begin
-  // Fast path: read under shared lock
-  FLock.BeginRead;
+  // Lock-free fast path: if FHandlersReady=1, the dictionary is stable (no more writes)
+  if FHandlersReady = 1 then
+    Exit(FHandlers);
+
+  // First access: exclusive lock + initialize
+  FLock.BeginWrite;
   try
+    if FHandlers = nil then
+      FHandlers := TCollections.CreateDictionary<string, IPropertyHandler>(True);
     Result := FHandlers;
   finally
-    FLock.EndRead;
-  end;
-
-  if Result = nil then
-  begin
-    // Slow path: upgrade to exclusive lock and initialize
-    FLock.BeginWrite;
-    try
-      if FHandlers = nil then
-        FHandlers := TCollections.CreateDictionary<string, IPropertyHandler>(True);
-      Result := FHandlers;
-    finally
-      FLock.EndWrite;
-    end;
+    FLock.EndWrite;
   end;
 end;
 
 function TTypeMetadata.GetSnakeMap: IDictionary<string, IPropertyHandler>;
 begin
-  // Fast path
-  FLock.BeginRead;
+  // Lock-free fast path: if FSnakeReady=1, the dictionary is stable (no more writes)
+  if FSnakeReady = 1 then
+    Exit(FSnakeMap);
+
+  // First access: exclusive lock + initialize
+  FLock.BeginWrite;
   try
+    if FSnakeMap = nil then
+      FSnakeMap := TCollections.CreateDictionary<string, IPropertyHandler>(True);
     Result := FSnakeMap;
   finally
-    FLock.EndRead;
-  end;
-
-  if Result = nil then
-  begin
-    FLock.BeginWrite;
-    try
-      if FSnakeMap = nil then
-        FSnakeMap := TCollections.CreateDictionary<string, IPropertyHandler>(True);
-      Result := FSnakeMap;
-    finally
-      FLock.EndWrite;
-    end;
+    FLock.EndWrite;
   end;
 end;
 
 function TTypeMetadata.GetHandlerBySnakeCase(const ASnakeName: string): IPropertyHandler;
 var
-  SnakeMap: IDictionary<string, IPropertyHandler>;
   LSnake: string;
   LHandler: IPropertyHandler;
   Prop: TRttiProperty;
 begin
-  // Fast read path
-  FLock.BeginRead;
-  try
-    SnakeMap := FSnakeMap;
-    if (SnakeMap <> nil) and SnakeMap.TryGetValue(ASnakeName, Result) then
-      Exit;
-  finally
-    FLock.EndRead;
+  // Lock-free fast path: map fully populated, direct read (no lock needed)
+  if FSnakeReady = 1 then
+  begin
+    FSnakeMap.TryGetValue(ASnakeName, Result);
+    Exit;
   end;
 
-  // Slow write path: populate snake map and cache the result
+  // Slow write path: populate the entire snake map once, then mark it ready
   FLock.BeginWrite;
   try
     if FSnakeMap = nil then
       FSnakeMap := TCollections.CreateDictionary<string, IPropertyHandler>(True);
-    // Check again after acquiring write lock (another thread may have beaten us)
-    if FSnakeMap.TryGetValue(ASnakeName, Result) then
+    // Double-check after acquiring the lock
+    if FSnakeReady = 1 then
+    begin
+      FSnakeMap.TryGetValue(ASnakeName, Result);
       Exit;
+    end;
 
-    // Populate entire snake map from the RTTI type properties
+    // Populate entire snake map from RTTI properties
     if RttiType <> nil then
     begin
+      if FHandlers = nil then
+        FHandlers := TCollections.CreateDictionary<string, IPropertyHandler>(True);
       for Prop in RttiType.GetProperties do
       begin
         LSnake := Prop.Name.ToLower;
         if not FSnakeMap.ContainsKey(LSnake) then
         begin
-          // Ensure the handler is in FHandlers first
-          if FHandlers = nil then
-            FHandlers := TCollections.CreateDictionary<string, IPropertyHandler>(True);
           if not FHandlers.TryGetValue(Prop.Name, LHandler) then
           begin
             LHandler := TPropertyHandler.Create(Prop);
@@ -597,6 +587,9 @@ begin
         end;
       end;
     end;
+    // Mark both maps as ready (full memory barrier via TInterlocked)
+    TInterlocked.Exchange(FHandlersReady, 1);
+    TInterlocked.Exchange(FSnakeReady, 1);
     FSnakeMap.TryGetValue(ASnakeName, Result);
   finally
     FLock.EndWrite;
@@ -607,16 +600,15 @@ function TTypeMetadata.GetHandler(const APropName: string): IPropertyHandler;
 var
   Member: TRttiMember;
 begin
-  // Fast read path
-  FLock.BeginRead;
-  try
-    if (FHandlers <> nil) and FHandlers.TryGetValue(APropName, Result) then
-      Exit;
-  finally
-    FLock.EndRead;
+  // Lock-free fast path: once FHandlersReady=1, FHandlers is fully populated
+  // and will only be read — no lock needed
+  if FHandlersReady = 1 then
+  begin
+    FHandlers.TryGetValue(APropName, Result);
+    Exit;
   end;
 
-  // Slow write path
+  // Slow write path: first miss goes through the exclusive lock
   FLock.BeginWrite;
   try
     if FHandlers = nil then
@@ -637,6 +629,11 @@ begin
     begin
       Result := TPropertyHandler.Create(Member);
       FHandlers.Add(APropName, Result);
+      // Signal that this handler is now permanently cached.
+      // NOTE: FHandlersReady=1 is a stronger guarantee set by GetHandlerBySnakeCase
+      // (which populates ALL handlers at once). For individual GetHandler calls,
+      // we keep the write lock for safety — reads outside the lock only happen
+      // when the full population has completed.
     end;
   finally
     FLock.EndWrite;
@@ -1070,7 +1067,35 @@ begin
         begin
           if (AType = TypeInfo(TDateTime)) or (AType = TypeInfo(TDate)) or (AType = TypeInfo(TTime)) then
           begin
-            Result := TValue.From<TDateTime>(StrToDateTimeDef(DecodedValue, 0));
+            // Parse date string in a locale-independent way.
+            // Supports ISO 8601: 'yyyy-mm-dd', 'yyyy-mm-ddThh:nn:ss', 'yyyy-mm-dd hh:nn:ss'
+            var DTVal: TDateTime := 0;
+            var Parsed := False;
+            var S := DecodedValue.Trim;
+            // Check for ISO date pattern: starts with 4 digits, dash, 2 digits, dash, 2 digits
+            if (Length(S) >= 10) and (S[5] = '-') and (S[8] = '-') then
+            begin
+              try
+                var Y := StrToInt(Copy(S, 1, 4));
+                var M := StrToInt(Copy(S, 6, 2));
+                var D := StrToInt(Copy(S, 9, 2));
+                DTVal := EncodeDate(Y, M, D);
+                // Check for time component: 'yyyy-mm-ddThh:nn:ss' or 'yyyy-mm-dd hh:nn:ss'
+                if (Length(S) >= 19) and CharInSet(S[11], ['T', 't', ' ']) then
+                begin
+                  var H := StrToIntDef(Copy(S, 12, 2), 0);
+                  var N := StrToIntDef(Copy(S, 15, 2), 0);
+                  var Sc := StrToIntDef(Copy(S, 18, 2), 0);
+                  DTVal := DTVal + EncodeTime(H, N, Sc, 0);
+                end;
+                Parsed := True;
+              except
+                // Fall through to locale-based parsing
+              end;
+            end;
+            if not Parsed then
+              DTVal := StrToDateTimeDef(S, 0);
+            Result := TValue.From<TDateTime>(DTVal);
           end
           else
           begin
@@ -1127,9 +1152,66 @@ begin
 end;
 
 class function TReflection.GetDefaultValue(AMember: TRttiObject; AType: PTypeInfo): TValue;
+var
+  Attr: TCustomAttribute;
+  AttrRtti: TRttiType;
+  ValField: TRttiField;
+  ValProp: TRttiProperty;
+  AttrValue: TValue;
+  V: Variant;
 begin
-  // Implementation note: We can expand this to check for [DefaultValue] attributes
-  // For now, return default for the type
+  // Check for [DefaultValue] attribute via RTTI (avoids direct unit dependency)
+  if AMember <> nil then
+  begin
+    for Attr in AMember.GetAttributes do
+    begin
+      if SameText(Attr.ClassName, 'DefaultValueAttribute') then
+      begin
+        AttrRtti := FContext.GetType(Attr.ClassType);
+        if AttrRtti <> nil then
+        begin
+          // Try the backing field FValue first (avoids Variant/TValue wrapping issues)
+          ValField := AttrRtti.GetField('FValue');
+          if ValField <> nil then
+          begin
+            AttrValue := ValField.GetValue(Attr);
+            try
+              V := AttrValue.AsVariant;
+              if not VarIsEmpty(V) and not VarIsNull(V) then
+              begin
+                Result := CastFromString(VarToStr(V), AType);
+                Exit;
+              end;
+            except
+              // Fall through to default
+            end;
+          end
+          else
+          begin
+            // Try the property if the field isn't directly accessible
+            ValProp := AttrRtti.GetProperty('Value');
+            if ValProp <> nil then
+            begin
+              AttrValue := ValProp.GetValue(Attr);
+              try
+                V := AttrValue.AsVariant;
+                if not VarIsEmpty(V) and not VarIsNull(V) then
+                begin
+                  Result := CastFromString(VarToStr(V), AType);
+                  Exit;
+                end;
+              except
+                // Fall through to default
+              end;
+            end;
+          end;
+        end;
+        Break;
+      end;
+    end;
+  end;
+
+  // No [DefaultValue] attribute found — return zero/empty for type
   TValue.Make(nil, AType, Result);
 end;
 

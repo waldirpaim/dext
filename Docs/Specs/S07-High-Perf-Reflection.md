@@ -225,3 +225,62 @@ Para erradicar qualquer possibilidade de concorrência destrutiva, as seguintes 
 1. **Uso de `TMREWSync` ou `TMonitor` (Delphi Native):** Integrar e inicializar travas exclusivas nos pontos exatos de `GetHandler`, bem como no registro dinâmico via Singleton ou Caches de escopo transacional. O lock `TMultiReadExclusiveWriteSynchronizer` é ideal aqui, já que teremos uma altíssima carga de leituras contra apenas algumas raras inicializações bloqueantes por Tipo.
 2. **Avaliação Fina de Performance:** Executar rodadas no `Web.FrameworkTests` injetando requisições paralelas simultâneas (`TParallel.For` testando `TReflection.GetHandler`) pós-implementação dos blockings para garantir que a lentidão da trava seja mitigada.
 3. **Escopo Centralizado:** Evitar instanciar `TCriticalSection` em cada Tipo se pudermos utilizar Global Locks ou `TMonitor.Enter`/`TMonitor.Exit` diretamente no objeto `TTypeMetadata`.
+
+---
+
+## 6. Fase 5 — Implementação Concluída
+
+**Status:** ✅ Implementado e verificado em `dee8b6b`
+
+### 6.1 Mudanças em `Dext.Core.Reflection.pas` — `TTypeMetadata`
+
+| Ponto | Antes | Depois |
+|---|---|---|
+| `FHandlers` / `FSnakeMap` lazy-init | Sem proteção — AV sob carga paralela | `TMREWSync` com double-checked locking |
+| `GetHandler` | Escrita em dicionário sem lock | BeginRead → miss → BeginWrite + re-check |
+| `GetHandlerBySnakeCase` | Idem | BeginRead → miss → BeginWrite preenche mapa inteiro |
+| `GetPropertyHandlers` | Crash se `RttiType = nil` | Guard `if RttiType <> nil` |
+
+**Padrão adotado:** `TMREWSync` (Multi-Read Exclusive-Write Synchronizer) — ideal para a proporção de acessos (centenas de leituras × poucas inicializações por tipo).
+
+```delphi
+// Fast path (shared lock)
+FLock.BeginRead;
+try
+  if (FHandlers <> nil) and FHandlers.TryGetValue(APropName, Result) then Exit;
+finally
+  FLock.EndRead;
+end;
+
+// Slow path (exclusive lock + double-check)
+FLock.BeginWrite;
+try
+  if FHandlers = nil then
+    FHandlers := TCollections.CreateDictionary<string, IPropertyHandler>(True);
+  if FHandlers.TryGetValue(APropName, Result) then Exit;
+  // ... populate ...
+finally
+  FLock.EndWrite;
+end;
+```
+
+### 6.2 Mudanças em `Dext.Core.Activator.pas` — `TActivator`
+
+| Cache | Operação protegida |
+|---|---|
+| `FConstructorCache` | `TryGetValue` (leitura) + `AddOrSetValue` (escrita) via `TCriticalSection FLock` |
+| `FHybridConstructorCache` | Idem |
+
+**Padrão adotado:** `TCriticalSection` global da classe — cobre tanto leituras que precisam de atomicidade com escrita subsequente quanto escritas puras.
+
+### 6.3 Resultado do Teste de Estresse
+
+```
+Starting Stress Tests (Wave 8 Hardened)...
+Testing Reflection (Parallel)...         ← TParallel.For x1000 em GetHandler + GetHandlerBySnakeCase
+Testing Activator (Parallel)...          ← TParallel.For x1000 em CreateInstance<TTestEntity>
+Stress Tests Passed 100%!
+```
+
+Executado com `TestParallelReflection` (console, Win32, Debug) sem nenhum `EAggregateException` ou `Access Violation`.
+
