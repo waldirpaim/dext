@@ -1792,6 +1792,48 @@ var
     Result := Copy(S, LStart, P - LStart);
   end;
 
+  function ParsePathToken: string;
+  var
+    LStart, LDepth: Integer;
+    LQuote: Char;
+  begin
+    if (P <= Length(S)) and (S[P] = '@') then
+      Inc(P);
+    LStart := P;
+    LDepth := 0;
+    LQuote := #0;
+    while P <= Length(S) do
+    begin
+      if LQuote <> #0 then
+      begin
+        if S[P] = LQuote then LQuote := #0;
+        Inc(P);
+        Continue;
+      end;
+      if CharInSet(S[P], ['''', '"']) then
+      begin
+        LQuote := S[P];
+        Inc(P);
+        Continue;
+      end;
+      if S[P] = '(' then Inc(LDepth)
+      else if S[P] = ')' then Dec(LDepth);
+
+      if LDepth = 0 then
+      begin
+        if S[P] = ')' then
+        begin
+          Inc(P);
+          Continue;
+        end;
+        if not CharInSet(S[P], ['A'..'Z', 'a'..'z', '0'..'9', '_', '.', '@']) then
+          Break;
+      end;
+      Inc(P);
+    end;
+    Result := Copy(S, LStart, P - LStart);
+  end;
+
   function ParsePrimary: TValue;
   var
     LName: string;
@@ -1822,6 +1864,7 @@ var
       Exit(StrToInt64Def(LName, 0));
     end;
 
+    var LStartPos := P;
     LName := ParseNameToken;
     SkipSpaces;
     if (P <= Length(S)) and (S[P] = '(') and (Pos('.', LName) = 0) then
@@ -1853,6 +1896,8 @@ var
       Exit;
     end;
 
+    P := LStartPos;
+    LName := ParsePathToken;
     Result := ResolvePathValue(LName, AContext);
   end;
 

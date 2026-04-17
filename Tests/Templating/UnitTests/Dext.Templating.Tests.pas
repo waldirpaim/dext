@@ -280,9 +280,9 @@ begin
   Context.SetValue('EmptyName', '');
   Context.SetValue('Bio', 'abcdefghijklmnopqrstuvwxyz');
 
+  Should(Engine.Render('@Name.trim().uppercase()', Context)).Be('USER PROFILE');
   Should(Engine.Render('@EmptyName.default(''N/A'')', Context)).Be('N/A');
   Should(Engine.Render('@Bio.truncate(5, ''~'')', Context)).Be('abcde~');
-  Should(Engine.Render('@Name.trim().uppercase()', Context)).Be('USER PROFILE');
 end;
 
 procedure TTemplatingTests.Test_Comparison_Filters_In_If;
