@@ -37,6 +37,7 @@ Status | Task | Spec | Description
 ✅ | **Live Tracing (Core)** | [S03](Specs/S03-Live-Observability.md) | Real-time instrumentation infrastructure (TDiagnosticSource).
 🟡 | **Observability Dashboard**| - | Built-in web UI for real-time log and SQL visualization.
 🔴 | **EntityDataSet Providers** | - | Pluggable providers (REST/gRPC) for EntityDataSet.
+🔴 | **Redis Client (Dext.Redis)** | [S13](Specs/S13-Redis-Client.md) | High-performance async Redis client with RESP3 and RedisJSON support.
 
 ## 🔮 Future / Post-V1
 - [ ] **OData Support**: Full OData query support.
@@ -75,6 +76,7 @@ Status | Tarefa | Spec | Descrição
 ✅ | **Live Tracing (Core)** | [S03](Specs/S03-Live-Observability.md) | Infraestrutura de instrumentação em tempo real.
 🟡 | **Dashboard Log Live** | - | Interface web para visualização de logs e SQL em tempo real.
 🔴 | **Provider de EntityDataSet** | - | Providers plugáveis (REST/gRPC) para o EntityDataSet.
+🔴 | **Redis Client (Dext.Redis)** | [S13](Specs/S13-Redis-Client.md) | Client Redis async de alta performance com suporte a RESP3 e RedisJSON.
 
 ## 🔮 Futuro / Pós-V1
 - [ ] **Suporte a OData**: Suporte completo a queries OData.

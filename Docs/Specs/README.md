@@ -17,6 +17,7 @@ ID | Title | Status | Goal
 **S09** | [Template Engine](S09-Template-Engine.md) | ✅ Finalized | Zero-dependency AST-based template engine (Razor-like).
 **S11** | [Migration Audit & Finalization](S11-Migration-Finalization.md) | ✅ Finalized | Safe schema evolution with renaming detection and CLI automation.
 **S12** | [Advanced Template Engine](S12-Template-Engine-Advanced.md) | 📝 Draft | Layouts, partials, template inheritance, 35+ filters, and Razor-parity for Delphi.
+**S13** | [Redis Client](S13-Redis-Client.md) | 📝 Draft | High-performance async Redis client with RESP3 and RedisJSON support.
 
 ---
 
