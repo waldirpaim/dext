@@ -1,4 +1,4 @@
-﻿# ðŸ“‘ Dext Framework: Engineering Specifications
+# ðŸ“‘ Dext Framework: Engineering Specifications
 
 This directory contains the formal technical specifications and requirements for the Dext Framework evolution. Each "Spec" defines the architecture, user experience (CLI/API), and implementation constraints for a core feature.
 
@@ -16,7 +16,7 @@ ID | Title | Status | Goal
 **S08** | [Dynamic Ports](S08-Dynamic-Ports.md) | âœ… Finalized | Support for Port 0 (OS picks free port) for Demos and CI.
 **S09** | [Template Engine](S09-Template-Engine.md) | âœ… Finalized | Zero-dependency AST-based template engine (Razor-like).
 **S11** | [Migration Audit & Finalization](S11-Migration-Finalization.md) | âœ… Finalized | Safe schema evolution with renaming detection and CLI automation.
-**S12** | [Advanced Template Engine](S12-Template-Engine-Advanced.md) | 🟡 Implementing | Phases 1-4 core + phase 5 partial delivered: advanced filters, layouts/partials/inheritance, complete flow control, inline expressions, `@raw` block, whitespace `~`, and AST cache.
+**S12** | [Advanced Template Engine](S12-Template-Engine-Advanced.md) | ✅ Finalized | Phases 1-6 complete: layouts, partials, inheritance, AST cache, smart positions, @encoded, and high-performance TDataSet/Streaming iterators.
 **S13** | [Redis Client](S13-Redis-Client.md) | ðŸ“ Draft | High-performance async Redis client with RESP3 and RedisJSON support.
 
 ---

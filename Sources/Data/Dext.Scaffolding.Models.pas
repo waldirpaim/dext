@@ -7,6 +7,7 @@ uses
   Dext.Collections;
 
 type
+  {$M+}
   TColumnViewModel = class
   private
     FName: string;

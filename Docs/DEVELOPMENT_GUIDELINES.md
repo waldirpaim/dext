@@ -34,5 +34,8 @@ To ensure consistency and avoid "stale DCU" or path mismatch issues, all contrib
 3.  **Clean State**: If you encounter strange "Access Violations" or "Identifier not found" errors after a refactor, run the `manual_build.md` workflow to perform a full cleanup of DCU files.
 4.  **No Manual Path Edits**: Do not add local absolute paths to `.dproj` files. Use relative paths or rely on the global library path configured via `setenv`.
 
+## 5. Build and Versions
+- **No Source Paths in Projects**: NEVER add Framework or local source paths (`.pas` locations) to the Search Path of `.dproj` files. This causes `F2051` errors (compiled with a different version) and stale DCU issues. Always use the provided packages (`Dext.Core.dpk`, etc.) and compile them using the framework's build scripts.
+
 ---
 *Created: April 2026*

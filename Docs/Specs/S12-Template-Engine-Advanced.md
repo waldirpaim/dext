@@ -42,7 +42,7 @@ Atualmente localizado em `Sources\Core\Base\Dext.Templating.pas`:
 - [x] `@set`, `@continue`, `@break`, `@switch/@case` (Fase 4).
 - [x] Whitespace control base com `~` em diretivas (Fase 5).
 - [x] Cache de AST por conteúdo de template (Fase 5).
-- [ ] Loop em `TDataSet` (Fase 6).
+- [x] Loop em `TDataSet` (Fase 6).
 
 ## 2. Objetivo
 

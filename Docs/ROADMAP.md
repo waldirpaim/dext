@@ -1,4 +1,4 @@
-﻿# ðŸ—ºï¸ Dext Framework: Master Roadmap
+# ðŸ—ºï¸ Dext Framework: Master Roadmap
 
 This is the centralized roadmap for the Dext Framework. It tracks the progress of core features, architectural specifications, and the path to the V1.0 Stable release.
 
@@ -24,7 +24,7 @@ Status | Task | Spec | Description
 âœ… | **High-Perf Reflection** | [S07](Specs/S07-High-Perf-Reflection.md) | Thread-safe RTTI cache with lock-free fast paths, zero-boxing type handlers, and ISO 8601 date binding.
 âœ… | **Advanced Scaffolding** | [S01](Specs/S01-Advanced-Scaffolding.md) | New CLI template engine (`dext new`, `dext add`).
 âœ… | **Template Engine** | [S09](Specs/S09-Template-Engine.md) | Zero-dependency AST-based template engine (Razor-like).
-🟡 | **Advanced Template Engine** | [S12](Specs/S12-Template-Engine-Advanced.md) | Phases 1-4 core + phase 5 partial delivered: complete flow control, filters, layouts/partials/inheritance, inline expressions, `@raw` block, whitespace `~`, and AST cache.
+✅ | **Advanced Template Engine** | [S12](Specs/S12-Template-Engine-Advanced.md) | Phases 1-6 complete: layouts, partials, inheritance, AST cache, smart positions, @encoded, and high-performance TDataSet/Streaming iterators.
 âœ… | **Schema Migrations** | [S11](Specs/S11-Migration-Finalization.md) | Attribute-based renaming detection and CLI automation.
 ðŸŸ¡ | **Dext IDE Explorer** | [S05](Specs/S05-Advanced-Tooling.md) | Initial visual tool for Migrations inside the IDE.
 ðŸŸ¡ | **Production Middleware** | - | SPA Fallback, Forwarded Headers, and Resilience.
@@ -63,7 +63,7 @@ Status | Tarefa | Spec | DescriÃ§Ã£o
 âœ… | **High-Perf Reflection** | [S07](Specs/S07-High-Perf-Reflection.md) | Cache de RTTI thread-safe com fast paths lock-free, handlers sem boxing e binding ISO 8601.
 âœ… | **Scaffolding AvanÃ§ado** | [S01](Specs/S01-Advanced-Scaffolding.md) | Novo motor de templates CLI (`dext new`, `dext add`).
 âœ… | **Motor de Templates** | [S09](Specs/S09-Template-Engine.md) | Motor de templates baseado em AST, zero dependÃªncia (estilo Razor).
-🟡 | **Motor de Templates Avançado** | [S12](Specs/S12-Template-Engine-Advanced.md) | Fases 1-4 core + fase 5 parcial entregues: fluxo completo, filtros, layouts/partials/herança, expressões inline, bloco `@raw`, whitespace `~` e cache de AST.
+✅ | **Motor de Templates Avançado** | [S12](Specs/S12-Template-Engine-Advanced.md) | Fases 1-6 completas: layouts, partials, herança, cache de AST, posições inteligentes, @encoded e iteradores TDataSet/Streaming de alta performance.
 âœ… | **Migrations de Schema** | [S11](Specs/S11-Migration-Finalization.md) | DetecÃ§Ã£o de renomeaÃ§Ã£o por atributos e automaÃ§Ã£o CLI.
 ðŸŸ¡ | **Dext IDE Explorer** | [S05](Specs/S05-Advanced-Tooling.md) | Ferramenta visual inicial para Migrations na IDE.
 ðŸŸ¡ | **Middleware Pack** | - | SPA Fallback, Forwarded Headers e ResiliÃªncia.

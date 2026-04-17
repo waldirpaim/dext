@@ -65,6 +65,24 @@ type
     function CreateChildScope: ITemplateContext;
   end;
 
+  TSourcePos = record
+    Line: Integer;
+    Col: Integer;
+    Filename: string;
+    constructor Create(ALine, ACol: Integer; const AFilename: string = '');
+    function ToString: string;
+  end;
+
+  ETemplateException = class(Exception)
+  private
+    FPos: TSourcePos;
+    FTemplateSnippet: string;
+  public
+    constructor Create(const AMessage: string; const APos: TSourcePos; const ASnippet: string = '');
+    property Pos: TSourcePos read FPos;
+    property TemplateSnippet: string read FTemplateSnippet;
+  end;
+
   ITemplateLoader = interface
     ['{5C6D7E8F-9A0B-1C2D-3E4F-5A6B7C8D9E0F}']
     function Load(const ATemplateName: string): string;
@@ -76,7 +94,10 @@ type
     function RenderTemplate(const ATemplateName: string; const AContext: ITemplateContext): string;
     procedure SetTemplateLoader(const ALoader: ITemplateLoader);
     function GetTemplateLoader: ITemplateLoader;
+    function GetIsHtmlMode: Boolean;
+    procedure SetIsHtmlMode(AValue: Boolean);
     property TemplateLoader: ITemplateLoader read GetTemplateLoader write SetTemplateLoader;
+    property IsHtmlMode: Boolean read GetIsHtmlMode write SetIsHtmlMode;
   end;
 
   ITemplateFilterRegistry = interface
@@ -113,9 +134,12 @@ type
   TTemplateNode = class
   protected
     FEngine: TDextTemplateEngine;
+    FPos: TSourcePos;
   public
     constructor Create(AEngine: TDextTemplateEngine); virtual;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos); virtual;
     function Render(const AContext: ITemplateContext): string; virtual; abstract;
+    property Pos: TSourcePos read FPos;
   end;
 
   TTextNode = class(TTemplateNode)
@@ -123,6 +147,7 @@ type
     FText: string;
   public
     constructor Create(AEngine: TDextTemplateEngine; const AText: string); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AText: string); reintroduce;
     function Render(const AContext: ITemplateContext): string; override;
   end;
 
@@ -132,6 +157,7 @@ type
     FIsRaw: Boolean;
   public
     constructor Create(AEngine: TDextTemplateEngine; const AExpression: string; AIsRaw: Boolean); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AExpression: string; AIsRaw: Boolean); reintroduce;
     function Render(const AContext: ITemplateContext): string; override;
   end;
 
@@ -142,6 +168,7 @@ type
     FFalseNodes: TObjectList<TTemplateNode>;
   public
     constructor Create(AEngine: TDextTemplateEngine; const ACondition: string); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const ACondition: string); reintroduce;
     destructor Destroy; override;
     function Render(const AContext: ITemplateContext): string; override;
     property TrueNodes: TObjectList<TTemplateNode> read FTrueNodes;
@@ -156,6 +183,7 @@ type
     FElseNodes: TObjectList<TTemplateNode>;
   public
     constructor Create(AEngine: TDextTemplateEngine; const AItemName, AListExpr: string); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AItemName, AListExpr: string); reintroduce;
     destructor Destroy; override;
     function Render(const AContext: ITemplateContext): string; override;
     property Nodes: TObjectList<TTemplateNode> read FNodes;
@@ -223,7 +251,6 @@ type
       constructor Create;
       destructor Destroy; override;
     end;
-
   private
     FFilters: IDictionary<string, System.SysUtils.TFunc<string, string>>;
     FAdvancedFilters: IDictionary<string, TTemplateFilterFunc>;
@@ -235,6 +262,8 @@ type
 
     function GetTemplateLoader: ITemplateLoader;
     procedure SetTemplateLoader(const ALoader: ITemplateLoader);
+    function GetIsHtmlMode: Boolean;
+    procedure SetIsHtmlMode(AValue: Boolean);
 
     function Parse(const ATemplate: string): TTemplateNodeList;
     function GetOrParseTemplate(const ATemplate: string): TTemplateNodeList;
@@ -247,17 +276,14 @@ type
     function MergeSectionContent(const AChildContent, AParentContent: string): string;
     function ResolveNodeOutput(ANode: TTemplateNode; const AContext: ITemplateContext): string;
 
-    function ResolveValue(const AExpr: string; const AContext: ITemplateContext; out AIsRaw: Boolean): TValue;
-    function ResolveExpression(const AExpr: string; const AContext: ITemplateContext): string;
+    function GetTemplateSnippet(const ATemplate: string; APos: Integer): string;
+    function ResolveValue(const AExpr: string; const AContext: ITemplateContext; out AIsRaw, AIsEncoded: Boolean): TValue;
     function ResolveRootValue(const ARoot: string; const AContext: ITemplateContext): TValue;
     function ResolvePathValue(const APath: string; const AContext: ITemplateContext): TValue;
-    function ResolveMemberValue(const AValue: TValue; const APath: string): TValue;
-    function ResolveObjectValue(AObj: TObject; const APropPath: string): TValue;
-    function ResolveObjectProperty(AObj: TObject; const APropPath: string): string;
+    function ResolveMemberValue(const AValue: TValue; const APath: string; const AContext: ITemplateContext): TValue;
     function EvaluateInlineExpression(const AExpr: string; const AContext: ITemplateContext): TValue;
-    function ExecuteInlineFunction(const AName: string; const AArgs: TArray<TValue>): TValue;
+    function ExecuteInlineFunction(const AName: string; const AArgs: TArray<TValue>; const AContext: ITemplateContext): TValue;
     function HasTopLevelOperator(const AExpr: string): Boolean;
-    function EvaluateCondition(const ACond: string; const AContext: ITemplateContext): Boolean;
     function ApplyAdvancedFilter(const AName: string; const AValue: TValue; const AArgs: TArray<TValue>): TValue;
     function ParseFilterArguments(const AText: string; const AContext: ITemplateContext): TArray<TValue>;
     function ParseNamedArguments(const AText: string): TArray<TTemplateArgument>;
@@ -295,6 +321,7 @@ type
 implementation
 
 uses
+  Data.DB,
   Dext.Core.Reflection,
   Dext.Json;
 
@@ -307,17 +334,22 @@ type
     FName: string;
     FExpression: string;
   public
-    constructor Create(AEngine: TDextTemplateEngine; const AName, AExpression: string);
+    constructor Create(AEngine: TDextTemplateEngine; const AName, AExpression: string); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AName, AExpression: string); reintroduce;
     function Render(const AContext: ITemplateContext): string; override;
   end;
 
   TContinueNode = class(TTemplateNode)
   public
+    constructor Create(AEngine: TDextTemplateEngine); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos); reintroduce;
     function Render(const AContext: ITemplateContext): string; override;
   end;
 
   TBreakNode = class(TTemplateNode)
   public
+    constructor Create(AEngine: TDextTemplateEngine); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos); reintroduce;
     function Render(const AContext: ITemplateContext): string; override;
   end;
 
@@ -335,7 +367,8 @@ type
     FCases: TObjectList<TSwitchCase>;
     FDefaultNodes: TObjectList<TTemplateNode>;
   public
-    constructor Create(AEngine: TDextTemplateEngine; const AExpression: string);
+    constructor Create(AEngine: TDextTemplateEngine; const AExpression: string); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AExpression: string); reintroduce;
     destructor Destroy; override;
     function Render(const AContext: ITemplateContext): string; override;
     property Cases: TObjectList<TSwitchCase> read FCases;
@@ -347,7 +380,8 @@ type
     FTemplateName: string;
     FArgumentsText: string;
   public
-    constructor Create(AEngine: TDextTemplateEngine; const ATemplateName, AArgumentsText: string);
+    constructor Create(AEngine: TDextTemplateEngine; const ATemplateName, AArgumentsText: string); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const ATemplateName, AArgumentsText: string); reintroduce;
     function Render(const AContext: ITemplateContext): string; override;
   end;
 
@@ -356,12 +390,15 @@ type
     FSectionName: string;
     FRequired: Boolean;
   public
-    constructor Create(AEngine: TDextTemplateEngine; const ASectionName: string; ARequired: Boolean);
+    constructor Create(AEngine: TDextTemplateEngine; const ASectionName: string; ARequired: Boolean); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const ASectionName: string; ARequired: Boolean); reintroduce;
     function Render(const AContext: ITemplateContext): string; override;
   end;
 
   TRenderBodyNode = class(TTemplateNode)
   public
+    constructor Create(AEngine: TDextTemplateEngine); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos); reintroduce;
     function Render(const AContext: ITemplateContext): string; override;
   end;
 
@@ -370,7 +407,8 @@ type
     FName: string;
     FArgumentsText: string;
   public
-    constructor Create(AEngine: TDextTemplateEngine; const AName, AArgumentsText: string);
+    constructor Create(AEngine: TDextTemplateEngine; const AName, AArgumentsText: string); reintroduce;
+    constructor CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AName, AArgumentsText: string); reintroduce;
     function Render(const AContext: ITemplateContext): string; override;
   end;
 
@@ -434,12 +472,36 @@ begin
 end;
 
 procedure TTemplateContext.SetObject(const AKey: string; AObject: TObject);
+var
+  LContext: TTemplateContext;
 begin
+  LContext := Self;
+  while Assigned(LContext) do
+  begin
+    if LContext.FObjects.ContainsKey(AKey) then
+    begin
+      LContext.FObjects.AddOrSetValue(AKey, AObject);
+      Exit;
+    end;
+    LContext := TTemplateContext(LContext.FParent);
+  end;
   FObjects.AddOrSetValue(AKey, AObject);
 end;
 
 procedure TTemplateContext.SetValue(const AKey, AValue: string);
+var
+  LContext: TTemplateContext;
 begin
+  LContext := Self;
+  while Assigned(LContext) do
+  begin
+    if LContext.FValues.ContainsKey(AKey) then
+    begin
+      LContext.FValues.AddOrSetValue(AKey, AValue);
+      Exit;
+    end;
+    LContext := TTemplateContext(LContext.FParent);
+  end;
   FValues.AddOrSetValue(AKey, AValue);
 end;
 
@@ -450,19 +512,61 @@ begin
     Result := FParent.TryGetValue(AKey, AValue);
 end;
 
+{ TSourcePos }
+
+constructor TSourcePos.Create(ALine, ACol: Integer; const AFilename: string);
+begin
+  Line := ALine;
+  Col := ACol;
+  Filename := AFilename;
+end;
+
+function TSourcePos.ToString: string;
+begin
+  if Filename <> '' then
+    Result := Format('%s (Line %d, Col %d)', [Filename, Line, Col])
+  else
+    Result := Format('Line %d, Col %d', [Line, Col]);
+end;
+
+{ ETemplateException }
+
+constructor ETemplateException.Create(const AMessage: string; const APos: TSourcePos; const ASnippet: string);
+begin
+  inherited Create(AMessage + ' at ' + APos.ToString);
+  FPos := APos;
+  FTemplateSnippet := ASnippet;
+end;
+
 { TTemplateNode }
 
 constructor TTemplateNode.Create(AEngine: TDextTemplateEngine);
 begin
   inherited Create;
   FEngine := AEngine;
+  FPos.Line := 0;
+  FPos.Col := 0;
 end;
+
+constructor TTemplateNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos);
+begin
+  inherited Create;
+  FEngine := AEngine;
+  FPos := APos;
+end;
+
 
 { TTextNode }
 
 constructor TTextNode.Create(AEngine: TDextTemplateEngine; const AText: string);
 begin
   inherited Create(AEngine);
+  FText := AText;
+end;
+
+constructor TTextNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AText: string);
+begin
+  inherited CreateAt(AEngine, APos);
   FText := AText;
 end;
 
@@ -480,15 +584,23 @@ begin
   FIsRaw := AIsRaw;
 end;
 
+constructor TExpressionNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AExpression: string; AIsRaw: Boolean);
+begin
+  inherited CreateAt(AEngine, APos);
+  FExpression := AExpression;
+  FIsRaw := AIsRaw;
+end;
+
 function TExpressionNode.Render(const AContext: ITemplateContext): string;
 var
-  LIsRaw: Boolean;
+  LIsRaw, LIsEncoded: Boolean;
   LValue: TValue;
 begin
-  LIsRaw := FIsRaw;
-  LValue := FEngine.ResolveValue(FExpression, AContext, LIsRaw);
+  LIsRaw := False;
+  LIsEncoded := False;
+  LValue := FEngine.ResolveValue(FExpression, AContext, LIsRaw, LIsEncoded);
   Result := FEngine.ValueToString(LValue);
-  if FEngine.IsHtmlMode and (not LIsRaw) then
+  if (FEngine.IsHtmlMode and (not LIsRaw) and (not FIsRaw)) or LIsEncoded then
     Result := TDextEscaping.Html(Result);
 end;
 
@@ -498,8 +610,16 @@ constructor TConditionalNode.Create(AEngine: TDextTemplateEngine; const AConditi
 begin
   inherited Create(AEngine);
   FCondition := ACondition;
-  FTrueNodes := TObjectList<TTemplateNode>.Create(True);
-  FFalseNodes := TObjectList<TTemplateNode>.Create(True);
+  FTrueNodes := TTemplateNodeList.Create(True);
+  FFalseNodes := TTemplateNodeList.Create(True);
+end;
+
+constructor TConditionalNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const ACondition: string);
+begin
+  inherited CreateAt(AEngine, APos);
+  FCondition := ACondition;
+  FTrueNodes := TTemplateNodeList.Create(True);
+  FFalseNodes := TTemplateNodeList.Create(True);
 end;
 
 destructor TConditionalNode.Destroy;
@@ -510,8 +630,13 @@ begin
 end;
 
 function TConditionalNode.Render(const AContext: ITemplateContext): string;
+var
+  LIsRaw: Boolean;
+  LIsEncoded: Boolean;
 begin
-  if FEngine.EvaluateCondition(FCondition, AContext) then
+  LIsRaw := False;
+  LIsEncoded := False;
+  if FEngine.ValueToBoolean(FEngine.ResolveValue(FCondition, AContext, LIsRaw, LIsEncoded)) then
     Result := FEngine.RenderNodes(FTrueNodes, AContext)
   else
     Result := FEngine.RenderNodes(FFalseNodes, AContext);
@@ -524,8 +649,17 @@ begin
   inherited Create(AEngine);
   FItemName := AItemName;
   FListExpr := AListExpr;
-  FNodes := TObjectList<TTemplateNode>.Create(True);
-  FElseNodes := TObjectList<TTemplateNode>.Create(True);
+  FNodes := TTemplateNodeList.Create(True);
+  FElseNodes := TTemplateNodeList.Create(True);
+end;
+
+constructor TLoopNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AItemName, AListExpr: string);
+begin
+  inherited CreateAt(AEngine, APos);
+  FItemName := AItemName;
+  FListExpr := AListExpr;
+  FNodes := TTemplateNodeList.Create(True);
+  FElseNodes := TTemplateNodeList.Create(True);
 end;
 
 destructor TLoopNode.Destroy;
@@ -538,111 +672,176 @@ end;
 function TLoopNode.Render(const AContext: ITemplateContext): string;
 var
   LSource: TValue;
-  LItems: TArray<TObject>;
   I: Integer;
-  LChild: ITemplateContext;
-  LIsRaw: Boolean;
-  LMeta: TTypeMetadata;
-  LObjectList: IObjectList;
-  LIntfList: IObjectList;
+  LIsRaw, LIsEncoded: Boolean;
   LObject: TObject;
-  LIntf: IInterface;
-begin
-  LIsRaw := False;
-  LSource := FEngine.ResolveValue(FListExpr, AContext, LIsRaw);
-  LItems := [];
+  LDataSet: TDataSet;
+  LObjectList: IObjectList;
+  LBuilder: TStringBuilder;
 
-  if not LSource.IsEmpty then
+  procedure RenderItem(AValue: TValue; AIndex: Integer; AFirst, ALast: Boolean);
+  var
+    LItemChild: ITemplateContext;
   begin
-    if LSource.Kind = tkClass then
-    begin
-      LObject := LSource.AsObject;
-      if Assigned(LObject) then
-      begin
-        LMeta := TReflection.GetMetadata(LObject.ClassInfo);
-        if LMeta.IsList then
-        begin
-          if Supports(LObject, IObjectList, LObjectList) then
-          begin
-            SetLength(LItems, LObjectList.Count);
-            for I := 0 to LObjectList.Count - 1 do
-              LItems[I] := LObjectList.Items[I];
-          end;
-        end;
-      end;
-    end
-    else if LSource.Kind = tkInterface then
-    begin
-      LIntf := LSource.AsInterface;
-      if Supports(LIntf, IObjectList, LIntfList) then
-      begin
-        SetLength(LItems, LIntfList.Count);
-        for I := 0 to LIntfList.Count - 1 do
-          LItems[I] := LIntfList.Items[I];
-      end;
-    end;
-  end;
-
-  if Length(LItems) = 0 then
-    Exit(FEngine.RenderNodes(FElseNodes, AContext));
-
-  Result := '';
-  for I := 0 to High(LItems) do
-  begin
-    LChild := AContext.CreateChildScope;
-    LChild.SetObject(FItemName, LItems[I]);
-    LChild.SetValue('index', IntToStr(I + 1));
-    LChild.SetValue('first', BoolToStr(I = 0, True).ToLower);
-    LChild.SetValue('last', BoolToStr(I = High(LItems), True).ToLower);
-    LChild.SetValue('odd', BoolToStr(((I + 1) mod 2) = 1, True).ToLower);
-    LChild.SetValue('even', BoolToStr(((I + 1) mod 2) = 0, True).ToLower);
     try
-      Result := Result + FEngine.RenderNodes(FNodes, LChild);
+      LItemChild := AContext.CreateChildScope;
+      if AValue.IsObject then
+        LItemChild.SetObject(FItemName, AValue.AsObject)
+      else
+        LItemChild.SetValue(FItemName, FEngine.ValueToString(AValue));
+
+      LItemChild.SetValue('index', AIndex.ToString);
+      LItemChild.SetValue('@@index', AIndex.ToString);
+      LItemChild.SetValue('count', AIndex.ToString);
+      LItemChild.SetValue('first', System.StrUtils.IfThen(AFirst, 'true', 'false'));
+      LItemChild.SetValue('last', System.StrUtils.IfThen(ALast, 'true', 'false'));
+      LItemChild.SetValue('odd', System.StrUtils.IfThen(AIndex mod 2 <> 0, 'true', 'false'));
+      LItemChild.SetValue('even', System.StrUtils.IfThen(AIndex mod 2 = 0, 'true', 'false'));
+      
+      // Built-in style with @
+      LItemChild.SetValue('@index', (AIndex - 1).ToString);
+      LItemChild.SetValue('@first', System.SysUtils.BoolToStr(AFirst, True));
+      LItemChild.SetValue('@last', System.SysUtils.BoolToStr(ALast, True));
+
+      LBuilder.Append(FEngine.RenderNodes(FNodes, LItemChild));
     except
-      on ETemplateLoopContinue do
-        Continue;
-      on ETemplateLoopBreak do
-        Break;
+      on ETemplateLoopContinue do ;
     end;
+  end;
+
+begin
+  LIsRaw := False;
+  LIsEncoded := False;
+  LBuilder := TStringBuilder.Create;
+  try
+    try
+      LSource := FEngine.ResolveValue(FListExpr, AContext, LIsRaw, LIsEncoded);
+      if LSource.IsEmpty then
+      begin
+        LBuilder.Append(FEngine.RenderNodes(FElseNodes, AContext));
+        Exit(LBuilder.ToString);
+      end;
+
+      if LSource.IsObject or (LSource.Kind = tkInterface) then
+      begin
+        LObject := nil;
+        if LSource.IsObject then LObject := LSource.AsObject;
+        
+        if Assigned(LObject) and (LObject is TDataSet) then
+        begin
+          LDataSet := TDataSet(LObject);
+          if LDataSet.IsEmpty then
+            LBuilder.Append(FEngine.RenderNodes(FElseNodes, AContext))
+          else
+          begin
+            LDataSet.DisableControls;
+            try
+              LDataSet.First;
+              I := 1;
+              while not LDataSet.Eof do
+              begin
+                RenderItem(TValue.From<TDataSet>(LDataSet), I, I = 1, False);
+                LDataSet.Next;
+                Inc(I);
+              end;
+            finally
+              LDataSet.EnableControls;
+            end;
+          end;
+        end
+        else
+        begin
+          LObjectList := nil;
+          if Assigned(LObject) then
+            Supports(LObject, IObjectList, LObjectList)
+          else if LSource.Kind = tkInterface then
+            Supports(LSource.AsInterface, IObjectList, LObjectList);
+
+          if Assigned(LObjectList) then
+          begin
+            if LObjectList.Count = 0 then
+              LBuilder.Append(FEngine.RenderNodes(FElseNodes, AContext))
+            else
+            begin
+              for I := 0 to LObjectList.Count - 1 do
+                RenderItem(LObjectList.Items[I], I + 1, I = 0, I = LObjectList.Count - 1);
+            end;
+          end
+          else if TReflection.IsListType(LSource.TypeInfo) then
+          begin
+            var LMeta := TReflection.GetMetadata(LSource.TypeInfo);
+            var LRtti := LMeta.RttiType;
+            var LCountProp := LRtti.GetProperty('Count');
+            if LCountProp = nil then LCountProp := LRtti.GetProperty('GetCount');
+            
+            var LIndexedProp: TRttiIndexedProperty := nil;
+            var LItemsList := LRtti.GetIndexedProperties;
+            for var P in LItemsList do
+              if SameText(P.Name, 'Items') then
+              begin
+                LIndexedProp := P;
+                Break;
+              end;
+              
+            if (LIndexedProp = nil) and (Length(LItemsList) > 0) then
+              LIndexedProp := LItemsList[0];
+
+            if Assigned(LCountProp) and Assigned(LIndexedProp) then
+            begin
+              var LCount: Integer;
+              if LSource.Kind = tkInterface then
+                LCount := LCountProp.GetValue(LSource.AsInterface).AsInteger
+              else
+                LCount := LCountProp.GetValue(LObject).AsInteger;
+
+              if LCount = 0 then
+                LBuilder.Append(FEngine.RenderNodes(FElseNodes, AContext))
+              else
+              begin
+                for I := 0 to LCount - 1 do
+                begin
+                  var LItemValue: TValue;
+                  var LArgs: TArray<TValue>;
+                  SetLength(LArgs, 1);
+                  LArgs[0] := TValue.From(I);
+                  
+                  if LSource.Kind = tkInterface then
+                    LItemValue := LIndexedProp.GetValue(Pointer(LSource.AsInterface), LArgs)
+                  else
+                    LItemValue := LIndexedProp.GetValue(LObject, LArgs);
+                  RenderItem(LItemValue, I + 1, I = 0, I = LCount - 1);
+                end;
+              end;
+            end
+            else
+              RenderItem(LSource, 1, True, True);
+          end
+          else
+            RenderItem(LSource, 1, True, True);
+        end;
+      end
+      else if LSource.IsArray then
+      begin
+        if LSource.GetArrayLength = 0 then
+          LBuilder.Append(FEngine.RenderNodes(FElseNodes, AContext))
+        else
+        begin
+          for I := 0 to LSource.GetArrayLength - 1 do
+            RenderItem(LSource.GetArrayElement(I), I + 1, I = 0, I = LSource.GetArrayLength - 1);
+        end;
+      end
+      else
+        RenderItem(LSource, 1, True, True);
+
+      Result := LBuilder.ToString;
+    except
+      on ETemplateLoopBreak do Result := LBuilder.ToString;
+    end;
+  finally
+    LBuilder.Free;
   end;
 end;
 
-{ TSetNode }
-
-constructor TSetNode.Create(AEngine: TDextTemplateEngine; const AName, AExpression: string);
-begin
-  inherited Create(AEngine);
-  FName := AName;
-  FExpression := AExpression;
-end;
-
-function TSetNode.Render(const AContext: ITemplateContext): string;
-var
-  LIsRaw: Boolean;
-  LValue: TValue;
-begin
-  LIsRaw := False;
-  LValue := FEngine.ResolveValue(FExpression, AContext, LIsRaw);
-  if LValue.Kind = tkClass then
-    AContext.SetObject(FName, LValue.AsObject)
-  else
-    AContext.SetValue(FName, FEngine.ValueToString(LValue));
-  Result := '';
-end;
-
-{ TContinueNode }
-
-function TContinueNode.Render(const AContext: ITemplateContext): string;
-begin
-  raise ETemplateLoopContinue.Create('continue');
-end;
-
-{ TBreakNode }
-
-function TBreakNode.Render(const AContext: ITemplateContext): string;
-begin
-  raise ETemplateLoopBreak.Create('break');
-end;
 
 { TSwitchCase }
 
@@ -669,6 +868,14 @@ begin
   FDefaultNodes := TObjectList<TTemplateNode>.Create(True);
 end;
 
+constructor TSwitchNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AExpression: string);
+begin
+  inherited CreateAt(AEngine, APos);
+  FExpression := AExpression;
+  FCases := TObjectList<TSwitchCase>.Create(True);
+  FDefaultNodes := TObjectList<TTemplateNode>.Create(True);
+end;
+
 destructor TSwitchNode.Destroy;
 begin
   FCases.Free;
@@ -678,16 +885,18 @@ end;
 
 function TSwitchNode.Render(const AContext: ITemplateContext): string;
 var
-  LIsRaw: Boolean;
+  LIsRaw, LIsEncoded: Boolean;
   LSwitchValue: TValue;
   LCaseValue: TValue;
   LCase: TSwitchCase;
 begin
   LIsRaw := False;
-  LSwitchValue := FEngine.ResolveValue(FExpression, AContext, LIsRaw);
+  LIsEncoded := False;
+  LSwitchValue := FEngine.ResolveValue(FExpression, AContext, LIsRaw, LIsEncoded);
   for LCase in FCases do
   begin
-    LCaseValue := FEngine.ResolveValue(LCase.Expression, AContext, LIsRaw);
+    LIsEncoded := False;
+    LCaseValue := FEngine.ResolveValue(LCase.Expression, AContext, LIsRaw, LIsEncoded);
     if SameText(FEngine.ValueToString(LSwitchValue), FEngine.ValueToString(LCaseValue)) then
       Exit(FEngine.RenderNodes(LCase.Nodes, AContext));
   end;
@@ -978,28 +1187,55 @@ begin
       Digits := 0;
       if Length(AArgs) > 0 then Digits := StrToIntDef(ValueToString(AArgs[0]), 0);
       if AValue.TryAsType<Extended>(N) then
-        Result := SimpleRoundTo(N, -Digits)
+        Result := System.Math.SimpleRoundTo(N, -Digits)
       else
         Result := ValueToString(AValue);
     end);
-  RegisterAdvancedFilter('eq', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
-    begin Result := SameText(ValueToString(AValue), ValueToString(AArgs[0])); end);
-  RegisterAdvancedFilter('ne', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
-    begin Result := not SameText(ValueToString(AValue), ValueToString(AArgs[0])); end);
-  RegisterAdvancedFilter('gt', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
-    begin Result := ValueToString(AValue) > ValueToString(AArgs[0]); end);
-  RegisterAdvancedFilter('ge', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
-    begin Result := ValueToString(AValue) >= ValueToString(AArgs[0]); end);
-  RegisterAdvancedFilter('lt', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
-    begin Result := ValueToString(AValue) < ValueToString(AArgs[0]); end);
-  RegisterAdvancedFilter('le', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
-    begin Result := ValueToString(AValue) <= ValueToString(AArgs[0]); end);
-  RegisterAdvancedFilter('contains', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
-    begin Result := ContainsText(ValueToString(AValue), ValueToString(AArgs[0])); end);
-  RegisterAdvancedFilter('startswith', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
-    begin Result := StartsText(ValueToString(AArgs[0]), ValueToString(AValue)); end);
-  RegisterAdvancedFilter('endswith', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
-    begin Result := EndsText(ValueToString(AArgs[0]), ValueToString(AValue)); end);
+   RegisterAdvancedFilter('eq', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
+     begin 
+       if Length(AArgs) = 0 then Exit(False);
+       Result := SameText(ValueToString(AValue), ValueToString(AArgs[0])); 
+     end);
+   RegisterAdvancedFilter('ne', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
+     begin 
+       if Length(AArgs) = 0 then Exit(True);
+       Result := not SameText(ValueToString(AValue), ValueToString(AArgs[0])); 
+     end);
+   RegisterAdvancedFilter('gt', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
+     begin 
+       if Length(AArgs) = 0 then Exit(False);
+       Result := ValueToString(AValue) > ValueToString(AArgs[0]); 
+     end);
+   RegisterAdvancedFilter('ge', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
+     begin 
+       if Length(AArgs) = 0 then Exit(False);
+       Result := ValueToString(AValue) >= ValueToString(AArgs[0]); 
+     end);
+   RegisterAdvancedFilter('lt', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
+     begin 
+       if Length(AArgs) = 0 then Exit(False);
+       Result := ValueToString(AValue) < ValueToString(AArgs[0]); 
+     end);
+   RegisterAdvancedFilter('le', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
+     begin 
+       if Length(AArgs) = 0 then Exit(False);
+       Result := ValueToString(AValue) <= ValueToString(AArgs[0]); 
+     end);
+   RegisterAdvancedFilter('contains', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
+     begin 
+       if Length(AArgs) = 0 then Exit(False);
+       Result := ContainsText(ValueToString(AValue), ValueToString(AArgs[0])); 
+     end);
+   RegisterAdvancedFilter('startswith', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
+     begin 
+       if Length(AArgs) = 0 then Exit(False);
+       Result := StartsText(ValueToString(AArgs[0]), ValueToString(AValue)); 
+     end);
+   RegisterAdvancedFilter('endswith', function(const AValue: TValue; const AArgs: TArray<TValue>): TValue
+     begin 
+       if Length(AArgs) = 0 then Exit(False);
+       Result := EndsText(ValueToString(AArgs[0]), ValueToString(AValue)); 
+     end);
 end;
 
 destructor TDextTemplateEngine.Destroy;
@@ -1060,15 +1296,15 @@ begin
   if TReflection.TryUnwrapProp(AValue, LUnwrapped) then
     Exit(ValueToString(LUnwrapped));
 
-  if AValue.Kind = tkClass then
+  if (AValue.Kind = tkClass) then
   begin
-    if AValue.AsObject = nil then
-      Exit('');
-    Exit(AValue.AsObject.ToString);
+    var LObj := AValue.AsObject;
+    if LObj = nil then Exit('');
+    Exit(LObj.ToString);
   end;
 
-  if AValue.Kind = tkInterface then
-    Exit(AValue.ToString);
+  if (AValue.Kind = tkInterface) then
+    Exit('');
 
   Result := AValue.ToString;
 end;
@@ -1089,8 +1325,8 @@ begin
   if AValue.Kind in [tkInteger, tkInt64] then
     Exit(AValue.AsInt64 <> 0);
 
-  LText := ValueToString(AValue).ToLower;
-  Result := (LText <> '') and (LText <> 'false') and (LText <> '0') and (LText <> 'null');
+  LText := ValueToString(AValue).Trim.ToLower;
+  Result := (LText <> '') and (LText <> 'false') and (LText <> '0') and (LText <> 'null') and (LText <> 'no');
 end;
 
 function TDextTemplateEngine.ResolveRootValue(const ARoot: string; const AContext: ITemplateContext): TValue;
@@ -1101,8 +1337,18 @@ var
 begin
   Result := TValue.Empty;
 
-  if (ARoot = '@@index') or SameText(ARoot, '@@index') then
-    Exit(AContext.GetValue('index'));
+  if (ARoot = '@@index') or (ARoot = 'index') or SameText(ARoot, '@@index') or SameText(ARoot, 'index') then
+    Result := AContext.GetValue('index')
+  else if (ARoot = '@@first') or SameText(ARoot, '@@first') then
+    Result := AContext.GetValue('first')
+  else if (ARoot = '@@last') or SameText(ARoot, '@@last') then
+    Result := AContext.GetValue('last')
+  else if (ARoot = '@@odd') or SameText(ARoot, '@@odd') then
+    Result := AContext.GetValue('odd')
+  else if (ARoot = '@@even') or SameText(ARoot, '@@even') then
+    Result := AContext.GetValue('even');
+
+  if not Result.IsEmpty then Exit;
   if SameText(ARoot, '@@first') then
     Exit(AContext.GetValue('first'));
   if SameText(ARoot, '@@last') then
@@ -1141,41 +1387,15 @@ begin
   Result := ResolveRootValue(System.SysUtils.Trim(LParts[0]), AContext);
   for I := 1 to High(LParts) do
   begin
-    Result := ResolveMemberValue(Result, LParts[I]);
+    var LPart := System.SysUtils.Trim(LParts[I]);
+    Result := ResolveMemberValue(Result, LPart, AContext);
+    
     if Result.IsEmpty then
       Exit(TValue.Empty);
   end;
 end;
 
-function TDextTemplateEngine.ResolveObjectValue(AObj: TObject; const APropPath: string): TValue;
-var
-  LParts: TArray<string>;
-  LCurrent: TValue;
-  LPath: string;
-begin
-  Result := TValue.From<TObject>(AObj);
-  if (AObj = nil) or (APropPath = '') then
-    Exit(Result);
-
-  LParts := SplitTopLevel(APropPath, '.');
-  LCurrent := TValue.From<TObject>(AObj);
-
-  for LPath in LParts do
-  begin
-    LCurrent := ResolveMemberValue(LCurrent, LPath);
-    if LCurrent.IsEmpty then
-      Exit(TValue.Empty);
-  end;
-
-  Result := LCurrent;
-end;
-
-function TDextTemplateEngine.ResolveObjectProperty(AObj: TObject; const APropPath: string): string;
-begin
-  Result := ValueToString(ResolveObjectValue(AObj, APropPath));
-end;
-
-function TDextTemplateEngine.ResolveMemberValue(const AValue: TValue; const APath: string): TValue;
+function TDextTemplateEngine.ResolveMemberValue(const AValue: TValue; const APath: string; const AContext: ITemplateContext): TValue;
 var
   LWorking: TValue;
   LMeta: TTypeMetadata;
@@ -1184,6 +1404,11 @@ var
   LObject: TObject;
 begin
   Result := TValue.Empty;
+  LName := System.SysUtils.Trim(APath);
+
+  if StartsText('@@', LName) then
+    Exit(ResolveRootValue(LName, AContext));
+
   LWorking := AValue;
 
   if TReflection.TryUnwrapProp(LWorking, Result) then
@@ -1192,17 +1417,54 @@ begin
   if LWorking.IsEmpty then
     Exit(TValue.Empty);
 
-  LName := System.SysUtils.Trim(APath);
+  // Check if it's a filter call (fallback or dot-syntax)
+  var LCheckName := LName;
+  var LArgs: TArray<TValue> := [];
+  var LParenPos := LName.IndexOf('(');
+  if LParenPos >= 0 then
+  begin
+      LCheckName := LName.Substring(0, LParenPos);
+      var LArgsStr := LName.Substring(LParenPos + 1, LName.Length - LParenPos - 2);
+      if LArgsStr <> '' then
+        LArgs := ParseFilterArguments(LArgsStr, AContext);
+  end;
 
+  if FAdvancedFilters.ContainsKey(LCheckName) or FFilters.ContainsKey(LCheckName) then
+    Exit(ApplyAdvancedFilter(LCheckName, LWorking, LArgs));
+
+  // Try standard member resolution (Property or Field)
   if LWorking.Kind = tkClass then
   begin
     LObject := LWorking.AsObject;
     if Assigned(LObject) then
     begin
-      LMeta := TReflection.GetMetadata(LObject.ClassInfo);
-      LHandler := LMeta.GetHandler(LName);
-      if Assigned(LHandler) then
-        Exit(LHandler.GetValue(Pointer(LObject)));
+      if LObject is TDataSet then
+      begin
+        var LDataSetField := TDataSet(LObject).FindField(LCheckName);
+        if LDataSetField <> nil then
+          Exit(TValue.FromVariant(LDataSetField.Value));
+      end;
+      
+      var LContext := TRttiContext.Create;
+      var LRttiType := LContext.GetType(LObject.ClassType);
+      if LRttiType <> nil then
+      begin
+        // Try Method invocation
+        var LMethod := LRttiType.GetMethod(LCheckName);
+        if LMethod <> nil then
+           Exit(LMethod.Invoke(LObject, LArgs));
+           
+        // Try Property
+        var LProp := LRttiType.GetProperty(LCheckName);
+        if LProp <> nil then
+           Exit(LProp.GetValue(LObject));
+           
+        // Try Field
+        var LRttiField := LRttiType.GetField(LCheckName);
+        if LRttiField = nil then LRttiField := LRttiType.GetField('F' + LCheckName);
+        if LRttiField <> nil then
+           Exit(LRttiField.GetValue(LObject));
+      end;
     end;
   end;
 
@@ -1216,13 +1478,28 @@ begin
 
   if LWorking.Kind = tkInterface then
   begin
-    var LIntfObj := TObject(LWorking.AsInterface);
-    if Assigned(LIntfObj) then
+    LMeta := TReflection.GetMetadata(LWorking.TypeInfo);
+    LHandler := LMeta.GetHandler(LName);
+    if Assigned(LHandler) then
+      Exit(LHandler.GetValue(LWorking.GetReferenceToRawData));
+  end;
+
+  // Check if it's an indexed property
+  if (LName.Length > 2) and LName.EndsWith(']') then
+  begin
+    var LBPos := LName.LastIndexOf('[');
+    if LBPos > 0 then
     begin
-      LMeta := TReflection.GetMetadata(LIntfObj.ClassInfo);
-      LHandler := LMeta.GetHandler(LName);
-      if Assigned(LHandler) then
-        Exit(LHandler.GetValue(Pointer(LIntfObj)));
+        var LIndexStr := LName.Substring(LBPos + 1, LName.Length - LBPos - 2);
+        // Special case for TDataSet fields/indexed
+        if (LWorking.Kind = tkClass) and (not LWorking.IsEmpty) and (LWorking.AsObject is TDataSet) then
+        begin
+           var LField := TDataSet(LWorking.AsObject).FindField(LIndexStr);
+           if LField <> nil then Exit(TValue.FromVariant(LField.Value));
+        end;
+        // Generic GetValue handles some indexed props
+        if LWorking.Kind = tkClass then
+           Exit(TReflection.GetValue(LWorking.AsObject, LName)); 
     end;
   end;
 
@@ -1263,9 +1540,9 @@ begin
         Continue;
       end;
 
-      if AText[I] = '(' then
+      if (AText[I] = '(') or (AText[I] = '[') then
         Inc(LDepth)
-      else if AText[I] = ')' then
+      else if (AText[I] = ')') or (AText[I] = ']') then
         Dec(LDepth)
       else if (AText[I] = ASeparator) and (LDepth = 0) then
       begin
@@ -1285,13 +1562,15 @@ var
   LParts: TArray<string>;
   I: Integer;
   LIsRaw: Boolean;
+  LIsEncoded: Boolean;
 begin
   LParts := SplitTopLevel(AText, ',');
   SetLength(Result, Length(LParts));
   for I := 0 to High(LParts) do
   begin
     LIsRaw := False;
-    Result[I] := ResolveValue(LParts[I], AContext, LIsRaw);
+    LIsEncoded := False;
+    Result[I] := ResolveValue(LParts[I], AContext, LIsRaw, LIsEncoded);
   end;
 end;
 
@@ -1382,14 +1661,27 @@ begin
   end;
 end;
 
-function TDextTemplateEngine.ExecuteInlineFunction(const AName: string; const AArgs: TArray<TValue>): TValue;
+function TDextTemplateEngine.ExecuteInlineFunction(const AName: string; const AArgs: TArray<TValue>; const AContext: ITemplateContext): TValue;
 var
   LName: string;
   LNum1, LNum2: Double;
   LInt: Integer;
   LText: string;
+  LBase: TValue;
+  LParts: TArray<string>;
+  LMethodName: string;
 begin
-  LName := LowerCase(System.SysUtils.Trim(AName));
+  LName := System.SysUtils.Trim(AName);
+
+  if LName.Contains('.') then
+  begin
+    LParts := SplitTopLevel(LName, '.');
+    LMethodName := LParts[High(LParts)];
+    LBase := ResolvePathValue(string.Join('.', Copy(LParts, 0, Length(LParts) - 1)), AContext);
+    Exit(ApplyAdvancedFilter(LMethodName, LBase, AArgs));
+  end;
+
+  LName := LowerCase(LName);
 
   if LName = 'length' then
     Exit(Length(ValueToString(AArgs[0])));
@@ -1416,7 +1708,7 @@ begin
       LInt := StrToIntDef(ValueToString(AArgs[1]), 0)
     else
       LInt := 0;
-    Exit(SimpleRoundTo(LNum1, -LInt));
+    Exit(System.Math.SimpleRoundTo(LNum1, -LInt));
   end;
   if LName = 'min' then
   begin
@@ -1457,7 +1749,7 @@ var
 
   procedure SkipSpaces;
   begin
-    while (P <= Length(S)) and TCharacter.IsWhiteSpace(S[P]) do
+    while (P <= Length(S)) and S[P].IsWhiteSpace do
       Inc(P);
   end;
 
@@ -1554,7 +1846,7 @@ var
         end;
         if (P <= Length(S)) and (S[P] = ')') then
           Inc(P);
-        Result := ExecuteInlineFunction(LName, LArgs.ToArray);
+        Result := ExecuteInlineFunction(LName, LArgs.ToArray, AContext);
       finally
         LArgs.Free;
       end;
@@ -1704,7 +1996,7 @@ begin
   Result := ParseExpression;
 end;
 
-function TDextTemplateEngine.ResolveValue(const AExpr: string; const AContext: ITemplateContext; out AIsRaw: Boolean): TValue;
+function TDextTemplateEngine.ResolveValue(const AExpr: string; const AContext: ITemplateContext; out AIsRaw, AIsEncoded: Boolean): TValue;
 var
   LExpr: string;
   LParts: TArray<string>;
@@ -1718,9 +2010,21 @@ var
   LLegacyFilter: System.SysUtils.TFunc<string, string>;
 begin
   AIsRaw := False;
+  AIsEncoded := False;
   LExpr := System.SysUtils.Trim(AExpr);
   if LExpr = '' then
     Exit(TValue.Empty);
+
+  if StartsText('raw(', LExpr) and LExpr.EndsWith(')') then
+  begin
+    AIsRaw := True;
+    LExpr := Copy(LExpr, 5, Length(LExpr) - 5);
+  end
+  else if StartsText('encoded(', LExpr) and LExpr.EndsWith(')') then
+  begin
+    AIsEncoded := True;
+    LExpr := Copy(LExpr, 9, Length(LExpr) - 9);
+  end;
 
   if StartsText('@', LExpr) and (not StartsText('@@', LExpr)) then
     LExpr := Copy(LExpr, 2, MaxInt);
@@ -1739,19 +2043,17 @@ begin
   if TryStrToFloat(LExpr, LFloat, TFormatSettings.Invariant) then
     Exit(LFloat);
 
-  LParenPos := System.Pos('(', LExpr);
-  if (LParenPos > 1) and (System.Pos('.', LExpr) = 0) and EndsText(')', LExpr) then
+  if HasTopLevelOperator(LExpr) or (System.Pos('(', LExpr) > 0) then
     Exit(EvaluateInlineExpression(LExpr, AContext));
 
-  if HasTopLevelOperator(LExpr) then
-    Exit(EvaluateInlineExpression(LExpr, AContext));
-
-  LParts := SplitTopLevel(LExpr, '.');
+  LParts := SplitTopLevel(LExpr, '|');
   if Length(LParts) = 0 then
     Exit(TValue.Empty);
-
+ 
+  // Resolve the first part as a property path
   LCurrent := ResolvePathValue(System.SysUtils.Trim(LParts[0]), AContext);
-
+ 
+  // Apply subsequent parts as filters
   for I := 1 to High(LParts) do
   begin
     LFilterName := System.SysUtils.Trim(LParts[I]);
@@ -1764,7 +2066,9 @@ begin
         LArgsText := Copy(LArgsText, 1, Length(LArgsText) - 1);
       LArgs := ParseFilterArguments(LArgsText, AContext);
       if SameText(LFilterName, 'raw') then
-        AIsRaw := True;
+        AIsRaw := True
+      else if SameText(LFilterName, 'encoded') then
+        AIsEncoded := True;
       LCurrent := ApplyAdvancedFilter(LFilterName, LCurrent, LArgs);
     end
     else
@@ -1772,30 +2076,20 @@ begin
       if FAdvancedFilters.TryGetValue(LFilterName, LHasAdvanced) or FFilters.TryGetValue(LFilterName, LLegacyFilter) then
         LCurrent := ApplyAdvancedFilter(LFilterName, LCurrent, [])
       else
-        LCurrent := ResolveMemberValue(LCurrent, LFilterName);
+        LCurrent := ResolveMemberValue(LCurrent, LFilterName, AContext);
     end;
   end;
-
+ 
   Result := LCurrent;
 end;
 
-function TDextTemplateEngine.ResolveExpression(const AExpr: string; const AContext: ITemplateContext): string;
-var
-  LIsRaw: Boolean;
-begin
-  Result := ValueToString(ResolveValue(AExpr, AContext, LIsRaw));
-end;
 
-function TDextTemplateEngine.EvaluateCondition(const ACond: string; const AContext: ITemplateContext): Boolean;
-var
-  LIsRaw: Boolean;
-begin
-  Result := ValueToBoolean(ResolveValue(ACond, AContext, LIsRaw));
-end;
 
 procedure TDextTemplateEngine.SkipWhitespace(const AText: string; var APos: Integer);
 begin
-  while (APos <= Length(AText)) and TCharacter.IsWhiteSpace(AText[APos]) do
+  // This version is used in non-parsing contexts (like layout reading)
+  // which don't track pos. I'll add an overload or just ignore pos here.
+  while (APos <= Length(AText)) and CharInSet(AText[APos], [' ', #9, #13, #10]) do
     Inc(APos);
 end;
 
@@ -1848,14 +2142,57 @@ var
 begin
   LEndPos := Pos(AEndMarker, AText, APos);
   if LEndPos = 0 then
-    raise EInvalidOpException.CreateFmt('Missing closing marker %s', [AEndMarker]);
+  begin
+    var LLine := 1;
+    var LCol := 1;
+    for var I := 1 to APos - 1 do
+      if AText[I] = #10 then begin Inc(LLine); LCol := 1; end else Inc(LCol);
+    raise ETemplateException.Create('Missing closing marker ' + AEndMarker,
+      TSourcePos.Create(LLine, LCol), GetTemplateSnippet(AText, APos));
+  end;
   Result := Copy(AText, APos, LEndPos - APos);
   APos := LEndPos + Length(AEndMarker);
+end;
+
+function TDextTemplateEngine.GetTemplateSnippet(const ATemplate: string; APos: Integer): string;
+var
+  LStart, LEnd: Integer;
+begin
+  LStart := Max(1, APos - 20);
+  LEnd := Min(Length(ATemplate), APos + 20);
+  Result := Copy(ATemplate, LStart, LEnd - LStart + 1);
+  if LStart > 1 then Result := '...' + Result;
+  if LEnd < Length(ATemplate) then Result := Result + '...';
 end;
 
 function TDextTemplateEngine.Parse(const ATemplate: string): TTemplateNodeList;
 var
   LPos: Integer;
+  LCurrentLine, LCurrentCol: Integer;
+  ATrimNext: Boolean;
+
+  procedure UpdatePos(AOldPos, ANewPos: Integer);
+  var I: Integer;
+  begin
+    for I := AOldPos to ANewPos - 1 do
+    begin
+      if (I >= 1) and (I <= Length(ATemplate)) then
+      begin
+        if ATemplate[I] = #10 then
+        begin
+          Inc(LCurrentLine);
+          LCurrentCol := 1;
+        end
+        else
+          Inc(LCurrentCol);
+      end;
+    end;
+  end;
+
+  function GetCurrentPos: TSourcePos;
+  begin
+    Result := TSourcePos.Create(LCurrentLine, LCurrentCol);
+  end;
 
   procedure TrimTrailingWhitespaceFromLastText(ATarget: TTemplateNodeList);
   var
@@ -1868,22 +2205,26 @@ var
       TTextNode(LNode).FText := System.SysUtils.TrimRight(TTextNode(LNode).FText);
   end;
 
-  procedure ConsumeTrimRight(const AText: string; var ACurrentPos: Integer);
+  function ConsumeTrimRight(const AText: string; var ACurrentPos: Integer): Boolean;
+  var LOldPos: Integer;
   begin
+    Result := False;
     if (ACurrentPos <= Length(AText)) and (AText[ACurrentPos] = '~') then
     begin
+      Result := True;
+      LOldPos := ACurrentPos;
       Inc(ACurrentPos);
       while (ACurrentPos <= Length(AText)) and CharInSet(AText[ACurrentPos], [' ', #9, #13, #10]) do
         Inc(ACurrentPos);
+      UpdatePos(LOldPos, ACurrentPos);
     end;
   end;
 
-  procedure ParseBlock(ATarget: TTemplateNodeList; const AEndMarkers: TArray<string>);
+  procedure ParseBlock(ATarget: TTemplateNodeList; const AEndMarkers: TArray<string>; const ABeginPos: TSourcePos; var ATrimNext: Boolean);
   var
-    LNextAt, LTextStart: Integer;
+    LNextAt: Integer;
     LMarker: string;
-    LFoundMarker: Boolean;
-    LContent, LCallName, LCallArgs: string;
+    LContent: string;
     LNode: TConditionalNode;
     LLoopNode: TLoopNode;
     LSwitchNode: TSwitchNode;
@@ -1892,17 +2233,49 @@ var
     LParts: TArray<string>;
     LRequired: Boolean;
     LEqPos: Integer;
-    LStartPos: Integer;
+    LOldPos: Integer;
     LTrimLeft: Boolean;
+    LCallName: string;
+    LCallArgs: string;
+    LTextStart: Integer;
+    LDirectivePos: TSourcePos;
+    LNext: Integer;
+    LMatchName: string;
+
+    function MatchCommand(const ACommand: string; AConsume: Boolean; ABoundaryCheck: Boolean = True): Boolean;
+    var
+      LNextChar: Char;
+    begin
+      Result := SameText(Copy(ATemplate, LPos, Length(ACommand)), ACommand);
+      if Result then
+      begin
+        if ABoundaryCheck and (LPos + Length(ACommand) <= Length(ATemplate)) then
+        begin
+          LNextChar := ATemplate[LPos + Length(ACommand)];
+          if LNextChar.IsLetterOrDigit or (LNextChar = '_') then
+          begin
+            Result := False;
+            Exit;
+          end;
+        end;
+
+        if AConsume then
+        begin
+          LOldPos := LPos;
+          Inc(LPos, Length(ACommand));
+          UpdatePos(LOldPos, LPos);
+        end;
+      end;
+    end;
+
   begin
     while LPos <= Length(ATemplate) do
     begin
-      LFoundMarker := False;
       for LMarker in AEndMarkers do
       begin
-        if StartsText('@' + LMarker, Copy(ATemplate, LPos, Length(LMarker) + 1)) then
+        // Boundary check is false for markers to allow @elseText
+        if MatchCommand('@' + LMarker, False, False) then
         begin
-          LFoundMarker := True;
           Exit;
         end;
       end;
@@ -1910,106 +2283,204 @@ var
       LNextAt := Pos('@', ATemplate, LPos);
       if LNextAt = 0 then
       begin
-        ATarget.Add(TTextNode.Create(Self, Copy(ATemplate, LPos, MaxInt)));
-        LPos := Length(ATemplate) + 1;
+        if LPos <= Length(ATemplate) then
+        begin
+          LContent := Copy(ATemplate, LPos, MaxInt);
+          if ATrimNext then
+            LContent := System.SysUtils.TrimLeft(LContent);
+          ATarget.Add(TTextNode.CreateAt(Self, GetCurrentPos, LContent));
+          UpdatePos(LPos, Length(ATemplate) + 1);
+          LPos := Length(ATemplate) + 1;
+        end;
+        
+        if Length(AEndMarkers) > 0 then
+        begin
+          var LExpectedList := string.Join(' or @', AEndMarkers);
+          raise ETemplateException.Create('Missing closing marker @' + LExpectedList, ABeginPos);
+        end;
         Exit;
       end;
 
-      if LNextAt > LPos then
-        ATarget.Add(TTextNode.Create(Self, Copy(ATemplate, LPos, LNextAt - LPos)));
+      if (LNextAt > LPos) then
+      begin
+        LContent := Copy(ATemplate, LPos, LNextAt - LPos);
+        if ATrimNext then
+        begin
+          LContent := System.SysUtils.TrimLeft(LContent);
+          ATrimNext := False;
+        end;
+        ATarget.Add(TTextNode.CreateAt(Self, GetCurrentPos, LContent));
+        UpdatePos(LPos, LNextAt);
+        LPos := LNextAt;
+        Continue; 
+      end;
 
-      LPos := LNextAt + 1;
+      LOldPos := LPos;
+      LDirectivePos := GetCurrentPos;
+      LPos := LNextAt; 
+      UpdatePos(LOldPos, LPos);
+
+      // Now LPos is at @
+      if (LPos <= Length(ATemplate)) and (ATemplate[LPos] = '@') then
+      begin
+        if (ATemplate[LPos] = '@') and (LPos < Length(ATemplate)) and (ATemplate[LPos+1] = '@') then
+        begin
+          LNext := LPos + 2;
+          LMatchName := '';
+          while (LNext <= Length(ATemplate)) and CharInSet(ATemplate[LNext], ['a'..'z', 'A'..'Z']) do
+          begin
+            LMatchName := LMatchName + ATemplate[LNext];
+            Inc(LNext);
+          end;
+
+          if not (SameText(LMatchName, 'index') or SameText(LMatchName, 'count') or
+                  SameText(LMatchName, 'first') or SameText(LMatchName, 'last') or
+                  SameText(LMatchName, 'odd') or SameText(LMatchName, 'even')) then
+          begin
+            ATarget.Add(TTextNode.CreateAt(Self, GetCurrentPos, '@'));
+            Inc(LPos, 2);
+            Continue;
+          end;
+        end;
+        Inc(LPos); // Skip @
+      if (LPos <= Length(ATemplate)) and (ATemplate[LPos] = '~') then
+      begin
+        if (ATarget.Count > 0) and (ATarget.Last is TTextNode) then
+          TTextNode(ATarget.Last).FText := System.SysUtils.TrimRight(TTextNode(ATarget.Last).FText);
+        Inc(LPos);
+      end;
+        UpdatePos(LPos - 1, LPos);
+      end;
+
       LTrimLeft := False;
       if (LPos <= Length(ATemplate)) and (ATemplate[LPos] = '~') then
       begin
         LTrimLeft := True;
+        LOldPos := LPos;
         Inc(LPos);
+        UpdatePos(LOldPos, LPos);
       end;
       if LTrimLeft then
         TrimTrailingWhitespaceFromLastText(ATarget);
 
       if (LPos <= Length(ATemplate)) and (ATemplate[LPos] = '@') then
       begin
-        ATarget.Add(TTextNode.Create(Self, '@'));
+        ATarget.Add(TTextNode.CreateAt(Self, GetCurrentPos, '@'));
+        LOldPos := LPos;
         Inc(LPos);
+        UpdatePos(LOldPos, LPos);
         Continue;
       end;
 
       if (LPos <= Length(ATemplate)) and (ATemplate[LPos] = '*') then
       begin
+        LOldPos := LPos;
         Inc(LPos);
-        CaptureUntil(ATemplate, LPos, '*@');
-        ConsumeTrimRight(ATemplate, LPos);
+        UpdatePos(LOldPos, LPos);
+        LContent := CaptureUntil(ATemplate, LPos, '*@');
+        UpdatePos(LOldPos + 1, LPos);
         Continue;
       end;
 
-      if StartsText('if', Copy(ATemplate, LPos, 2)) then
+      if MatchCommand('if', True) then
       begin
-        Inc(LPos, 2);
         SkipWhitespace(ATemplate, LPos);
+        LOldPos := LPos;
         LContent := ReadBalanced(ATemplate, LPos, '(', ')');
-        SkipWhitespace(ATemplate, LPos);
-        LNode := TConditionalNode.Create(Self, LContent);
+        UpdatePos(LOldPos, LPos);
+        LNode := TConditionalNode.CreateAt(Self, LDirectivePos, LContent);
         ATarget.Add(LNode);
-        ParseBlock(LNode.TrueNodes, ['else', 'endif']);
-        if StartsText('@else', Copy(ATemplate, LPos, 5)) then
+        ParseBlock(LNode.TrueNodes, ['else', 'endif'], LDirectivePos, ATrimNext);
+        if MatchCommand('@else', True, False) then
         begin
-          Inc(LPos, 5);
-          ConsumeTrimRight(ATemplate, LPos);
+          ATrimNext := ConsumeTrimRight(ATemplate, LPos);
           SkipLineBreak(ATemplate, LPos);
-          ParseBlock(LNode.FalseNodes, ['endif']);
+          ParseBlock(LNode.FalseNodes, ['endif'], LDirectivePos, ATrimNext);
         end;
-        if StartsText('@endif', Copy(ATemplate, LPos, 6)) then
+        if MatchCommand('@endif', True, False) then
         begin
-          Inc(LPos, 6);
-          ConsumeTrimRight(ATemplate, LPos);
+          ATrimNext := ConsumeTrimRight(ATemplate, LPos);
           SkipLineBreak(ATemplate, LPos);
         end;
-        ConsumeTrimRight(ATemplate, LPos);
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
+        Continue;
+      end;
+  
+      if MatchCommand('for', True) then
+      begin
+        SkipWhitespace(ATemplate, LPos);
+        LContent := ReadBalanced(ATemplate, LPos, '(', ')');
+        LParts := LContent.Split([';'], TStringSplitOptions.ExcludeEmpty);
+        if Length(LParts) >= 3 then
+          LLoopNode := TLoopNode.CreateAt(Self, LDirectivePos, LParts[0], LParts[1] + ';' + LParts[2])
+        else
+          raise EInvalidOpException.CreateFmt('Invalid for expression: %s', [LContent]);
+ 
+        ATarget.Add(LLoopNode);
+        SkipWhitespace(ATemplate, LPos);
+        ParseBlock(LLoopNode.Nodes, ['else', 'endfor'], LDirectivePos, ATrimNext);
+        if MatchCommand('@else', True, False) then
+        begin
+          ATrimNext := ConsumeTrimRight(ATemplate, LPos);
+          SkipLineBreak(ATemplate, LPos);
+          ParseBlock(LLoopNode.ElseNodes, ['endfor'], GetCurrentPos, ATrimNext);
+        end;
+        if MatchCommand('@endfor', True, False) then
+        begin
+          ATrimNext := ConsumeTrimRight(ATemplate, LPos);
+          SkipLineBreak(ATemplate, LPos);
+        end;
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
 
-      if StartsText('foreach', Copy(ATemplate, LPos, 7)) then
+      if MatchCommand('foreach', True) then
       begin
-        Inc(LPos, 7);
         SkipWhitespace(ATemplate, LPos);
+        LOldPos := LPos;
         LContent := ReadBalanced(ATemplate, LPos, '(', ')');
+        UpdatePos(LOldPos, LPos);
         LParts := LContent.Split([' '], TStringSplitOptions.ExcludeEmpty);
         if (Length(LParts) >= 4) and SameText(LParts[0], 'var') then
-          LLoopNode := TLoopNode.Create(Self, LParts[1], LParts[3])
+          LLoopNode := TLoopNode.CreateAt(Self, LDirectivePos, LParts[1], LParts[3])
         else if Length(LParts) >= 3 then
-          LLoopNode := TLoopNode.Create(Self, LParts[0], LParts[2])
+          LLoopNode := TLoopNode.CreateAt(Self, LDirectivePos, LParts[0], LParts[2])
         else
           raise EInvalidOpException.CreateFmt('Invalid foreach expression: %s', [LContent]);
 
         ATarget.Add(LLoopNode);
         SkipWhitespace(ATemplate, LPos);
-        ParseBlock(LLoopNode.Nodes, ['else', 'endforeach']);
-        if StartsText('@else', Copy(ATemplate, LPos, 5)) then
+        ParseBlock(LLoopNode.Nodes, ['else', 'endforeach'], LDirectivePos, ATrimNext);
+        if MatchCommand('@else', True, False) then
         begin
-          Inc(LPos, 5);
-          ConsumeTrimRight(ATemplate, LPos);
+          ATrimNext := ConsumeTrimRight(ATemplate, LPos);
           SkipLineBreak(ATemplate, LPos);
-          ParseBlock(LLoopNode.ElseNodes, ['endforeach']);
+          ParseBlock(LLoopNode.ElseNodes, ['endforeach'], GetCurrentPos, ATrimNext);
         end;
-        if StartsText('@endforeach', Copy(ATemplate, LPos, 12)) then
+        if MatchCommand('@endforeach', True, False) then
         begin
-          Inc(LPos, 12);
-          ConsumeTrimRight(ATemplate, LPos);
+          ATrimNext := ConsumeTrimRight(ATemplate, LPos);
           SkipLineBreak(ATemplate, LPos);
         end;
-        ConsumeTrimRight(ATemplate, LPos);
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
-
-      if StartsText('set', Copy(ATemplate, LPos, 3)) then
+ 
+      if MatchCommand('set', True) then
       begin
-        Inc(LPos, 3);
         SkipWhitespace(ATemplate, LPos);
-        LStartPos := LPos;
-        while (LPos <= Length(ATemplate)) and (ATemplate[LPos] <> #13) and (ATemplate[LPos] <> #10) do
-          Inc(LPos);
-        LContent := System.SysUtils.Trim(Copy(ATemplate, LStartPos, LPos - LStartPos));
+        if (LPos <= Length(ATemplate)) and (ATemplate[LPos] = '(') then
+        begin
+          LContent := ReadBalanced(ATemplate, LPos, '(', ')');
+        end
+        else
+        begin
+          LTextStart := LPos;
+          while (LPos <= Length(ATemplate)) and (ATemplate[LPos] <> #13) and (ATemplate[LPos] <> #10) do
+            Inc(LPos);
+          LContent := System.SysUtils.Trim(Copy(ATemplate, LTextStart, LPos - LTextStart));
+        end;
+ 
         LEqPos := System.Pos('=', LContent);
         if LEqPos > 0 then
         begin
@@ -2017,81 +2488,75 @@ var
           LSetExpr := System.SysUtils.Trim(Copy(LContent, LEqPos + 1, MaxInt));
           if StartsText('@', LSetExpr) then
             LSetExpr := Copy(LSetExpr, 2, MaxInt);
-          ATarget.Add(TSetNode.Create(Self, LSetName, LSetExpr));
+          ATarget.Add(TSetNode.CreateAt(Self, LDirectivePos, LSetName, LSetExpr));
         end;
         SkipLineBreak(ATemplate, LPos);
-        ConsumeTrimRight(ATemplate, LPos);
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
-
-      if StartsText('continue', Copy(ATemplate, LPos, 8)) then
+ 
+      if MatchCommand('continue', True) then
       begin
-        Inc(LPos, 8);
-        ATarget.Add(TContinueNode.Create(Self));
-        ConsumeTrimRight(ATemplate, LPos);
+        ATarget.Add(TContinueNode.CreateAt(Self, LDirectivePos));
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
-
-      if StartsText('break', Copy(ATemplate, LPos, 5)) then
+ 
+      if MatchCommand('break', True) then
       begin
-        Inc(LPos, 5);
-        ATarget.Add(TBreakNode.Create(Self));
-        ConsumeTrimRight(ATemplate, LPos);
+        ATarget.Add(TBreakNode.CreateAt(Self, LDirectivePos));
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
-
-      if StartsText('switch', Copy(ATemplate, LPos, 6)) then
+ 
+      if MatchCommand('switch', True) then
       begin
-        Inc(LPos, 6);
         SkipWhitespace(ATemplate, LPos);
+        LOldPos := LPos;
         LContent := ReadBalanced(ATemplate, LPos, '(', ')');
-        LSwitchNode := TSwitchNode.Create(Self, LContent);
+        UpdatePos(LOldPos, LPos);
+        LSwitchNode := TSwitchNode.CreateAt(Self, LDirectivePos, LContent);
         ATarget.Add(LSwitchNode);
         SkipWhitespace(ATemplate, LPos);
-
+ 
         while LPos <= Length(ATemplate) do
         begin
-          if StartsText('@endswitch', Copy(ATemplate, LPos, 10)) then
+          if MatchCommand('@endswitch', True, False) then
           begin
-            Inc(LPos, 10);
-            ConsumeTrimRight(ATemplate, LPos);
+            ATrimNext := ConsumeTrimRight(ATemplate, LPos);
             SkipLineBreak(ATemplate, LPos);
             Break;
           end;
-
-          if StartsText('@case', Copy(ATemplate, LPos, 5)) then
+ 
+          if MatchCommand('@case', True, False) then
           begin
-            Inc(LPos, 5);
             SkipWhitespace(ATemplate, LPos);
+            LOldPos := LPos;
             LContent := ReadBalanced(ATemplate, LPos, '(', ')');
+            UpdatePos(LOldPos, LPos);
             LCaseNode := TSwitchCase.Create(LContent);
             LSwitchNode.Cases.Add(LCaseNode);
             SkipWhitespace(ATemplate, LPos);
-            ParseBlock(LCaseNode.Nodes, ['case', 'default', 'endswitch']);
+            ParseBlock(LCaseNode.Nodes, ['case', 'default', 'endswitch'], LDirectivePos, ATrimNext);
             Continue;
           end;
-
-          if StartsText('@default', Copy(ATemplate, LPos, 8)) then
+ 
+          if MatchCommand('@default', True, False) then
           begin
-            Inc(LPos, 8);
-            ConsumeTrimRight(ATemplate, LPos);
+            ATrimNext := ConsumeTrimRight(ATemplate, LPos);
             SkipLineBreak(ATemplate, LPos);
-            ParseBlock(LSwitchNode.DefaultNodes, ['endswitch']);
+            ParseBlock(LSwitchNode.DefaultNodes, ['endswitch'], LDirectivePos, ATrimNext);
             Continue;
           end;
-
+ 
           Inc(LPos);
         end;
-        ConsumeTrimRight(ATemplate, LPos);
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
-
-      if StartsText('partial', Copy(ATemplate, LPos, 7)) or StartsText('include', Copy(ATemplate, LPos, 7)) then
+ 
+      if MatchCommand('partial', True) or MatchCommand('include', True) then
       begin
-        if StartsText('partial', Copy(ATemplate, LPos, 7)) then
-          Inc(LPos, 7)
-        else
-          Inc(LPos, 7);
         SkipWhitespace(ATemplate, LPos);
         LContent := ReadBalanced(ATemplate, LPos, '(', ')');
         LCallArgs := LContent;
@@ -2103,37 +2568,41 @@ var
             LCallArgs := Copy(LCallArgs, Length(LParts[0]) + 2, MaxInt)
           else
             LCallArgs := '';
-          ATarget.Add(TPartialNode.Create(Self, LCallName, LCallArgs));
+          ATarget.Add(TPartialNode.CreateAt(Self, GetCurrentPos, LCallName, LCallArgs));
         end;
-        ConsumeTrimRight(ATemplate, LPos);
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
-
+ 
       if StartsText('renderSection', Copy(ATemplate, LPos, 13)) then
       begin
+        LOldPos := LPos;
         Inc(LPos, 13);
         SkipWhitespace(ATemplate, LPos);
         LContent := ReadBalanced(ATemplate, LPos, '(', ')');
+        UpdatePos(LOldPos, LPos);
         LParts := SplitTopLevel(LContent, ',');
         LCallName := UnquoteString(LParts[0]);
         LRequired := True;
         if Length(LParts) > 1 then
           LRequired := not ContainsText(LParts[1], 'false');
-        ATarget.Add(TRenderSectionNode.Create(Self, LCallName, LRequired));
-        ConsumeTrimRight(ATemplate, LPos);
+        ATarget.Add(TRenderSectionNode.CreateAt(Self, GetCurrentPos, LCallName, LRequired));
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
-
+ 
       if StartsText('renderBody', Copy(ATemplate, LPos, 10)) then
       begin
+        LOldPos := LPos;
         Inc(LPos, 10);
-        ATarget.Add(TRenderBodyNode.Create(Self));
-        ConsumeTrimRight(ATemplate, LPos);
+        ATarget.Add(TRenderBodyNode.CreateAt(Self, GetCurrentPos));
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
-
+ 
       if (LPos <= Length(ATemplate)) and (ATemplate[LPos] = '>') then
       begin
+        LOldPos := LPos;
         Inc(LPos);
         SkipWhitespace(ATemplate, LPos);
         LTextStart := LPos;
@@ -2141,59 +2610,101 @@ var
           Inc(LPos);
         LContent := System.SysUtils.Trim(Copy(ATemplate, LTextStart, LPos - LTextStart));
         LCallArgs := ExtractCallArguments(LContent, LCallName);
-        ATarget.Add(TMacroCallNode.Create(Self, LCallName, LCallArgs));
-        ConsumeTrimRight(ATemplate, LPos);
+        ATarget.Add(TMacroCallNode.CreateAt(Self, GetCurrentPos, LCallName, LCallArgs));
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
-
+ 
       if StartsText('raw', Copy(ATemplate, LPos, 3)) then
       begin
         Inc(LPos, 3);
         SkipWhitespace(ATemplate, LPos);
         if (LPos <= Length(ATemplate)) and (ATemplate[LPos] = '(') then
         begin
+          LOldPos := LPos;
           LContent := ReadBalanced(ATemplate, LPos, '(', ')');
-          ATarget.Add(TExpressionNode.Create(Self, LContent, True));
+          UpdatePos(LOldPos, LPos);
+          ATarget.Add(TExpressionNode.CreateAt(Self, GetCurrentPos, LContent, True));
         end
         else
         begin
           SkipLineBreak(ATemplate, LPos);
+          LOldPos := LPos;
           LContent := CaptureUntil(ATemplate, LPos, '@endraw');
-          ATarget.Add(TTextNode.Create(Self, LContent));
-          ConsumeTrimRight(ATemplate, LPos);
+          UpdatePos(LOldPos, LPos);
+          ATarget.Add(TTextNode.CreateAt(Self, GetCurrentPos, LContent));
+          ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         end;
-        ConsumeTrimRight(ATemplate, LPos);
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
-
+ 
       if (LPos <= Length(ATemplate)) and (ATemplate[LPos] = '(') then
       begin
+        LOldPos := LPos;
         LContent := ReadBalanced(ATemplate, LPos, '(', ')');
-        ATarget.Add(TExpressionNode.Create(Self, LContent, False));
-        ConsumeTrimRight(ATemplate, LPos);
+        UpdatePos(LOldPos, LPos);
+        ATarget.Add(TExpressionNode.CreateAt(Self, GetCurrentPos, LContent, False));
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
         Continue;
       end;
 
-      LTextStart := LPos;
-      while (LPos <= Length(ATemplate)) and
-            not CharInSet(ATemplate[LPos], [#13, #10, ' ', '@', '<', '>', '/', '\', '[', ']', ';', ':', ',', '=', '+', '-', '*', '!', '?']) do
+      LOldPos := LPos;
+      while (LPos <= Length(ATemplate)) do
       begin
-        if ATemplate[LPos] = '(' then
-          ReadBalanced(ATemplate, LPos, '(', ')')
-        else
-          Inc(LPos);
+        var LChar := ATemplate[LPos];
+        // Stop at delimiters
+        if CharInSet(LChar, [#13, #10, ' ', '<', '>', '/', '\', ';', ':', ',', '=', '+', '-', '*', '!', '?', '|', '~']) then
+           Break;
+
+        if (LChar = '(') then
+        begin
+             // Peek next to see if it's a nested directive starting with @ (but not @@pseudo)
+             if (LPos + 1 <= Length(ATemplate)) and (ATemplate[LPos+1] = '@') then
+             begin
+                  if (LPos + 2 > Length(ATemplate)) or (ATemplate[LPos+2] <> '@') then
+                    Break; // It's a directive, stop here
+             end;
+             
+             ReadBalanced(ATemplate, LPos, '(', ')');
+             Continue;
+        end;
+        if (LChar = '[') then
+        begin
+             ReadBalanced(ATemplate, LPos, '[', ']');
+             Continue;
+        end;
+        
+        Inc(LPos);
       end;
 
-      LContent := Copy(ATemplate, LTextStart, LPos - LTextStart);
-      ATarget.Add(TExpressionNode.Create(Self, LContent, False));
-      ConsumeTrimRight(ATemplate, LPos);
+      LContent := Copy(ATemplate, LOldPos, LPos - LOldPos);
+      UpdatePos(LOldPos, LPos);
+      ATarget.Add(TExpressionNode.CreateAt(Self, GetCurrentPos, LContent, False));
+      
+      // Handle trailing whitespace control ~
+      if (LPos <= Length(ATemplate)) and (ATemplate[LPos] = '~') then
+      begin
+        LOldPos := LPos;
+        ATrimNext := ConsumeTrimRight(ATemplate, LPos);
+        UpdatePos(LOldPos, LPos);
+      end;
+      Continue;
     end;
   end;
 
 begin
-  Result := TTemplateNodeList.Create(True);
+  LCurrentLine := 1;
+  LCurrentCol := 1;
   LPos := 1;
-  ParseBlock(Result, []);
+  Result := TTemplateNodeList.Create(True);
+  try
+    ATrimNext := False;
+    ParseBlock(Result, [], GetCurrentPos, ATrimNext);
+  except
+    Result.Free;
+    raise;
+  end;
 end;
 
 function TDextTemplateEngine.GetOrParseTemplate(const ATemplate: string): TTemplateNodeList;
@@ -2338,7 +2849,7 @@ var
   LCandidates: TArray<string>;
   LBaseDir, LName: string;
   LPrefix: string;
-  LCandidate: string;
+  LCandName, LCandidate: string;
 begin
   if ARequestedName = '' then
     Exit('');
@@ -2361,24 +2872,30 @@ begin
   if FTemplateRoot <> '' then
   begin
     SetLength(LCandidates, Length(LCandidates) + 1);
-    LCandidates[High(LCandidates)] := TPath.Combine(FTemplateRoot, LName);
+    LCandName := TPath.Combine(FTemplateRoot, LName);
+    LCandidates[High(LCandidates)] := LCandName.Replace('/', '\'); // Normalize for memory loader keys
   end;
 
   for LPrefix in ['shared', 'components', 'layouts'] do
   begin
     SetLength(LCandidates, Length(LCandidates) + 1);
-    LCandidates[High(LCandidates)] := TPath.Combine(LPrefix, LName);
+    LCandName := TPath.Combine(LPrefix, LName);
+    LCandidates[High(LCandidates)] := LCandName.Replace('/', '\');
   end;
 
   for LCandidate in LCandidates do
   begin
-    try
-      if Assigned(FTemplateLoader) then
-      begin
-        FTemplateLoader.Load(LCandidate);
-        Exit(LCandidate);
+    for LPrefix in ['', '.html', '.dext', '.htm'] do
+    begin
+      var LFinalPath := LCandidate + LPrefix;
+      try
+        if Assigned(FTemplateLoader) then
+        begin
+          FTemplateLoader.Load(LFinalPath);
+          Exit(LFinalPath);
+        end;
+      except
       end;
-    except
     end;
   end;
 
@@ -2387,7 +2904,6 @@ end;
 
 function TDextTemplateEngine.RenderResolvedTemplate(const ATemplateName, AResolvedName: string; const AContext: ITemplateContext): string;
 var
-  LPreviousState: TRenderState;
   LDocument: TTemplateDocument;
   LRootTemplate: string;
   LCopy: TInlineTemplateDefinition;
@@ -2398,11 +2914,8 @@ var
 begin
   LDocument := ParseDocument(FTemplateLoader.Load(AResolvedName));
   try
-    LPreviousState := FCurrentState;
-    if LPreviousState = nil then
-      FCurrentState := TRenderState.Create
-    else
-      FCurrentState := LPreviousState;
+    if FCurrentState = nil then
+      raise ETemplateException.Create('RenderState not initialized for ' + ATemplateName, TSourcePos.Create(0, 0));
 
     if FCurrentState.TemplateName = '' then
       FCurrentState.TemplateName := AResolvedName;
@@ -2434,8 +2947,6 @@ begin
 
       LRootTemplate := ResolveTemplateName(AResolvedName, LDocument.LayoutName);
       Result := RenderResolvedTemplate(LDocument.LayoutName, LRootTemplate, AContext);
-      if LPreviousState = nil then
-        FreeAndNil(FCurrentState);
       Exit;
     end;
 
@@ -2453,8 +2964,6 @@ begin
     end;
 
     Result := RenderInlineTemplate(LDocument.BodyText, AContext);
-    if LPreviousState = nil then
-      FreeAndNil(FCurrentState);
   finally
     LDocument.Free;
   end;
@@ -2469,6 +2978,82 @@ begin
 
   LResolvedName := ResolveTemplateName(FCurrentState.TemplateName, ATemplateName);
   Result := RenderResolvedTemplate(ATemplateName, LResolvedName, AContext);
+end;
+
+function TDextTemplateEngine.GetIsHtmlMode: Boolean;
+begin
+  Result := FIsHtmlMode;
+end;
+
+procedure TDextTemplateEngine.SetIsHtmlMode(AValue: Boolean);
+begin
+  FIsHtmlMode := AValue;
+end;
+
+{ TSetNode }
+
+constructor TSetNode.Create(AEngine: TDextTemplateEngine; const AName, AExpression: string);
+begin
+  inherited Create(AEngine);
+  FName := AName;
+  FExpression := AExpression;
+end;
+
+constructor TSetNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AName, AExpression: string);
+begin
+  inherited CreateAt(AEngine, APos);
+  FName := AName;
+  FExpression := AExpression;
+end;
+
+function TSetNode.Render(const AContext: ITemplateContext): string;
+var
+  LIsRaw: Boolean;
+  LIsEncoded: Boolean;
+  LValue: TValue;
+begin
+  LIsRaw := False;
+  LIsEncoded := False;
+  LValue := FEngine.ResolveValue(FExpression, AContext, LIsRaw, LIsEncoded);
+  if LValue.Kind = tkClass then
+    AContext.SetObject(FName, LValue.AsObject)
+  else
+    AContext.SetValue(FName, FEngine.ValueToString(LValue));
+  Result := '';
+end;
+
+{ TContinueNode }
+
+constructor TContinueNode.Create(AEngine: TDextTemplateEngine);
+begin
+  inherited Create(AEngine);
+end;
+
+constructor TContinueNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos);
+begin
+  inherited CreateAt(AEngine, APos);
+end;
+
+function TContinueNode.Render(const AContext: ITemplateContext): string;
+begin
+  raise ETemplateLoopContinue.Create('continue');
+end;
+
+{ TBreakNode }
+
+constructor TBreakNode.Create(AEngine: TDextTemplateEngine);
+begin
+  inherited Create(AEngine);
+end;
+
+constructor TBreakNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos);
+begin
+  inherited CreateAt(AEngine, APos);
+end;
+
+function TBreakNode.Render(const AContext: ITemplateContext): string;
+begin
+  raise ETemplateLoopBreak.Create('break');
 end;
 
 function TDextTemplateEngine.Render(const ATemplate: string; const AContext: ITemplateContext): string;
@@ -2574,6 +3159,7 @@ var
   LArgs: TArray<TTemplateArgument>;
   LArg: TTemplateArgument;
   LIsRaw: Boolean;
+  LIsEncoded: Boolean;
   LValue: TValue;
 begin
   LChildContext := AContext.CreateChildScope;
@@ -2583,7 +3169,8 @@ begin
     if LArg.Name = '' then
       Continue;
     LIsRaw := False;
-    LValue := ResolveValue(LArg.Expression, AContext, LIsRaw);
+    LIsEncoded := False;
+    LValue := ResolveValue(LArg.Expression, AContext, LIsRaw, LIsEncoded);
     if LValue.Kind = tkClass then
       LChildContext.SetObject(LArg.Name, LValue.AsObject)
     else
@@ -2599,6 +3186,7 @@ var
   LArgs: TArray<string>;
   I: Integer;
   LIsRaw: Boolean;
+  LIsEncoded: Boolean;
   LValue: TValue;
 begin
   LDefinition := GetDefinition(AName);
@@ -2610,7 +3198,8 @@ begin
   for I := 0 to Min(High(LDefinition.Parameters), High(LArgs)) do
   begin
     LIsRaw := False;
-    LValue := ResolveValue(LArgs[I], AContext, LIsRaw);
+    LIsEncoded := False;
+    LValue := ResolveValue(LArgs[I], AContext, LIsRaw, LIsEncoded);
     if LValue.Kind = tkClass then
       LChildContext.SetObject(LDefinition.Parameters[I], LValue.AsObject)
     else
@@ -2629,6 +3218,13 @@ begin
   FArgumentsText := AArgumentsText;
 end;
 
+constructor TPartialNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const ATemplateName, AArgumentsText: string);
+begin
+  inherited CreateAt(AEngine, APos);
+  FTemplateName := ATemplateName;
+  FArgumentsText := AArgumentsText;
+end;
+
 function TPartialNode.Render(const AContext: ITemplateContext): string;
 begin
   Result := FEngine.RenderPartial(FTemplateName, FArgumentsText, AContext);
@@ -2643,6 +3239,13 @@ begin
   FRequired := ARequired;
 end;
 
+constructor TRenderSectionNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const ASectionName: string; ARequired: Boolean);
+begin
+  inherited CreateAt(AEngine, APos);
+  FSectionName := ASectionName;
+  FRequired := ARequired;
+end;
+
 function TRenderSectionNode.Render(const AContext: ITemplateContext): string;
 begin
   Result := FEngine.GetSectionValue(FSectionName, FRequired);
@@ -2651,6 +3254,16 @@ begin
 end;
 
 { TRenderBodyNode }
+
+constructor TRenderBodyNode.Create(AEngine: TDextTemplateEngine);
+begin
+  inherited Create(AEngine);
+end;
+
+constructor TRenderBodyNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos);
+begin
+  inherited CreateAt(AEngine, APos);
+end;
 
 function TRenderBodyNode.Render(const AContext: ITemplateContext): string;
 begin
@@ -2665,6 +3278,13 @@ end;
 constructor TMacroCallNode.Create(AEngine: TDextTemplateEngine; const AName, AArgumentsText: string);
 begin
   inherited Create(AEngine);
+  FName := AName;
+  FArgumentsText := AArgumentsText;
+end;
+
+constructor TMacroCallNode.CreateAt(AEngine: TDextTemplateEngine; const APos: TSourcePos; const AName, AArgumentsText: string);
+begin
+  inherited CreateAt(AEngine, APos);
   FName := AName;
   FArgumentsText := AArgumentsText;
 end;

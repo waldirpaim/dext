@@ -1,9 +1,12 @@
 ﻿program Dext.Templating.UnitTests;
 
-{$APPTYPE CONSOLE}
+{$IFNDEF TESTINSIGHT}
+  {$APPTYPE CONSOLE}
+{$ENDIF}
 
 uses
   Dext.MM,
+  Dext.Core.Debug,
   System.SysUtils,
   Dext.Testing.Runner,
   Dext.Testing.Attributes,
@@ -20,7 +23,10 @@ begin
     SafeWriteLn;
 
     RunTests(ConfigureTests
-      .VeryVerbose
+      .Verbose
+      {$IFDEF TESTINSIGHT}
+      .UseTestInsight
+      {$ENDIF}
       .RegisterFixtures([
         TTemplatingTests
       ]));

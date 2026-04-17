@@ -6,8 +6,7 @@ uses
   Dext.Testing,
   Dext.Templating,
   Dext.Scaffolding.Models,
-  System.SysUtils,
-  System.Generics.Collections;
+  System.SysUtils;
 
 type
   [TestFixture]
@@ -17,33 +16,44 @@ type
     [Test] procedure Test_Nested_Property_Resolution;
     [Test] procedure Test_Conditional_IF_True;
     [Test] procedure Test_Conditional_IF_False;
-    [Test] procedure Test_Conditional_With_Else;
-    [Test] procedure Test_Loop_ForEach;
-    [Test] procedure Test_Loop_With_Else_And_Pseudo_Variables;
     [Test] procedure Test_Filters_PascalCase;
     [Test] procedure Test_Filters_CamelCase;
     [Test] procedure Test_Advanced_Filters_With_Params;
     [Test] procedure Test_Comparison_Filters_In_If;
     [Test] procedure Test_Escaping;
     [Test] procedure Test_Html_Escaping;
-    [Test] procedure Test_Nested_Control_Flow;
-    [Test] procedure Test_Whitespace_Handling;
-    [Test] procedure Test_Nested_Loops;
+
     [Test] procedure Test_Complex_Path_Resolution;
     [Test] procedure Test_Filters_SnakeCase;
     [Test] procedure Test_Filters_Pluralize;
     [Test] procedure Test_Filters_Singularize;
     [Test] procedure Test_Chained_Filters;
-    [Test] procedure Test_Render_Template_With_Layout_Sections_And_Partial;
     [Test] procedure Test_Inline_Define_And_Macro_Call;
-    [Test] procedure Test_Set_And_Inline_Expression;
+    [Test] procedure Test_Raw_Block_Literal_Output;
+    [Test] procedure Test_Encoded_Directive;
+///
+    [Test] procedure Test_Nested_Control_Flow;
+    [Test] procedure Test_Whitespace_Handling;
+    [Test] procedure Test_Nested_Loops;
     [Test] procedure Test_Continue_And_Break_In_Loop;
     [Test] procedure Test_Switch_Case_Default;
-    [Test] procedure Test_Raw_Block_Literal_Output;
+    [Test] procedure Test_Render_Template_With_Layout_Sections_And_Partial;
+///
+    [Test] procedure Test_Conditional_With_Else;
+    [Test] procedure Test_Loop_ForEach;
+    [Test] procedure Test_Loop_With_Else_And_Pseudo_Variables;
+    [Test] procedure Test_Set_And_Inline_Expression;
     [Test] procedure Test_Whitespace_Control_With_Tilde;
+    [Test] procedure Test_Error_Reporting_Position;
+
+    // TODO : Fix Memory Leaks
+    [Test] procedure Test_Loop_TDataSet;
   end;
 
 implementation
+
+uses
+  Data.DB, Datasnap.DBClient;
 
 { TTemplatingTests }
 
@@ -270,9 +280,9 @@ begin
   Context.SetValue('EmptyName', '');
   Context.SetValue('Bio', 'abcdefghijklmnopqrstuvwxyz');
 
-  Should(Engine.Render('@Name.trim().uppercase()', Context)).Be('USER PROFILE');
   Should(Engine.Render('@EmptyName.default(''N/A'')', Context)).Be('N/A');
   Should(Engine.Render('@Bio.truncate(5, ''~'')', Context)).Be('abcde~');
+  Should(Engine.Render('@Name.trim().uppercase()', Context)).Be('USER PROFILE');
 end;
 
 procedure TTemplatingTests.Test_Comparison_Filters_In_If;
@@ -696,7 +706,81 @@ begin
   Should(Output).Be('A' + 'B' + 'C');
 end;
 
-initialization
-  TTestRunner.RegisterFixture(TTemplatingTests);
+procedure TTemplatingTests.Test_Error_Reporting_Position;
+var
+  Engine: ITemplateEngine;
+begin
+  Engine := TTemplating.CreateEngine;
+  try
+    Engine.Render('@if(test) missing endif', TTemplating.CreateContext);
+    Assert.Fail('Should have raised ETemplateException');
+  except
+    on E: ETemplateException do
+    begin
+      Should(E.Pos.Line).Be(1);
+      Should(E.Pos.Col).Be(1); // Pointer to where @if starts
+      Should(E.Message).Contain('Missing closing marker @endif');
+    end;
+    on E: Exception do Assert.Fail('Expected ETemplateException but got ' + E.ClassName);
+  end;
+end;
+
+procedure TTemplatingTests.Test_Encoded_Directive;
+var
+  Engine: ITemplateEngine;
+  Context: ITemplateContext;
+  Output: string;
+begin
+  Engine := TTemplating.CreateEngine;
+  Engine.IsHtmlMode := False; // Disable default escaping
+  Context := TTemplating.CreateContext;
+  Context.SetValue('Name', '<b>Cezar</b>');
+
+  Output := Engine.Render('@Name', Context);
+  Should(Output).Be('<b>Cezar</b>');
+
+  Output := Engine.Render('@encoded(Name)', Context);
+  Should(Output).Be('&lt;b&gt;Cezar&lt;/b&gt;');
+end;
+
+procedure TTemplatingTests.Test_Loop_TDataSet;
+var
+  Context: ITemplateContext;
+  DataSet: TClientDataSet;
+  Engine: ITemplateEngine;
+  Output: string;
+begin
+  Engine := TTemplating.CreateEngine;
+  Context := TTemplating.CreateContext;
+  
+  DataSet := TClientDataSet.Create(nil);
+  try
+    DataSet.FieldDefs.Add('ID', ftInteger);
+    DataSet.FieldDefs.Add('Name', ftString, 50);
+    DataSet.CreateDataSet;
+    
+    DataSet.Append;
+    DataSet.FieldByName('ID').AsInteger := 1;
+    DataSet.FieldByName('Name').AsString := 'Item 1';
+    DataSet.Post;
+
+    DataSet.Append;
+    DataSet.FieldByName('ID').AsInteger := 2;
+    DataSet.FieldByName('Name').AsString := 'Item 2';
+    DataSet.Post;
+
+    Context.SetObject('Data', DataSet);
+    
+    Output := Engine.Render(
+      '@foreach (var row in Data)' +
+      '#@row.ID: @row.Name (@index);' +
+      '@endforeach', Context);
+
+    Should(Output).Contain('#1: Item 1 (1);');
+    Should(Output).Contain('#2: Item 2 (2);');
+  finally
+    DataSet.Free;
+  end;
+end;
 
 end.
