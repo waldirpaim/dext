@@ -1,4 +1,4 @@
-unit Dext.Templating.Tests;
+﻿unit Dext.Templating.Tests;
 
 interface
 
@@ -6,48 +6,44 @@ uses
   Dext.Testing,
   Dext.Templating,
   Dext.Scaffolding.Models,
+  FireDAC.Comp.Client,
   System.SysUtils;
 
 type
   [TestFixture]
   TTemplatingTests = class
   public
-    [Test] procedure Test_Simple_Property_Resolution;
-    [Test] procedure Test_Nested_Property_Resolution;
-    [Test] procedure Test_Conditional_IF_True;
-    [Test] procedure Test_Conditional_IF_False;
-    [Test] procedure Test_Filters_PascalCase;
-    [Test] procedure Test_Filters_CamelCase;
     [Test] procedure Test_Advanced_Filters_With_Params;
+    [Test] procedure Test_Chained_Filters;
     [Test] procedure Test_Comparison_Filters_In_If;
-    [Test] procedure Test_Escaping;
-    [Test] procedure Test_Html_Escaping;
-
     [Test] procedure Test_Complex_Path_Resolution;
-    [Test] procedure Test_Filters_SnakeCase;
+    [Test] procedure Test_Conditional_IF_False;
+    [Test] procedure Test_Conditional_IF_True;
+    [Test] procedure Test_Conditional_With_Else;
+    [Test] procedure Test_Continue_And_Break_In_Loop;
+    [Test] procedure Test_Encoded_Directive;
+    [Test] procedure Test_Error_Reporting_Position;
+    [Test] procedure Test_Escaping;
+    [Test] procedure Test_Filters_CamelCase;
+    [Test] procedure Test_Filters_PascalCase;
     [Test] procedure Test_Filters_Pluralize;
     [Test] procedure Test_Filters_Singularize;
-    [Test] procedure Test_Chained_Filters;
+    [Test] procedure Test_Filters_SnakeCase;
+    [Test] procedure Test_Html_Escaping;
     [Test] procedure Test_Inline_Define_And_Macro_Call;
-    [Test] procedure Test_Raw_Block_Literal_Output;
-    [Test] procedure Test_Encoded_Directive;
-///
-    [Test] procedure Test_Nested_Control_Flow;
-    [Test] procedure Test_Whitespace_Handling;
-    [Test] procedure Test_Nested_Loops;
-    [Test] procedure Test_Continue_And_Break_In_Loop;
-    [Test] procedure Test_Switch_Case_Default;
-    [Test] procedure Test_Render_Template_With_Layout_Sections_And_Partial;
-///
-    [Test] procedure Test_Conditional_With_Else;
     [Test] procedure Test_Loop_ForEach;
-    [Test] procedure Test_Loop_With_Else_And_Pseudo_Variables;
-    [Test] procedure Test_Set_And_Inline_Expression;
-    [Test] procedure Test_Whitespace_Control_With_Tilde;
-    [Test] procedure Test_Error_Reporting_Position;
-
-    // TODO : Fix Memory Leaks
     [Test] procedure Test_Loop_TDataSet;
+    [Test] procedure Test_Loop_With_Else_And_Pseudo_Variables;
+    [Test] procedure Test_Nested_Control_Flow;
+    [Test] procedure Test_Nested_Loops;
+    [Test] procedure Test_Nested_Property_Resolution;
+    [Test] procedure Test_Raw_Block_Literal_Output;
+    [Test] procedure Test_Render_Template_With_Layout_Sections_And_Partial;
+    [Test] procedure Test_Set_And_Inline_Expression;
+    [Test] procedure Test_Simple_Property_Resolution;
+    [Test] procedure Test_Switch_Case_Default;
+    [Test] procedure Test_Whitespace_Control_With_Tilde;
+    [Test] procedure Test_Whitespace_Handling;
   end;
 
 implementation
@@ -746,14 +742,16 @@ end;
 procedure TTemplatingTests.Test_Loop_TDataSet;
 var
   Context: ITemplateContext;
-  DataSet: TClientDataSet;
+  DataSet: TFDMemTable;
   Engine: ITemplateEngine;
   Output: string;
 begin
   Engine := TTemplating.CreateEngine;
   Context := TTemplating.CreateContext;
   
-  DataSet := TClientDataSet.Create(nil);
+  // TFDMemTable is a pure-Delphi in-memory table — no midas.dll dependency,
+  // no false-positive FastMM5 leaks on shutdown.
+  DataSet := TFDMemTable.Create(nil);
   try
     DataSet.FieldDefs.Add('ID', ftInteger);
     DataSet.FieldDefs.Add('Name', ftString, 50);
