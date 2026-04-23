@@ -12,7 +12,7 @@ Provide a transparent, "code-first" Service-Oriented Architecture (SOA) layer fo
 ## 2. Context & Rationale
 Legacy Delphi applications often contain massive, monolithic business rules hidden behind simple interfaces. To transition to a modern architecture (Web/Mobile/Microservices):
 * Building REST conventions (Controllers/Minimal APIs) can represent high friction for migrating legacy systems.
-* An RPC (Remote Procedure Call) approach based on native Interfaces (e.g., `ICalculadoraService`) is natural to Delphi developers and provides a zero-friction modernization path, competing directly with frameworks like TMS XData and mORMot.
+* An RPC (Remote Procedure Call) approach based on native Interfaces (e.g., `ICalculadoraService`) is natural to Delphi developers and provides a zero-friction modernization path.
 * By using **gRPC** and **Protobuf** as the core transport — combined with Dext's High-Performance Reflection and Zero-Allocation spans — Dext will deliver unparalleled performance natively over HTTP/2. This mirrors the DX of `protobuf-net.Grpc` in the .NET ecosystem.
 
 ## 3. Core Components
