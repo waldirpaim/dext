@@ -92,6 +92,8 @@ $(DEXT)\Core\Interception
 $(DEXT)\Core\Json
 $(DEXT)\Dashboard
 $(DEXT)\Data
+$(DEXT)\Debug
+$(DEXT)\Events
 $(DEXT)\Hosting
 $(DEXT)\Hosting\CLI
 $(DEXT)\Hosting\CLI\Logger
@@ -100,7 +102,6 @@ $(DEXT)\Hubs
 $(DEXT)\Hubs\Transports
 $(DEXT)\Net
 $(DEXT)\Testing
-$(DEXT)\Tests
 $(DEXT)\UI
 $(DEXT)\Web
 $(DEXT)\Web\Caching
@@ -108,6 +109,7 @@ $(DEXT)\Web\Hosting
 $(DEXT)\Web\Indy
 $(DEXT)\Web\Middleware
 $(DEXT)\Web\Mvc
+$(DEXT)\..\Apps\CLI\Commands
 ```
 
 *Observação: As pastas `Http` e `Expressions` mencionadas em versões anteriores foram renomeadas ou reorganizadas para `Web` e outros módulos.*
