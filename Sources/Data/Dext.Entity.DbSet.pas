@@ -1107,14 +1107,14 @@ begin
         RetVal := Cmd.ExecuteScalar;
         var Payload := TJSONObject.Create;
         Payload.AddPair('sql', Sql);
-        Payload.AddPair('rows', 1);
+        Payload.AddPair('rows', TJSONNumber.Create(1));
         TDiagnosticSource.Instance.Write('SQL.Insert', Payload, 'SQL', SW.ElapsedMilliseconds);
       except
         on E: Exception do
         begin
           var Payload := TJSONObject.Create;
           Payload.AddPair('sql', Sql);
-          Payload.AddPair('rows', 1);
+          Payload.AddPair('rows', TJSONNumber.Create(1));
           TDiagnosticSource.Instance.Write('SQL.Insert', Payload, 'SQL', SW.ElapsedMilliseconds, 'Error', E.Message);
           raise;
         end;
@@ -1130,14 +1130,14 @@ begin
         Cmd.ExecuteNonQuery;
         var Payload := TJSONObject.Create;
         Payload.AddPair('sql', Sql);
-        Payload.AddPair('rows', 1);
+        Payload.AddPair('rows', TJSONNumber.Create(1));
         TDiagnosticSource.Instance.Write('SQL.Insert', Payload, 'SQL', SW.ElapsedMilliseconds);
       except
         on E: Exception do
         begin
           var Payload := TJSONObject.Create;
           Payload.AddPair('sql', Sql);
-          Payload.AddPair('rows', 1);
+          Payload.AddPair('rows', TJSONNumber.Create(1));
           TDiagnosticSource.Instance.Write('SQL.Insert', Payload, 'SQL', SW.ElapsedMilliseconds, 'Error', E.Message);
           raise;
         end;
@@ -1276,14 +1276,14 @@ begin
       RowsAffected := Cmd.ExecuteNonQuery;
       Payload := TJSONObject.Create;
       Payload.AddPair('sql', Sql);
-      Payload.AddPair('rows', RowsAffected);
+      Payload.AddPair('rows', TJSONNumber.Create(RowsAffected));
       TDiagnosticSource.Instance.Write('SQL.Update', Payload, 'SQL', SW.ElapsedMilliseconds);
     except
       on E: Exception do
       begin
         Payload := TJSONObject.Create;
         Payload.AddPair('sql', Sql);
-        Payload.AddPair('rows', 0);
+        Payload.AddPair('rows', TJSONNumber.Create(0));
         TDiagnosticSource.Instance.Write('SQL.Update', Payload, 'SQL', SW.ElapsedMilliseconds, 'Error', E.Message);
         raise;
       end;
@@ -1440,14 +1440,14 @@ begin
       var RowsAffected := Cmd.ExecuteNonQuery;
       var Payload := TJSONObject.Create;
       Payload.AddPair('sql', Sql);
-      Payload.AddPair('rows', RowsAffected);
+      Payload.AddPair('rows', TJSONNumber.Create(RowsAffected));
       TDiagnosticSource.Instance.Write('SQL.Delete', Payload, 'SQL', SW.ElapsedMilliseconds);
     except
       on E: Exception do
       begin
         var Payload := TJSONObject.Create;
         Payload.AddPair('sql', Sql);
-        Payload.AddPair('rows', 0);
+        Payload.AddPair('rows', TJSONNumber.Create(0));
         TDiagnosticSource.Instance.Write('SQL.Delete', Payload, 'SQL', SW.ElapsedMilliseconds, 'Error', E.Message);
         raise;
       end;
@@ -1799,7 +1799,7 @@ begin
       
       var Payload := TJSONObject.Create;
       Payload.AddPair('sql', Sql);
-      Payload.AddPair('rows', RowCount);
+      Payload.AddPair('rows', TJSONNumber.Create(RowCount));
       TDiagnosticSource.Instance.Write('SQL.Query', Payload, 'SQL', SW.ElapsedMilliseconds);
     except
       on E: Exception do

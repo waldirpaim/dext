@@ -1619,13 +1619,13 @@ end;
 {$IFDEF DEXT_ENABLE_ENTITY}
 function THttpAppBuilderHelper.MapDataApi<T>(const APath: string): AppBuilder;
 begin
-  TDataApiHandler<T>.Map(Self.Unwrap, APath);
+  TDataApi.Map(Self.Unwrap, TClass(T), APath);
   Result := Self;
 end;
 
 function THttpAppBuilderHelper.MapDataApi<T>(const APath: string; AOptions: TDataApiOptions): AppBuilder;
 begin
-  TDataApiHandler<T>.Map(Self.Unwrap, APath, TDataApiOptions<T>(AOptions));
+  TDataApi.Map(Self.Unwrap, TClass(T), APath, AOptions);
   Result := Self;
 end;
 

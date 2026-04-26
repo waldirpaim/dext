@@ -28,6 +28,7 @@ package Dext.Web.Core;
 {$DESCRIPTION 'Dext Framework - Web & HTTP'}
 {$RUNONLY}
 {$IMPLICITBUILD OFF}
+{$I Dext.inc}
 
 requires
   rtl,
@@ -37,8 +38,10 @@ requires
   Dext.Core,
   Dext.EF.Core,
   RESTComponents,
-  inet,
-  inetstn;
+{$IFDEF DEXT_DELPHI12_UP}
+  inetstn,
+{$ENDIF}
+  inet;
 
 contains
   Dext.Web in 'Web\Dext.Web.pas',

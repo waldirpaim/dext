@@ -1,4 +1,4 @@
-﻿unit TestEntityRelationships;
+unit TestEntityRelationships;
 
 interface
 
@@ -14,7 +14,8 @@ uses
   Dext.Collections,
   Dext.Types.Lazy,
   Dext.Entity.LazyLoading,
-  Dext.Entity.Core;
+  Dext.Entity.Core,
+  Dext.Core.Reflection;
 
 type
   [Table('Customers')]

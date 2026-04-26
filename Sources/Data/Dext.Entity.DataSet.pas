@@ -56,7 +56,11 @@ type
   ///   Specialized high-performance dataset that maps lists of objects and records directly to VCL/FMX.
   ///   Supports Sorting, Filtering, Master-Detail, Streaming Iterators, and Design-Time Preview without compilation.
   /// </summary>
+  {$IF CompilerVersion >= 36.0}
   [ComponentPlatformsAttribute(pidWin32 or pidWin64 or pidWin64x)]
+  {$ELSE}
+  [ComponentPlatformsAttribute(pidWin32 or pidWin64)]
+  {$ENDIF}
   TEntityDataSet = class(TDataSet)
   private
     FEntityMap: TEntityMap;
