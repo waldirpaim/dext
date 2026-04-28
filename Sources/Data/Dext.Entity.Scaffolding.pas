@@ -90,6 +90,7 @@ type
     FIsCached: Boolean;
     procedure EnsureCache;
     function GetMetaQuery: TFDMetaInfoQuery;
+    function ExtractTableMetadataInternal(const ATableName: string): TMetaTable;
   public
     constructor Create(AConnection: IDbConnection);
     destructor Destroy; override;
@@ -118,6 +119,7 @@ uses
   Data.DB,
   FireDAC.Phys.Intf,
   FireDAC.Stan.Intf,
+  FireDAC.DApt,
   System.Diagnostics,
   System.StrUtils,
   Dext.Core.Reflection,
@@ -130,6 +132,7 @@ uses
 
 constructor TFireDACSchemaProvider.Create(AConnection: IDbConnection);
 begin
+  inherited Create;
   FConnection := AConnection;
   FCache := TCollections.CreateDictionary<string, TMetaTable>;
   FIsCached := False;
@@ -155,37 +158,87 @@ begin
   Result := FMetaQuery;
 end;
 
+function TFireDACSchemaProvider.GetTables: TArray<string>;
+var
+  FDConn: TFDConnection;
+  List: TStringList;
+begin
+  if not (FConnection is TFireDACConnection) then
+    raise Exception.Create('Connection is not a FireDAC connection');
+
+  FDConn := TFireDACConnection(FConnection).Connection;
+  List := TStringList.Create;
+  try
+    var LCatalog := FDConn.Params.Values['Database'];
+    var LSchema := FDConn.Params.Values['MetaCurSchema'];
+    if LSchema = '' then LSchema := FDConn.Params.Values['Schema'];
+    if LSchema = '' then LSchema := FDConn.Params.Values['MetaDefSchema'];
+
+    if SameText(FDConn.DriverName, 'SQLite') then
+    begin
+       LCatalog := '';
+       LSchema := '';
+    end;
+      
+    FDConn.GetTableNames(LCatalog, LSchema, '', List, [osMy, osOther], [tkTable, tkView], True);
+    
+    for var i := List.Count - 1 downto 0 do
+    begin
+       if List[i].StartsWith('pg_catalog.', True) or 
+          List[i].StartsWith('information_schema.', True) or
+          List[i].StartsWith('sys.', True) then
+          List.Delete(i);
+    end;
+    Result := List.ToStringArray;
+  finally
+    List.Free;
+  end;
+end;
+
+function TFireDACSchemaProvider.GetTableMetadata(const ATableName: string): TMetaTable;
+begin
+  EnsureCache;
+  if not FCache.TryGetValue(ATableName.Trim, Result) then
+    Result := ExtractTableMetadataInternal(ATableName);
+end;
+
 procedure TFireDACSchemaProvider.EnsureCache;
 var
-  Meta: TFDMetaInfoQuery;
   LTable: TMetaTable;
   LCol: TMetaColumn;
   LFK: TMetaForeignKey;
   LTableName: string;
   LDriver: string;
+  LSchema: string;
+  SWTotal: TStopwatch;
+  TableList: TArray<string>;
+  FDConn: TFDConnection;
+  Qry: TFDQuery;
 begin
   if FIsCached then Exit;
+  FIsCached := True;
 
-  var FDConn := TFireDACConnection(FConnection).Connection;
+  if FCache = nil then
+    FCache := TCollections.CreateDictionaryIgnoreCase<string, TMetaTable>;
+
+  FDConn := TFireDACConnection(FConnection).Connection;
   LDriver := FDConn.DriverName;
   
-  var LSchema := FDConn.Params.Values['MetaCurSchema'];
+  LSchema := FDConn.Params.Values['MetaCurSchema'];
   if LSchema = '' then LSchema := FDConn.Params.Values['Schema'];
   if LSchema = '' then LSchema := FDConn.Params.Values['MetaDefSchema'];
 
   if Assigned(FConnection.OnLog) then
     FConnection.OnLog('Starting bulk metadata extraction for schema: ' + LSchema + ' (Driver: ' + LDriver + ')');
 
-  var SWTotal := TStopwatch.StartNew;
+  SWTotal := TStopwatch.StartNew;
+  TableList := GetTables;
 
-  // Use Native SQL for PostgreSQL
   if SameText(LDriver, 'PG') then
   begin
-    var Qry := TFDQuery.Create(nil);
+    Qry := TFDQuery.Create(nil);
     try
       Qry.Connection := FDConn;
-      
-      // 1. Fetch all columns for the schema
       Qry.SQL.Text := 
         'SELECT table_name, column_name, data_type, character_maximum_length, ' +
         '       numeric_precision, numeric_scale, is_nullable, column_default ' +
@@ -198,9 +251,13 @@ begin
       while not Qry.Eof do
       begin
         LTableName := Qry.FieldByName('table_name').AsString;
-        if not (FCache.TryGetValue(LTableName, LTable)) then
+        var LFullTableName := LTableName;
+        if (LSchema <> '') and (LSchema <> 'public') then
+          LFullTableName := LSchema + '.' + LTableName;
+
+        if not (FCache.TryGetValue(LFullTableName, LTable)) then
         begin
-          LTable.Name := LTableName;
+          LTable.Name := LFullTableName;
           LTable.Columns := [];
           LTable.ForeignKeys := [];
         end;
@@ -215,12 +272,11 @@ begin
         LCol.IsAutoInc := Qry.FieldByName('column_default').AsString.Contains('nextval');
 
         LTable.Columns := LTable.Columns + [LCol];
-        FCache.AddOrSetValue(LTableName, LTable);
+        FCache.AddOrSetValue(LFullTableName, LTable);
         Qry.Next;
       end;
       Qry.Close;
 
-      // 2. Fetch Primary Keys
       Qry.SQL.Text := 
         'SELECT rel.relname AS table_name, att.attname AS column_name ' +
         'FROM pg_index idx ' +
@@ -233,14 +289,19 @@ begin
       while not Qry.Eof do
       begin
         LTableName := Qry.FieldByName('table_name').AsString;
+        var LFullTableName := LTableName;
+        if (LSchema <> '') and (LSchema <> 'public') then
+          LFullTableName := LSchema + '.' + LTableName;
+
         var LColName := Qry.FieldByName('column_name').AsString;
-        if (FCache.TryGetValue(LTableName, LTable)) then
+        LTable := Default(TMetaTable);
+        if (FCache.TryGetValue(LFullTableName, LTable)) then
         begin
           for var i := 0 to High(LTable.Columns) do
             if SameText(LTable.Columns[i].Name, LColName) then
             begin
               LTable.Columns[i].IsPrimaryKey := True;
-              FCache.AddOrSetValue(LTableName, LTable);
+              FCache.AddOrSetValue(LFullTableName, LTable);
               Break;
             end;
         end;
@@ -248,7 +309,6 @@ begin
       end;
       Qry.Close;
 
-      // 3. Fetch Foreign Keys
       Qry.SQL.Text := 
         'SELECT con.conname AS constraint_name, rel.relname AS table_name, att.attname AS column_name, ' +
         '       frel.relname AS foreign_table_name, fatt.attname AS foreign_column_name ' +
@@ -264,14 +324,20 @@ begin
       while not Qry.Eof do
       begin
         LTableName := Qry.FieldByName('table_name').AsString;
-        if (FCache.TryGetValue(LTableName, LTable)) then
+        var LFullTableName := LTableName;
+        if (LSchema <> '') and (LSchema <> 'public') then
+          LFullTableName := LSchema + '.' + LTableName;
+
+        LTable := Default(TMetaTable);
+        if (FCache.TryGetValue(LFullTableName, LTable)) then
         begin
+          LFK := Default(TMetaForeignKey);
           LFK.Name := Qry.FieldByName('constraint_name').AsString;
           LFK.ColumnName := Qry.FieldByName('column_name').AsString;
           LFK.ReferencedTable := Qry.FieldByName('foreign_table_name').AsString;
           LFK.ReferencedColumn := Qry.FieldByName('foreign_column_name').AsString;
           LTable.ForeignKeys := LTable.ForeignKeys + [LFK];
-          FCache.AddOrSetValue(LTableName, LTable);
+          FCache.AddOrSetValue(LFullTableName, LTable);
         end;
         Qry.Next;
       end;
@@ -279,223 +345,264 @@ begin
       Qry.Free;
     end;
   end
+  else if SameText(LDriver, 'FB') then
+  begin
+    Qry := TFDQuery.Create(nil);
+    try
+      Qry.Connection := FDConn;
+      for var TName in TableList do
+      begin
+         var LTrimmedName := TName.Trim;
+         if not FCache.TryGetValue(LTrimmedName, LTable) then
+         begin
+            LTable := ExtractTableMetadataInternal(TName); 
+            LTable.Name := LTrimmedName;
+            FCache.AddOrSetValue(LTrimmedName, LTable);
+         end;
+      end;
+
+      Qry.SQL.Text := 
+        'SELECT RC.RDB$CONSTRAINT_NAME AS constraint_name, ' +
+        '       TRIM(RC.RDB$RELATION_NAME) AS table_name, ' +
+        '       TRIM(ISE.RDB$FIELD_NAME) AS column_name, ' +
+        '       TRIM(REF_RC.RDB$RELATION_NAME) AS foreign_table_name, ' +
+        '       TRIM(REF_ISE.RDB$FIELD_NAME) AS foreign_column_name ' +
+        'FROM RDB$RELATION_CONSTRAINTS RC ' +
+        'JOIN RDB$REF_CONSTRAINTS REFC ON RC.RDB$CONSTRAINT_NAME = REFC.RDB$CONSTRAINT_NAME ' +
+        'JOIN RDB$INDEX_SEGMENTS ISE ON RC.RDB$INDEX_NAME = ISE.RDB$INDEX_NAME ' +
+        'JOIN RDB$RELATION_CONSTRAINTS REF_RC ON REFC.RDB$CONST_NAME_UQ = REF_RC.RDB$CONSTRAINT_NAME ' +
+        'JOIN RDB$INDEX_SEGMENTS REF_ISE ON REF_RC.RDB$INDEX_NAME = REF_ISE.RDB$INDEX_NAME AND ISE.RDB$FIELD_POSITION = REF_ISE.RDB$FIELD_POSITION ' +
+        'WHERE RC.RDB$CONSTRAINT_TYPE = ''FOREIGN KEY'' ' +
+        'ORDER BY RC.RDB$RELATION_NAME, RC.RDB$CONSTRAINT_NAME, ISE.RDB$FIELD_POSITION';
+      
+      try
+        Qry.Open;
+        while not Qry.Eof do
+        begin
+          LTableName := Qry.FieldByName('table_name').AsString.Trim;
+          var LLookupName := LTableName;
+          LTable := Default(TMetaTable);
+          if not FCache.TryGetValue(LLookupName, LTable) then
+          begin
+            // Try again without quotes if needed, though GetTableNames usually returns what we need
+            // but for FB we might need to be more aggressive in matching
+            LLookupName := LTableName.Replace('"', '');
+            FCache.TryGetValue(LLookupName, LTable);
+          end;
+
+          if LTable.Name <> '' then
+          begin
+             LFK := Default(TMetaForeignKey);
+             LFK.Name := Qry.FieldByName('constraint_name').AsString.Trim;
+             LFK.ColumnName := Qry.FieldByName('column_name').AsString.Trim;
+             LFK.ReferencedTable := Qry.FieldByName('foreign_table_name').AsString.Trim;
+             LFK.ReferencedColumn := Qry.FieldByName('foreign_column_name').AsString.Trim;
+             
+             // Basic validation to avoid broken navigation properties
+             if (LFK.ColumnName <> '') and (LFK.ReferencedTable <> '') then
+             begin
+               LTable.ForeignKeys := LTable.ForeignKeys + [LFK];
+               FCache.AddOrSetValue(LTableName, LTable);
+               if LLookupName <> LTableName then
+                 FCache.AddOrSetValue(LLookupName, LTable);
+             end;
+          end;
+          Qry.Next;
+        end;
+      except
+      end;
+    finally
+      Qry.Free;
+    end;
+  end
   else
   begin
-    // Fallback to FireDAC MetaInfo
-    var TableList := GetTables;
-    Meta := GetMetaQuery;
     for var TName in TableList do
     begin
-      LTable.Name := TName;
-      LTable.Columns := [];
-      LTable.ForeignKeys := [];
-      
-      Meta.Close;
-      Meta.MetaInfoKind := mkTableFields;
-      Meta.ObjectName := TName;
-      Meta.Open;
-      while not Meta.Eof do
+      var LTrimmedName := TName.Trim;
+      if not FCache.TryGetValue(LTrimmedName, LTable) then
       begin
-        LCol.Name := Meta.FieldByName('COLUMN_NAME').AsString;
-        LCol.DataType := Meta.FieldByName('COLUMN_TYPENAME').AsString;
-        LCol.Length := Meta.FieldByName('COLUMN_LENGTH').AsInteger;
-        LCol.Precision := Meta.FieldByName('COLUMN_PRECISION').AsInteger;
-        LCol.Scale := Meta.FieldByName('COLUMN_SCALE').AsInteger;
-        LCol.IsNullable := True;
-        if Meta.FindField('IS_NULLABLE') <> nil then LCol.IsNullable := Meta.FieldByName('IS_NULLABLE').AsString = 'YES'
-        else if Meta.FindField('NULLABLE') <> nil then LCol.IsNullable := Meta.FieldByName('NULLABLE').AsInteger = 1;
-        
-        LCol.IsPrimaryKey := False;
-        if Meta.FindField('PRIMARY_KEY') <> nil then LCol.IsPrimaryKey := Meta.FieldByName('PRIMARY_KEY').AsBoolean;
-        
-        LCol.IsAutoInc := False;
-        LTable.Columns := LTable.Columns + [LCol];
-        Meta.Next;
+        LTable := ExtractTableMetadataInternal(TName);
+        FCache.AddOrSetValue(LTrimmedName, LTable);
       end;
-      
-      // Fetch PKs for this table (essential for composite PKs in SQLite)
-      Meta.Close;
-      Meta.MetaInfoKind := mkPrimaryKeyFields;
-      Meta.ObjectName := '';
-      Meta.BaseObjectName := TName;
-      try
-        Meta.Open;
-        while not Meta.Eof do
-        begin
-          var LColName := Meta.FieldByName('COLUMN_NAME').AsString;
-          for var i := 0 to High(LTable.Columns) do
-            if SameText(LTable.Columns[i].Name, LColName) then
-            begin
-              LTable.Columns[i].IsPrimaryKey := True;
-              Break;
-            end;
-          Meta.Next;
-        end;
-      except
-        // Some drivers might fail mkPrimaryKeyFields, ignore and continue
-      end;
-
-      // SQLite specific fallback to PRAGMA table_info for accurate composite PK detection
-      if SameText(FDConn.DriverName, 'SQLite') then
-      begin
-        var Qry := TFDQuery.Create(nil);
-        try
-          Qry.Connection := FDConn;
-          Qry.SQL.Text := 'PRAGMA table_info("' + TName + '")';
-          Qry.Open;
-          while not Qry.Eof do
-          begin
-            if Qry.FieldByName('pk').AsInteger > 0 then
-            begin
-              var LColName := Qry.FieldByName('name').AsString;
-              for var i := 0 to High(LTable.Columns) do
-                if SameText(LTable.Columns[i].Name, LColName) then
-                begin
-                  LTable.Columns[i].IsPrimaryKey := True;
-                  Break;
-                end;
-            end;
-            Qry.Next;
-          end;
-        finally
-          Qry.Free;
-        end;
-      end;
-      
-      // Fetch FKs for this table
-      Meta.Close;
-      Meta.MetaInfoKind := mkForeignKeys;
-      Meta.BaseObjectName := '';
-      Meta.ObjectName := TName;
-      try
-        Meta.Open;
-        while not Meta.Eof do
-        begin
-          // SQLite uses different field names or might not have CONSTRAINT_NAME
-          if Meta.FindField('CONSTRAINT_NAME') <> nil then
-            LFK.Name := Meta.FieldByName('CONSTRAINT_NAME').AsString
-          else if Meta.FindField('FKEY_NAME') <> nil then
-            LFK.Name := Meta.FieldByName('FKEY_NAME').AsString
-          else
-            LFK.Name := 'FK_' + TName + '_' + (FCache.Count + 1).ToString;
-
-          if Meta.FindField('COLUMN_NAME') <> nil then
-            LFK.ColumnName := Meta.FieldByName('COLUMN_NAME').AsString
-          else if Meta.FindField('FK_COLUMN_NAME') <> nil then
-            LFK.ColumnName := Meta.FieldByName('FK_COLUMN_NAME').AsString;
-
-          if Meta.FindField('REF_TABLE_NAME') <> nil then
-            LFK.ReferencedTable := Meta.FieldByName('REF_TABLE_NAME').AsString
-          else if Meta.FindField('PK_TABLE_NAME') <> nil then
-            LFK.ReferencedTable := Meta.FieldByName('PK_TABLE_NAME').AsString;
-
-          if Meta.FindField('REF_COLUMN_NAME') <> nil then
-            LFK.ReferencedColumn := Meta.FieldByName('REF_COLUMN_NAME').AsString
-          else if Meta.FindField('PK_COLUMN_NAME') <> nil then
-            LFK.ReferencedColumn := Meta.FieldByName('PK_COLUMN_NAME').AsString;
-
-          LTable.ForeignKeys := LTable.ForeignKeys + [LFK];
-          Meta.Next;
-        end;
-      except
-        // Some drivers might fail mkForeignKeys, ignore and continue
-      end;
-
-      // SQLite specific fallback to PRAGMA foreign_key_list for accurate FK columns
-      if SameText(FDConn.DriverName, 'SQLite') then
-      begin
-        LTable.ForeignKeys := [];
-        var Qry := TFDQuery.Create(nil);
-        try
-          Qry.Connection := FDConn;
-          Qry.SQL.Text := 'PRAGMA foreign_key_list("' + TName + '")';
-          try
-            Qry.Open;
-            var FkIndex := 0;
-            while not Qry.Eof do
-            begin
-              LFK.Name := 'FK_' + TName + '_' + IntToStr(FkIndex);
-              LFK.ReferencedTable := Qry.FieldByName('table').AsString;
-              LFK.ColumnName := Qry.FieldByName('from').AsString;
-              LFK.ReferencedColumn := Qry.FieldByName('to').AsString;
-              
-              LTable.ForeignKeys := LTable.ForeignKeys + [LFK];
-              Inc(FkIndex);
-              Qry.Next;
-            end;
-          except
-            // Ignore PRAGMA errors
-          end;
-        finally
-          Qry.Free;
-        end;
-      end;
-
-      FCache.AddOrSetValue(TName, LTable);
     end;
   end;
 
   if Assigned(FConnection.OnLog) then
     FConnection.OnLog(Format('Bulk metadata extraction completed in %d ms for %d tables', 
       [SWTotal.ElapsedMilliseconds, FCache.Count]));
-
-  FIsCached := True;
 end;
-function TFireDACSchemaProvider.GetTables: TArray<string>;
+
+function TFireDACSchemaProvider.ExtractTableMetadataInternal(const ATableName: string): TMetaTable;
 var
+  Meta: TFDMetaInfoQuery;
+  LCol: TMetaColumn;
+  LFK: TMetaForeignKey;
+  LActualSchema, LActualTable: string;
+  LDotPos, i: Integer;
   FDConn: TFDConnection;
-  List: TStringList;
 begin
-  if not (FConnection is TFireDACConnection) then
-    raise Exception.Create('Connection is not a FireDAC connection');
-
   FDConn := TFireDACConnection(FConnection).Connection;
-  List := TStringList.Create;
-  try
-    var LCatalog := FDConn.Params.Values['Database'];
-    var LSchema := FDConn.Params.Values['MetaCurSchema'];
-    if LSchema = '' then
-      LSchema := FDConn.Params.Values['Schema'];
-    if LSchema = '' then
-      LSchema := FDConn.Params.Values['MetaDefSchema'];
+  var LSchema := FDConn.Params.Values['MetaCurSchema'];
+  if LSchema = '' then LSchema := FDConn.Params.Values['Schema'];
+  if LSchema = '' then LSchema := FDConn.Params.Values['MetaDefSchema'];
 
-    // SQLite doesn't use Catalog/Schema in the same way, and file paths with colons break GetTableNames
+  Result.Name := ATableName;
+  Result.Columns := [];
+  Result.ForeignKeys := [];
+
+  LActualSchema := LSchema;
+  LActualTable := ATableName;
+  LDotPos := ATableName.IndexOf('.');
+  if LDotPos >= 0 then
+  begin
+    LActualSchema := ATableName.Substring(0, LDotPos);
+    LActualTable := ATableName.Substring(LDotPos + 1);
+  end;
+  
+  Meta := GetMetaQuery;
+  try
+    Meta.Close;
+    Meta.MetaInfoKind := mkTableFields;
+    Meta.CatalogName := '';
+    Meta.SchemaName := LActualSchema;
+    Meta.ObjectName := LActualTable;
+    Meta.Open;
+    while not Meta.Eof do
+    begin
+      LCol.Name := Meta.FieldByName('COLUMN_NAME').AsString;
+      LCol.DataType := Meta.FieldByName('COLUMN_TYPENAME').AsString;
+      LCol.Length := Meta.FieldByName('COLUMN_LENGTH').AsInteger;
+      LCol.Precision := Meta.FieldByName('COLUMN_PRECISION').AsInteger;
+      LCol.Scale := Meta.FieldByName('COLUMN_SCALE').AsInteger;
+      LCol.IsNullable := True;
+      if Meta.FindField('IS_NULLABLE') <> nil then LCol.IsNullable := Meta.FieldByName('IS_NULLABLE').AsString = 'YES'
+      else if Meta.FindField('NULLABLE') <> nil then LCol.IsNullable := Meta.FieldByName('NULLABLE').AsInteger = 1;
+      LCol.IsPrimaryKey := False;
+      if Meta.FindField('PRIMARY_KEY') <> nil then LCol.IsPrimaryKey := Meta.FieldByName('PRIMARY_KEY').AsBoolean;
+      LCol.IsAutoInc := False;
+      Result.Columns := Result.Columns + [LCol];
+      Meta.Next;
+    end;
+    
+    Meta.Close;
+    Meta.MetaInfoKind := mkPrimaryKeyFields;
+    Meta.CatalogName := '';
+    Meta.SchemaName := LActualSchema;
+    Meta.BaseObjectName := LActualTable;
+    Meta.ObjectName := '';
+    try
+      Meta.Open;
+      while not Meta.Eof do
+      begin
+        var LColName := Meta.FieldByName('COLUMN_NAME').AsString;
+        for i := 0 to High(Result.Columns) do
+          if SameText(Result.Columns[i].Name, LColName) then
+          begin
+            Result.Columns[i].IsPrimaryKey := True;
+            Break;
+          end;
+        Meta.Next;
+      end;
+    except
+    end;
+
     if SameText(FDConn.DriverName, 'SQLite') then
     begin
-       LCatalog := '';
-       LSchema := '';
+      var Qry := TFDQuery.Create(nil);
+      try
+        Qry.Connection := FDConn;
+        Qry.SQL.Text := 'PRAGMA table_info("' + LActualTable + '")';
+        Qry.Open;
+        while not Qry.Eof do
+        begin
+          if Qry.FieldByName('pk').AsInteger > 0 then
+          begin
+            var LColName := Qry.FieldByName('name').AsString;
+            for i := 0 to High(Result.Columns) do
+              if SameText(Result.Columns[i].Name, LColName) then
+              begin
+                Result.Columns[i].IsPrimaryKey := True;
+                Break;
+              end;
+          end;
+          Qry.Next;
+        end;
+      finally
+        Qry.Free;
+      end;
     end;
-      
-    // Added [osOther] to see tables from different owners in the same schema
-    FDConn.GetTableNames(LCatalog, LSchema, '', List, [osMy, osOther], [tkTable, tkView], True);
     
-    if Assigned(FConnection.OnLog) then
-      FConnection.OnLog(Format('Found %d tables in schema "%s"', [List.Count, LSchema]));
+    Meta.Close;
+    Meta.MetaInfoKind := mkForeignKeys;
+    Meta.CatalogName := '';
+    Meta.SchemaName := LActualSchema;
+    Meta.BaseObjectName := '';
+    Meta.ObjectName := LActualTable;
+    if not SameText(FDConn.DriverName, 'FB') then
+    try
+      Meta.Open;
+      if Meta.Eof then
+      begin
+         Meta.Close;
+         Meta.ObjectName := '';
+         Meta.BaseObjectName := LActualTable;
+         Meta.Open;
+      end;
 
-    // Filter out system tables
-    for var i := List.Count - 1 downto 0 do
-    begin
-       if List[i].StartsWith('pg_catalog.', True) or 
-          List[i].StartsWith('information_schema.', True) or
-          List[i].StartsWith('sys.', True) then
-          List.Delete(i);
+      while not Meta.Eof do
+      begin
+        LFK := Default(TMetaForeignKey);
+        if Meta.FindField('CONSTRAINT_NAME') <> nil then LFK.Name := Meta.FieldByName('CONSTRAINT_NAME').AsString.Trim
+        else if Meta.FindField('FKEY_NAME') <> nil then LFK.Name := Meta.FieldByName('FKEY_NAME').AsString.Trim
+        else LFK.Name := 'FK_' + LActualTable + '_' + (Length(Result.ForeignKeys) + 1).ToString;
+
+        if Meta.FindField('COLUMN_NAME') <> nil then LFK.ColumnName := Meta.FieldByName('COLUMN_NAME').AsString.Trim
+        else if Meta.FindField('FK_COLUMN_NAME') <> nil then LFK.ColumnName := Meta.FieldByName('FK_COLUMN_NAME').AsString.Trim;
+
+        if Meta.FindField('REF_TABLE_NAME') <> nil then LFK.ReferencedTable := Meta.FieldByName('REF_TABLE_NAME').AsString.Trim
+        else if Meta.FindField('PK_TABLE_NAME') <> nil then LFK.ReferencedTable := Meta.FieldByName('PK_TABLE_NAME').AsString.Trim;
+
+        if Meta.FindField('REF_COLUMN_NAME') <> nil then LFK.ReferencedColumn := Meta.FieldByName('REF_COLUMN_NAME').AsString.Trim
+        else if Meta.FindField('PK_COLUMN_NAME') <> nil then LFK.ReferencedColumn := Meta.FieldByName('PK_COLUMN_NAME').AsString.Trim;
+
+        Result.ForeignKeys := Result.ForeignKeys + [LFK];
+        Meta.Next;
+      end;
+    except
     end;
 
-    Result := List.ToStringArray;
-  finally
-    List.Free;
+    if SameText(FDConn.DriverName, 'SQLite') or SameText(FDConn.DriverName, 'FB') then
+    begin
+      Result.ForeignKeys := [];
+      if SameText(FDConn.DriverName, 'SQLite') then
+      begin
+        var Qry := TFDQuery.Create(nil);
+        try
+          Qry.Connection := FDConn;
+        Qry.SQL.Text := 'PRAGMA foreign_key_list("' + LActualTable + '")';
+        try
+          Qry.Open;
+          var FkIndex := 0;
+          while not Qry.Eof do
+          begin
+            LFK := Default(TMetaForeignKey);
+            LFK.Name := 'FK_' + ATableName + '_' + IntToStr(FkIndex);
+            LFK.ReferencedTable := Qry.FieldByName('table').AsString;
+            LFK.ColumnName := Qry.FieldByName('from').AsString;
+            LFK.ReferencedColumn := Qry.FieldByName('to').AsString;
+            Result.ForeignKeys := Result.ForeignKeys + [LFK];
+            Inc(FkIndex);
+            Qry.Next;
+          end;
+        except
+        end;
+      finally
+        Qry.Free;
+      end;
+    end;
   end;
-end;
-
-function TFireDACSchemaProvider.GetTableMetadata(const ATableName: string): TMetaTable;
-begin
-  EnsureCache;
-  if not (FCache.TryGetValue(ATableName, Result)) then
-  begin
-     // Fallback if table wasn't found in bulk (unlikely but safe)
-     Result.Name := ATableName;
-     Result.Columns := [];
-     Result.ForeignKeys := [];
+  finally
   end;
 end;
 
@@ -529,42 +636,33 @@ var
   CleanedName: string;
 begin
   Result := '';
-  // Remove quotes and brackets
   CleanedName := AName.Replace('"', '').Replace('''', '').Replace('[', '').Replace(']', '');
-  
-  // Handle dot notation (Catalog.Schema.Table or Schema.Table)
-  // Take the last part as the table name
   if CleanedName.Contains('.') then
   begin
     Parts := CleanedName.Split(['.']);
-    if Length(Parts) > 0 then
-      CleanedName := Parts[High(Parts)];
+    if Length(Parts) > 0 then CleanedName := Parts[High(Parts)];
   end;
-  
-  // Split by common delimiters
   Parts := CleanedName.Split(['_', '-', ' '], TStringSplitOptions.ExcludeEmpty);
   for S in Parts do
-  begin
-    if S.Length > 0 then
-      // Capitalize first letter, lowercase the rest (PascalCase)
-      Result := Result + UpperCase(S.Chars[0]) + S.Substring(1).ToLower;
-  end;
+    if S.Length > 0 then Result := Result + UpperCase(S.Chars[0]) + S.Substring(1).ToLower;
+end;
+
+function TDelphiEntityGenerator.CleanMappingName(const AName: string): string;
+begin
+  Result := AName.Replace('"', '').Replace('''', '').Replace('[', '').Replace(']', '');
 end;
 
 function TDelphiEntityGenerator.EscapeIdentifier(const AIdentifier: string): string;
 begin
-  if IsKeyword(AIdentifier) then
-    Result := '&' + AIdentifier
-  else
-    Result := AIdentifier;
+  if IsKeyword(AIdentifier) then Result := '&' + AIdentifier
+  else Result := AIdentifier;
 end;
 
-function TDelphiEntityGenerator.SQLTypeToDelphiType(const ASQLType: string; AScale: Integer; APropertyStyle: TPropertyStyle = psPOCO): string;
+function TDelphiEntityGenerator.SQLTypeToDelphiType(const ASQLType: string; AScale: Integer; APropertyStyle: TPropertyStyle): string;
 var
   LType: string;
 begin
   LType := ASQLType.ToUpper;
-  
   if APropertyStyle = psSmart then
   begin
     if LType.Contains('CHAR') or LType.Contains('TEXT') or LType.Contains('STRING') or LType.Contains('UUID') or LType.Contains('GUID') then Exit('StringType');
@@ -576,7 +674,7 @@ begin
     if LType.Contains('BOOL') or LType.Contains('BIT') or LType.Contains('LOGICAL') then Exit('BoolType');
     if LType.Contains('DECIMAL') or LType.Contains('NUMERIC') or LType.Contains('MONEY') or LType.Contains('CURRENCY') then Exit('CurrencyType');
     if LType.Contains('FLOAT') or LType.Contains('DOUBLE') or LType.Contains('REAL') then Exit('FloatType');
-    if LType.Contains('DATE') and LType.Contains('TIME') then Exit('DateTimeType');
+    if (LType.Contains('DATE') and LType.Contains('TIME')) or LType.Contains('TIMESTAMP') then Exit('DateTimeType');
     if LType.Contains('DATE') then Exit('DateType');
     if LType.Contains('TIME') then Exit('TimeType');
     if LType.Contains('BLOB') or LType.Contains('BYTEA') or LType.Contains('BINARY') or LType.Contains('IMAGE') then Exit('TBytes');
@@ -592,44 +690,35 @@ begin
   if LType.Contains('BOOL') or LType.Contains('BIT') or LType.Contains('LOGICAL') then Exit('Boolean');
   if LType.Contains('DECIMAL') or LType.Contains('NUMERIC') or LType.Contains('MONEY') or LType.Contains('CURRENCY') then
   begin
-    if AScale = 0 then Exit('Int64');
+    if AScale > 0 then Exit('Double');
     Exit('Currency');
   end;
   if LType.Contains('FLOAT') or LType.Contains('DOUBLE') or LType.Contains('REAL') then Exit('Double');
-  if LType.Contains('DATE') or LType.Contains('TIME') then Exit('TDateTime');
+  if (LType.Contains('DATE') and LType.Contains('TIME')) or LType.Contains('TIMESTAMP') then Exit('TDateTime');
+  if LType.Contains('DATE') then Exit('TDate');
+  if LType.Contains('TIME') then Exit('TTime');
   if LType.Contains('BLOB') or LType.Contains('BYTEA') or LType.Contains('BINARY') or LType.Contains('IMAGE') then Exit('TBytes');
-  
-  Result := 'string';
-end;
-
-function TDelphiEntityGenerator.CleanMappingName(const AName: string): string;
-begin
-  Result := AName.Replace('"', '').Replace('''', '').Replace('[', '').Replace(']', '').Replace('..', '.');
+  Exit('string');
 end;
 
 function TDelphiEntityGenerator.GenerateUnit(const AUnitName: string; const ATables: TArray<TMetaTable>; 
-  AMappingStyle: TMappingStyle = msAttributes; APropertyStyle: TPropertyStyle = psPOCO;
-  AGenerateMetadata: Boolean = True): string;
+  AMappingStyle: TMappingStyle; APropertyStyle: TPropertyStyle; AGenerateMetadata: Boolean): string;
 var
   SB: TStringBuilder;
   Table: TMetaTable;
   Col: TMetaColumn;
   FK: TMetaForeignKey;
-  ClassName, PropName, FieldName, DelphiType: string;
-  RefClass, NavPropName, FinalNavName: string;
+  ClassName, PropName, FieldName, DelphiType, RefClass, NavPropName, FinalNavName: string;
   LActualUnitName: string;
-  KnownClasses: IDictionary<string, Boolean>;
+  KnownClasses: Dext.Collections.Dict.IDictionary<string, Boolean>;
 begin
-  // MANDATORY: Unit identifier must match file name in Delphi
   LActualUnitName := ExtractFileName(AUnitName);
-  if LActualUnitName.EndsWith('.pas', True) then
-     LActualUnitName := LActualUnitName.Substring(0, LActualUnitName.Length - 4);
-  
+  if LActualUnitName.EndsWith('.pas', True) then LActualUnitName := LActualUnitName.Substring(0, LActualUnitName.Length - 4);
   LActualUnitName := LActualUnitName.Replace(' ', '_');
+  if LActualUnitName = '' then LActualUnitName := 'Dext.Entities';
 
   KnownClasses := TCollections.CreateDictionary<string, Boolean>;
-  for Table in ATables do
-    KnownClasses.AddOrSetValue('T' + CleanName(Table.Name), True);
+  for Table in ATables do KnownClasses.AddOrSetValue('T' + CleanName(Table.Name), True);
 
   SB := TStringBuilder.Create;
   try
@@ -640,8 +729,7 @@ begin
     SB.AppendLine('uses');
     SB.AppendLine('  Dext.Entity,');
     SB.AppendLine('  Dext.Entity.Mapping,');
-    if APropertyStyle = psSmart then
-       SB.AppendLine('  Dext.Core.SmartTypes,');
+    if APropertyStyle = psSmart then SB.AppendLine('  Dext.Core.SmartTypes,');
     SB.AppendLine('  Dext.Types.Nullable,');
     SB.AppendLine('  Dext.Types.Lazy,');
     if AGenerateMetadata then
@@ -655,187 +743,159 @@ begin
     SB.AppendLine('type');
     SB.AppendLine('');
 
-    for Table in ATables do
-      SB.AppendLine('  T' + CleanName(Table.Name) + ' = class;');
+    for Table in ATables do SB.AppendLine('  T' + CleanName(Table.Name) + ' = class;');
     SB.AppendLine('');
 
-  var TableNavMap := TCollections.CreateDictionary<string, IList<TPair<TMetaForeignKey, string>>>;
-  try
-    for Table in ATables do
-    begin
-      ClassName := 'T' + CleanName(Table.Name);
-      if AMappingStyle = msAttributes then
-         SB.AppendLine('  [Table(''' + CleanMappingName(Table.Name) + ''')]');
-         
-      SB.AppendLine('  ' + ClassName + ' = class');
-      SB.AppendLine('  private');
-      
-      var ClassUsedNames := TCollections.CreateDictionary<string, Boolean>;
-      var NavInfoList := TCollections.CreateList<TPair<TMetaForeignKey, string>>;
-      TableNavMap.Add(Table.Name, NavInfoList);
-
-      // 1. Generate Fields for Columns (MUST BE FIRST)
-      for Col in Table.Columns do
+    var TableNavMap := TCollections.CreateDictionary<string, IList<TPair<TMetaForeignKey, string>>>;
+    try
+      for Table in ATables do
       begin
-        PropName := CleanName(Col.Name);
-        FieldName := 'F' + PropName;
-        DelphiType := SQLTypeToDelphiType(Col.DataType, Col.Scale, APropertyStyle);
-        if (APropertyStyle = psPOCO) and Col.IsNullable and (DelphiType <> 'string') and (DelphiType <> 'TBytes') then
-          DelphiType := 'Nullable<' + DelphiType + '>';
-        SB.AppendLine('    ' + FieldName + ': ' + DelphiType + ';');
-        ClassUsedNames.AddOrSetValue(PropName.ToUpper, True);
-        ClassUsedNames.AddOrSetValue(FieldName.ToUpper, True);
-      end;
-      
-      // 2. Generate Fields for Navigation (STILL FIELDS, SO STILL FIRST)
-      for FK in Table.ForeignKeys do
-      begin
-        RefClass := 'T' + CleanName(FK.ReferencedTable);
-        if not KnownClasses.ContainsKey(RefClass) then Continue;
+        ClassName := 'T' + CleanName(Table.Name);
+        if AMappingStyle = msAttributes then SB.AppendLine('  [Table(''' + CleanMappingName(Table.Name) + ''')]');
+        SB.AppendLine('  ' + ClassName + ' = class');
+        SB.AppendLine('  private');
+        var ClassUsedNames := TCollections.CreateDictionary<string, Boolean>;
+        var NavInfoList := TCollections.CreateList<TPair<TMetaForeignKey, string>>;
+        TableNavMap.Add(Table.Name, NavInfoList);
 
-        NavPropName := CleanName(FK.ColumnName);
-        if NavPropName.EndsWith('Id', True) then NavPropName := NavPropName.Substring(0, NavPropName.Length - 2);
-        if (NavPropName = '') or SameText(NavPropName, 'Id') then NavPropName := CleanName(FK.ReferencedTable);
-
-        FinalNavName := NavPropName;
-        var Suffix := 1;
-        while ClassUsedNames.ContainsKey(FinalNavName.ToUpper) or 
-              ClassUsedNames.ContainsKey(('FNAV' + FinalNavName).ToUpper) do
+        for Col in Table.Columns do
         begin
-          Inc(Suffix);
-          FinalNavName := NavPropName + Suffix.ToString;
+          PropName := CleanName(Col.Name);
+          FieldName := 'F' + PropName;
+          DelphiType := SQLTypeToDelphiType(Col.DataType, Col.Scale, APropertyStyle);
+          if (APropertyStyle = psPOCO) and Col.IsNullable and (DelphiType <> 'string') and (DelphiType <> 'TBytes') then DelphiType := 'Nullable<' + DelphiType + '>';
+          SB.AppendLine('    ' + FieldName + ': ' + DelphiType + ';');
+          ClassUsedNames.AddOrSetValue(PropName.ToUpper, True);
+          ClassUsedNames.AddOrSetValue(FieldName.ToUpper, True);
         end;
-        ClassUsedNames.AddOrSetValue(FinalNavName.ToUpper, True);
-        ClassUsedNames.AddOrSetValue(('FNAV' + FinalNavName).ToUpper, True);
         
-        NavInfoList.Add(TPair<TMetaForeignKey, string>.Create(FK, FinalNavName));
-        SB.AppendLine('    FNav' + FinalNavName + ': Lazy<' + RefClass + '>;');
-      end;
-      
-      SB.AppendLine('  public');
-      
-      // 3. Generate Properties for Columns
-      for Col in Table.Columns do
-      begin
-        PropName := CleanName(Col.Name);
-        var EscapedPropName := EscapeIdentifier(PropName);
-        FieldName := 'F' + PropName;
-        DelphiType := SQLTypeToDelphiType(Col.DataType, Col.Scale, APropertyStyle);
-        if (APropertyStyle = psPOCO) and Col.IsNullable and (DelphiType <> 'string') and (DelphiType <> 'TBytes') then
-          DelphiType := 'Nullable<' + DelphiType + '>';
-
-        if AMappingStyle = msAttributes then
+        for FK in Table.ForeignKeys do
         begin
-            var Attrs := TCollections.CreateList<string>;
-            if Col.IsPrimaryKey then Attrs.Add('PK');
-            if Col.IsAutoInc then Attrs.Add('AutoInc');
-            if not Col.IsNullable then Attrs.Add('Required');
-            if (Col.Length > 0) and (DelphiType = 'string') then Attrs.Add('MaxLength(' + Col.Length.ToString + ')');
-            if (Col.Precision > 0) and ((DelphiType = 'Double') or (DelphiType = 'Currency')) then Attrs.Add(Format('Precision(%d, %d)', [Col.Precision, Col.Scale]));
-            if Col.Name <> PropName then Attrs.Add('Column(''' + Col.Name + ''')');
-            if Attrs.Count > 0 then SB.AppendLine('    [' + string.Join(', ', Attrs.ToArray) + ']');
-        end;
-        SB.AppendLine('    property ' + EscapedPropName + ': ' + DelphiType + ' read ' + FieldName + ' write ' + FieldName + ';');
-      end;
-      
-      // 4. Generate Properties for Navigation
-      for var NavInfo in NavInfoList do
-      begin
-        RefClass := 'T' + CleanName(NavInfo.Key.ReferencedTable);
-        FinalNavName := NavInfo.Value;
-
-         var EscapedNavName := EscapeIdentifier(FinalNavName);
-         if AMappingStyle = msAttributes then
-            SB.AppendLine('    [ForeignKey(''' + NavInfo.Key.ColumnName + ''')]');
-         SB.AppendLine('    property ' + EscapedNavName + ': Lazy<' + RefClass + '> read FNav' + FinalNavName + ' write FNav' + FinalNavName + ';'); 
-      end;
-      
-      SB.AppendLine('  end;');
-      SB.AppendLine('');
-    end;
-    
-    // Metadata Classes
-    if AGenerateMetadata then
-    begin
-      for Table in ATables do
-      begin
-         var EntityClassName := CleanName(Table.Name) + 'Entity';
-         SB.AppendLine('  ' + EntityClassName + ' = class(TEntityType<T' + CleanName(Table.Name) + '>)');
-         SB.AppendLine('  public');
-         for Col in Table.Columns do
-            SB.AppendLine('    class var ' + EscapeIdentifier(CleanName(Col.Name)) + ': TPropExpression;');
-         
-         if TableNavMap.ContainsKey(Table.Name) then
-         begin
-           for var NavInfo in TableNavMap[Table.Name] do
-              SB.AppendLine('    class var ' + EscapeIdentifier(NavInfo.Value) + ': TPropExpression;');
-         end;
-
-         SB.AppendLine('');
-         SB.AppendLine('    class constructor Create;');
-         SB.AppendLine('  end;');
-         SB.AppendLine('');
-      end;
-    end;
-
-    if (AMappingStyle = msFluent) then 
-      SB.AppendLine('procedure RegisterMappings(ModelBuilder: TModelBuilder);' + sLineBreak);
-    
-    SB.AppendLine('implementation' + sLineBreak);
-    
-    if (AMappingStyle = msFluent) then
-    begin
-       SB.AppendLine('procedure RegisterMappings(ModelBuilder: TModelBuilder);' + sLineBreak + 'begin');
-       for Table in ATables do
-       begin
-          ClassName := 'T' + CleanName(Table.Name);
-          SB.AppendLine('  ModelBuilder.Entity<' + ClassName + '>.Table(''' + CleanMappingName(Table.Name) + ''')');
-          for Col in Table.Columns do
-          begin
-             PropName := CleanName(Col.Name);
-             if Col.IsPrimaryKey then SB.AppendLine('    .HasKey(''' + PropName + ''')');
-             if not SameText(Col.Name, PropName) then SB.AppendLine('    .Prop(''' + PropName + ''').Column(''' + Col.Name + ''')');
-             if not Col.IsNullable then SB.AppendLine('    .Prop(''' + PropName + ''').IsRequired');
-             if (Col.Length > 0) and (CleanName(Col.DataType).Contains('CHAR') or CleanName(Col.DataType).Contains('TEXT')) then SB.AppendLine('    .Prop(''' + PropName + ''').MaxLength(' + Col.Length.ToString + ')');
-             if (Col.Precision > 0) then SB.AppendLine(Format('    .Prop(''%s'').Precision(%d, %d)', [PropName, Col.Precision, Col.Scale]));
-          end;
+          RefClass := 'T' + CleanName(FK.ReferencedTable);
+          if RefClass = 'T' then Continue;
           
-          if TableNavMap.ContainsKey(Table.Name) then
+          NavPropName := CleanName(FK.ColumnName);
+          if NavPropName.EndsWith('Id', True) then NavPropName := NavPropName.Substring(0, NavPropName.Length - 2);
+          if (NavPropName = '') or SameText(NavPropName, 'Id') then NavPropName := CleanName(FK.ReferencedTable);
+          
+          if NavPropName = '' then Continue;
+          FinalNavName := NavPropName;
+          var Suffix := 1;
+          while ClassUsedNames.ContainsKey(FinalNavName.ToUpper) or ClassUsedNames.ContainsKey(('FNAV' + FinalNavName).ToUpper) do
           begin
-            for var NavInfo in TableNavMap[Table.Name] do
-               SB.AppendLine('    .Prop(''' + NavInfo.Value + ''').HasForeignKey(''' + NavInfo.Key.ColumnName + ''')');
+            Inc(Suffix);
+            FinalNavName := NavPropName + Suffix.ToString;
           end;
-          SB.AppendLine('    ;');
-       end;
-       SB.AppendLine('end;' + sLineBreak);
-    end;
-    
-    if AGenerateMetadata then
-    begin
-      for Table in ATables do
-      begin
-         var EntityClassName := CleanName(Table.Name) + 'Entity';
-         SB.AppendLine('class constructor ' + EntityClassName + '.Create;' + sLineBreak + 'begin');
-         for Col in Table.Columns do SB.AppendLine('  ' + EscapeIdentifier(CleanName(Col.Name)) + ' := TPropExpression.Create(''' + CleanName(Col.Name) + ''');');
-         
-         if TableNavMap.ContainsKey(Table.Name) then
-         begin
-           for var NavInfo in TableNavMap[Table.Name] do
-              SB.AppendLine('  ' + EscapeIdentifier(NavInfo.Value) + ' := TPropExpression.Create(''' + NavInfo.Value + ''');');
-         end;
-         SB.AppendLine('end;');
-         SB.AppendLine('');
+          ClassUsedNames.AddOrSetValue(FinalNavName.ToUpper, True);
+          ClassUsedNames.AddOrSetValue(('FNAV' + FinalNavName).ToUpper, True);
+          NavInfoList.Add(TPair<TMetaForeignKey, string>.Create(FK, FinalNavName));
+          SB.AppendLine('    FNav' + FinalNavName + ': Lazy<' + RefClass + '>;');
+        end;
+        
+        SB.AppendLine('  public');
+        for Col in Table.Columns do
+        begin
+          PropName := CleanName(Col.Name);
+          var EscapedPropName := EscapeIdentifier(PropName);
+          FieldName := 'F' + PropName;
+          DelphiType := SQLTypeToDelphiType(Col.DataType, Col.Scale, APropertyStyle);
+          if (APropertyStyle = psPOCO) and Col.IsNullable and (DelphiType <> 'string') and (DelphiType <> 'TBytes') then DelphiType := 'Nullable<' + DelphiType + '>';
+          if AMappingStyle = msAttributes then
+          begin
+              var Attrs := TCollections.CreateList<string>;
+              if Col.IsPrimaryKey then Attrs.Add('PK');
+              if Col.IsAutoInc then Attrs.Add('AutoInc');
+              if not Col.IsNullable then Attrs.Add('Required');
+              if (Col.Length > 0) and (DelphiType = 'string') then Attrs.Add('MaxLength(' + Col.Length.ToString + ')');
+              if (Col.Precision > 0) and ((DelphiType = 'Double') or (DelphiType = 'Currency')) then Attrs.Add(Format('Precision(%d, %d)', [Col.Precision, Col.Scale]));
+              if Col.Name <> PropName then Attrs.Add('Column(''' + Col.Name + ''')');
+              if Attrs.Count > 0 then SB.AppendLine('    [' + string.Join(', ', Attrs.ToArray) + ']');
+          end;
+          SB.AppendLine('    property ' + EscapedPropName + ': ' + DelphiType + ' read ' + FieldName + ' write ' + FieldName + ';');
+        end;
+        
+        for var NavInfo in NavInfoList do
+        begin
+          RefClass := 'T' + CleanName(NavInfo.Key.ReferencedTable);
+          FinalNavName := NavInfo.Value;
+           var EscapedNavName := EscapeIdentifier(FinalNavName);
+           if AMappingStyle = msAttributes then SB.AppendLine('    [ForeignKey(''' + NavInfo.Key.ColumnName + ''')]');
+           SB.AppendLine('    property ' + EscapedNavName + ': Lazy<' + RefClass + '> read FNav' + FinalNavName + ' write FNav' + FinalNavName + ';'); 
+        end;
+        SB.AppendLine('  end;');
+        SB.AppendLine('');
       end;
+      
+      if AGenerateMetadata then
+      begin
+        for Table in ATables do
+        begin
+           var EntityClassName := CleanName(Table.Name) + 'Entity';
+           SB.AppendLine('  ' + EntityClassName + ' = class(TEntityType<T' + CleanName(Table.Name) + '>)');
+           SB.AppendLine('  public');
+           for Col in Table.Columns do SB.AppendLine('    class var ' + EscapeIdentifier(CleanName(Col.Name)) + ': TPropExpression;');
+           if TableNavMap.ContainsKey(Table.Name) then
+           begin
+             for var NavInfo in TableNavMap[Table.Name] do SB.AppendLine('    class var ' + EscapeIdentifier(NavInfo.Value) + ': TPropExpression;');
+           end;
+           SB.AppendLine('');
+           SB.AppendLine('    class constructor Create;');
+           SB.AppendLine('  end;');
+           SB.AppendLine('');
+        end;
+      end;
+
+      if (AMappingStyle = msFluent) then SB.AppendLine('procedure RegisterMappings(ModelBuilder: TModelBuilder);' + sLineBreak);
+      SB.AppendLine('implementation' + sLineBreak);
+      
+      if (AMappingStyle = msFluent) then
+      begin
+         SB.AppendLine('procedure RegisterMappings(ModelBuilder: TModelBuilder);' + sLineBreak + 'begin');
+         for Table in ATables do
+         begin
+            ClassName := 'T' + CleanName(Table.Name);
+            SB.AppendLine('  ModelBuilder.Entity<' + ClassName + '>.Table(''' + CleanMappingName(Table.Name) + ''')');
+            for Col in Table.Columns do
+            begin
+               PropName := CleanName(Col.Name);
+               if Col.IsPrimaryKey then SB.AppendLine('    .HasKey(''' + PropName + ''')');
+               if not SameText(Col.Name, PropName) then SB.AppendLine('    .Prop(''' + PropName + ''').Column(''' + Col.Name + ''')');
+               if not Col.IsNullable then SB.AppendLine('    .Prop(''' + PropName + ''').IsRequired');
+               if (Col.Length > 0) and (CleanName(Col.DataType).Contains('CHAR') or CleanName(Col.DataType).Contains('TEXT')) then SB.AppendLine('    .Prop(''' + PropName + ''').MaxLength(' + Col.Length.ToString + ')');
+               if (Col.Precision > 0) then SB.AppendLine(Format('    .Prop(''%s'').Precision(%d, %d)', [PropName, Col.Precision, Col.Scale]));
+            end;
+            if TableNavMap.ContainsKey(Table.Name) then
+            begin
+              for var NavInfo in TableNavMap[Table.Name] do SB.AppendLine('    .Prop(''' + NavInfo.Value + ''').HasForeignKey(''' + NavInfo.Key.ColumnName + ''')');
+            end;
+            SB.AppendLine('    ;');
+         end;
+         SB.AppendLine('end;' + sLineBreak);
+      end;
+      
+      if AGenerateMetadata then
+      begin
+        for Table in ATables do
+        begin
+           var EntityClassName := CleanName(Table.Name) + 'Entity';
+           SB.AppendLine('class constructor ' + EntityClassName + '.Create;' + sLineBreak + 'begin');
+           for Col in Table.Columns do SB.AppendLine('  ' + EscapeIdentifier(CleanName(Col.Name)) + ' := TPropExpression.Create(''' + CleanName(Col.Name) + ''');');
+           if TableNavMap.ContainsKey(Table.Name) then
+           begin
+             for var NavInfo in TableNavMap[Table.Name] do SB.AppendLine('  ' + EscapeIdentifier(NavInfo.Value) + ' := TPropExpression.Create(''' + NavInfo.Value + ''');');
+           end;
+           SB.AppendLine('end;');
+           SB.AppendLine('');
+        end;
+      end;
+      SB.AppendLine('end.');
+      Result := SB.ToString;
+    finally
+      TableNavMap := nil;
     end;
-    
-    SB.AppendLine('end.');
-    Result := SB.ToString;
   finally
-    TableNavMap := nil;
+    SB.Free;
   end;
-finally
-  SB.Free;
-end;
 end;
 
 end.
