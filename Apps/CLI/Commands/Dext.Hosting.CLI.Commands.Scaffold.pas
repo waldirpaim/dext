@@ -79,7 +79,7 @@ begin
   SafeWriteLn('');
   SafeWriteLn('Required:');
   SafeWriteLn('  --connection, -c   FireDAC connection string or database path');
-  SafeWriteLn('  --driver, -d       Database driver: sqlite, pg, mssql, firebird');
+  SafeWriteLn('  --driver, -d       Database driver: sqlite, pg, mssql, firebird, mysql');
   SafeWriteLn('');
   SafeWriteLn('Options:');
   SafeWriteLn('  --output, -o       Output file path (default: Entities.pas)');
@@ -262,9 +262,13 @@ begin
     begin
       FDConnection.ConnectionString := 'DriverID=FB;' + ConnectionStr;
     end
+    else if (DriverName = 'mysql') or (DriverName = 'mariadb') then
+    begin
+      FDConnection.ConnectionString := 'DriverID=MySQL;' + ConnectionStr;
+    end
     else
     begin
-      SafeWriteLn('Error: Unknown driver "' + DriverName + '". Supported: sqlite, pg, mssql, firebird');
+      SafeWriteLn('Error: Unknown driver "' + DriverName + '". Supported: sqlite, pg, mssql, firebird, mysql');
       Exit;
     end;
     

@@ -1,4 +1,4 @@
-﻿unit Dext.Entity.Dialect.MSSQL.Test;
+unit Dext.Entity.Dialect.MSSQL.Test;
 
 interface
 
@@ -6,7 +6,8 @@ uses
   System.SysUtils,
   System.TypInfo,
   Dext.Entity.Dialects,
-  Dext.Entity.Attributes;
+  Dext.Entity.Attributes,
+  Dext.Specifications.Interfaces;
 
 type
   TSQLServerDialectTest = class
@@ -18,6 +19,7 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure Run;
+    procedure TestLockingSQL;
   end;
 
 implementation

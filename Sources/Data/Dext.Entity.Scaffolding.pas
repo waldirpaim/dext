@@ -580,28 +580,65 @@ begin
         var Qry := TFDQuery.Create(nil);
         try
           Qry.Connection := FDConn;
-        Qry.SQL.Text := 'PRAGMA foreign_key_list("' + LActualTable + '")';
-        try
-          Qry.Open;
-          var FkIndex := 0;
-          while not Qry.Eof do
-          begin
-            LFK := Default(TMetaForeignKey);
-            LFK.Name := 'FK_' + ATableName + '_' + IntToStr(FkIndex);
-            LFK.ReferencedTable := Qry.FieldByName('table').AsString;
-            LFK.ColumnName := Qry.FieldByName('from').AsString;
-            LFK.ReferencedColumn := Qry.FieldByName('to').AsString;
-            Result.ForeignKeys := Result.ForeignKeys + [LFK];
-            Inc(FkIndex);
-            Qry.Next;
+          Qry.SQL.Text := 'PRAGMA foreign_key_list("' + LActualTable + '")';
+          try
+            Qry.Open;
+            var FkIndex := 0;
+            while not Qry.Eof do
+            begin
+              LFK := Default(TMetaForeignKey);
+              LFK.Name := 'FK_' + ATableName + '_' + IntToStr(FkIndex);
+              LFK.ReferencedTable := Qry.FieldByName('table').AsString;
+              LFK.ColumnName := Qry.FieldByName('from').AsString;
+              LFK.ReferencedColumn := Qry.FieldByName('to').AsString;
+              Result.ForeignKeys := Result.ForeignKeys + [LFK];
+              Inc(FkIndex);
+              Qry.Next;
+            end;
+          except
           end;
-        except
+        finally
+          Qry.Free;
         end;
-      finally
-        Qry.Free;
+      end
+      else if SameText(FDConn.DriverName, 'FB') then
+      begin
+        var Qry := TFDQuery.Create(nil);
+        try
+          Qry.Connection := FDConn;
+          Qry.SQL.Text := 
+            'SELECT ' +
+            '    TRIM(R.RDB$CONSTRAINT_NAME) AS CONSTRAINT_NAME, ' +
+            '    TRIM(IS2.RDB$FIELD_NAME) AS COLUMN_NAME, ' +
+            '    TRIM(R2.RDB$RELATION_NAME) AS REF_TABLE_NAME, ' +
+            '    TRIM(IS3.RDB$FIELD_NAME) AS REF_COLUMN_NAME ' +
+            'FROM RDB$RELATION_CONSTRAINTS R ' +
+            'JOIN RDB$REF_CONSTRAINTS RC ON R.RDB$CONSTRAINT_NAME = RC.RDB$CONSTRAINT_NAME ' +
+            'JOIN RDB$RELATION_CONSTRAINTS R2 ON RC.RDB$CONST_NAME_UQ = R2.RDB$CONSTRAINT_NAME ' +
+            'JOIN RDB$INDEX_SEGMENTS IS2 ON R.RDB$INDEX_NAME = IS2.RDB$INDEX_NAME ' +
+            'JOIN RDB$INDEX_SEGMENTS IS3 ON R2.RDB$INDEX_NAME = IS3.RDB$INDEX_NAME ' +
+            'WHERE R.RDB$CONSTRAINT_TYPE = ''FOREIGN KEY'' ' +
+            '  AND R.RDB$RELATION_NAME = :TABLE_NAME';
+          Qry.ParamByName('TABLE_NAME').AsString := LActualTable.ToUpper;
+          try
+            Qry.Open;
+            while not Qry.Eof do
+            begin
+              LFK := Default(TMetaForeignKey);
+              LFK.Name := Qry.FieldByName('CONSTRAINT_NAME').AsString;
+              LFK.ColumnName := Qry.FieldByName('COLUMN_NAME').AsString;
+              LFK.ReferencedTable := Qry.FieldByName('REF_TABLE_NAME').AsString;
+              LFK.ReferencedColumn := Qry.FieldByName('REF_COLUMN_NAME').AsString;
+              Result.ForeignKeys := Result.ForeignKeys + [LFK];
+              Qry.Next;
+            end;
+          except
+          end;
+        finally
+          Qry.Free;
+        end;
       end;
     end;
-  end;
   finally
   end;
 end;
