@@ -56,7 +56,11 @@ type
   ///   Specialized high-performance dataset that maps lists of objects and records directly to VCL/FMX.
   ///   Supports Sorting, Filtering, Master-Detail, Streaming Iterators, and Design-Time Preview without compilation.
   /// </summary>
+  {$IF CompilerVersion >= 36.0}
   [ComponentPlatformsAttribute(pidWin32 or pidWin64 or pidWin64x)]
+  {$ELSE}
+  [ComponentPlatformsAttribute(pidWin32 or pidWin64)]
+  {$ENDIF}
   TEntityDataSet = class(TDataSet)
   private
     FEntityMap: TEntityMap;
@@ -832,7 +836,28 @@ begin
                   begin
                     case Reader.TokenType of
                       TJsonTokenType.StringValue:
-                        RttiProp.SetValue(CurrentObj, Reader.GetString);
+                      begin
+                        if RttiProp.PropertyType.Handle = TypeInfo(TDateTime) then
+                        begin
+                          var LDate: TDateTime;
+                          if TryParseISODateTime(Reader.GetString, LDate) then
+                            RttiProp.SetValue(CurrentObj, LDate);
+                        end
+                        else if RttiProp.PropertyType.Handle = TypeInfo(TDate) then
+                        begin
+                          var LDate: TDateTime;
+                          if TryParseISODateTime(Reader.GetString, LDate) then
+                            RttiProp.SetValue(CurrentObj, Trunc(LDate));
+                        end
+                        else if RttiProp.PropertyType.Handle = TypeInfo(TTime) then
+                        begin
+                          var LDate: TDateTime;
+                          if TryParseISODateTime(Reader.GetString, LDate) then
+                            RttiProp.SetValue(CurrentObj, Frac(LDate));
+                        end
+                        else
+                          RttiProp.SetValue(CurrentObj, Reader.GetString);
+                      end;
                       TJsonTokenType.Number:
                       begin
                         if RttiProp.PropertyType.Handle = TypeInfo(Integer) then

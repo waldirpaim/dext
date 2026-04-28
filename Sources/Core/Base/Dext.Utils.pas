@@ -326,9 +326,12 @@ begin
 end;
 
 procedure HideConsoleIfAutocreated;
+{$IFDEF MSWINDOWS}
+var
+  ConsoleProcessList: array[0..1] of DWORD;
+{$ENDIF}
 begin
   {$IFDEF MSWINDOWS}
-  var ConsoleProcessList: array[0..1] of DWORD;
   if GetConsoleProcessList(@ConsoleProcessList[0], 2) = 1 then
     HideConsole;
   {$ENDIF}
