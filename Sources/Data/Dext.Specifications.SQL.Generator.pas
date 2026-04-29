@@ -1911,8 +1911,13 @@ begin
         
         if not IsMapped then Continue;
         
-        // Skip lazy properties from default SELECT
-        if (PropMap <> nil) and PropMap.IsLazy then Continue;
+        // Skip navigation properties and lazy properties from default SELECT
+        if (PropMap <> nil) and (PropMap.IsLazy or PropMap.IsNavigation) then Continue;
+
+        // TypeKind safety net for navigation properties not explicitly marked
+        var LKind := Prop.PropertyType.TypeKind;
+        if LKind in [tkClass, tkInterface] then Continue;
+        if (LKind = tkRecord) and Prop.PropertyType.Name.StartsWith('Lazy<') then Continue;
         
         if not First then SB.Append(', ');
         First := False;
@@ -2088,6 +2093,14 @@ begin
          ColName := FNamingStrategy.GetColumnName(Prop);
 
       if not IsMapped then Continue;
+
+      // Skip navigation properties and lazy properties from default SELECT
+      if (PropMap <> nil) and (PropMap.IsLazy or PropMap.IsNavigation) then Continue;
+
+      // TypeKind safety net for navigation properties not explicitly marked
+      var LKind := Prop.PropertyType.TypeKind;
+      if LKind in [tkClass, tkInterface] then Continue;
+      if (LKind = tkRecord) and Prop.PropertyType.Name.StartsWith('Lazy<') then Continue;
 
       if not First then SB.Append(', ');
       First := False;

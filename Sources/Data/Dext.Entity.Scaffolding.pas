@@ -566,7 +566,17 @@ begin
         if Meta.FindField('REF_COLUMN_NAME') <> nil then LFK.ReferencedColumn := Meta.FieldByName('REF_COLUMN_NAME').AsString.Trim
         else if Meta.FindField('PK_COLUMN_NAME') <> nil then LFK.ReferencedColumn := Meta.FieldByName('PK_COLUMN_NAME').AsString.Trim;
 
-        Result.ForeignKeys := Result.ForeignKeys + [LFK];
+        var LFound := False;
+        for var ExistingFK in Result.ForeignKeys do
+          if SameText(ExistingFK.ColumnName, LFK.ColumnName) and 
+             SameText(ExistingFK.ReferencedTable, LFK.ReferencedTable) then
+          begin
+            LFound := True;
+            Break;
+          end;
+
+        if not LFound then
+          Result.ForeignKeys := Result.ForeignKeys + [LFK];
         Meta.Next;
       end;
     except
@@ -591,7 +601,18 @@ begin
               LFK.ReferencedTable := Qry.FieldByName('table').AsString;
               LFK.ColumnName := Qry.FieldByName('from').AsString;
               LFK.ReferencedColumn := Qry.FieldByName('to').AsString;
-              Result.ForeignKeys := Result.ForeignKeys + [LFK];
+
+              var LFound := False;
+              for var ExistingFK in Result.ForeignKeys do
+                if SameText(ExistingFK.ColumnName, LFK.ColumnName) and 
+                   SameText(ExistingFK.ReferencedTable, LFK.ReferencedTable) then
+                begin
+                  LFound := True;
+                  Break;
+                end;
+
+              if not LFound then
+                Result.ForeignKeys := Result.ForeignKeys + [LFK];
               Inc(FkIndex);
               Qry.Next;
             end;
