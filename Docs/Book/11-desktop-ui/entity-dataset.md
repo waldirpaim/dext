@@ -91,3 +91,26 @@ Dext ensures that the design-time state doesn't pollute your source files:
 - **Zero Allocation on Value Loading:** Value reading maps to memory offsets accurately.
 - **DML Memory Mode:** Append, Edit, and Delete fully operational inside the dataset structures.
 - **Component Palette Ready:** Support for dropping statically at design-time for persistent `TFields`.
+
+---
+
+## 🛠️ Troubleshooting
+
+### Name Conflicts with Devart EntityDAC
+
+If you already have **EntityDAC** by Devart installed in your Delphi IDE, you might encounter a conflict when trying to install the `Dext.EF.Design.bpl` package. Both libraries use components with identical names (`TEntityDataProvider` and `TEntityDataSet`), and the Delphi IDE does not allow installing different components with the same name.
+
+**How to resolve this:**
+
+1. **Are you building a Desktop application?**
+   If you are building Web APIs, Daemons, or Console applications, you don't actually need to install the `Dext.EF.Design.bpl` package. You can simply use Dext entirely through code without any issues. The design-time package is only meant to provide drag-and-drop components for VCL/FMX Forms.
+
+2. **Are you using Devart and Dext in the same Desktop project?**
+   If you intend to use both ORMs visually in the same project, this limitation from the Delphi IDE will prevent having both installed at the same time. 
+
+3. **Using only Dext for your Desktop UI:**
+   If you just want to use Dext, you can temporarily disable the Devart package:
+   * In the Delphi IDE, go to **Component > Install Packages**.
+   * Find the Devart EntityDAC packages in the list and **uncheck** them.
+   * Click **Save**.
+   * You can now safely install the `Dext.EF.Design.bpl` package and use `TEntityDataSet` and `TEntityDataProvider` on your forms.
