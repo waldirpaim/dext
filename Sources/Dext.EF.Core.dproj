@@ -123,7 +123,6 @@
         <DCCReference Include="FireDACSqliteDriver.dcp"/>
         <DCCReference Include="Dext.AST.dcp"/>
         <DCCReference Include="Dext.Core.dcp"/>
-        <DCCReference Include="FireDACPgDriver.dcp"/>
         <DCCReference Include="Data\Dext.Entity.Context.pas"/>
         <DCCReference Include="Data\Dext.Entity.Setup.pas"/>
         <DCCReference Include="Data\Dext.Entity.Mapping.pas"/>

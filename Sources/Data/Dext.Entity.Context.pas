@@ -53,6 +53,7 @@ uses
   Dext.Specifications.Fluent,
   Dext.Specifications.Types,
   Dext.Core.Reflection,
+  Dext.Threading.Sync,
   Dext.Threading.Async;
 
 type
@@ -195,7 +196,7 @@ type
     
   public
     class var FModelCache: IDictionary<TClass, TModelBuilder>;
-    class var FModelLock: TLightweightMREW; // For thread safety (D.1)
+    class var FModelLock: TDextMREW; // For thread safety (D.1)
     
     constructor Create(const AConnection: IDbConnection; const ADialect: ISQLDialect = nil; const ANamingStrategy: INamingStrategy = nil; const ATenantProvider: ITenantProvider = nil); overload;
     /// <summary>Initializes the context based on a configurable options object.</summary>
@@ -362,7 +363,7 @@ const
 class constructor TDbContext.Create;
 begin
   FModelCache := TCollections.CreateDictionary<TClass, TModelBuilder>(True);
-  // TLightweightMREW is a record
+  // TDextMREW is a record
 end;
 
  class destructor TDbContext.Destroy;
