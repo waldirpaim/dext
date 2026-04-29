@@ -1,5 +1,8 @@
 program DextSidecar;
 
+{$MESSAGE HINT 'Dext CLI: This project generates the ".\Apps\dext-sidecar.exe" binary.'}
+
+
 uses
   Dext.MM,
   Vcl.Forms,

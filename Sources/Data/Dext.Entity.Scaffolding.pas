@@ -47,6 +47,7 @@ type
     IsNullable: Boolean;
     IsPrimaryKey: Boolean;
     IsAutoInc: Boolean;
+    IsArray: Boolean; // Firebird array columns (e.g. VARCHAR[1:5]) — unsupported by standard SELECT
   end;
 
   TMetaForeignKey = record
@@ -418,8 +419,10 @@ begin
             begin
               var LFound := False;
               for var ExistingFK in LTable.ForeignKeys do
-                if SameText(ExistingFK.ColumnName, LFK.ColumnName) and
-                   SameText(ExistingFK.ReferencedTable, LFK.ReferencedTable) then
+                // Group by Constraint Name to avoid duplicates in composite keys
+                if SameText(ExistingFK.Name, LFK.Name) or
+                   (SameText(ExistingFK.ColumnName, LFK.ColumnName) and
+                    SameText(ExistingFK.ReferencedTable, LFK.ReferencedTable)) then
                 begin
                   LFound := True;
                   Break;
@@ -508,8 +511,41 @@ begin
       LCol.IsPrimaryKey := False;
       if Meta.FindField('PRIMARY_KEY') <> nil then LCol.IsPrimaryKey := Meta.FieldByName('PRIMARY_KEY').AsBoolean;
       LCol.IsAutoInc := False;
+      LCol.IsArray := False;
       Result.Columns := Result.Columns + [LCol];
       Meta.Next;
+    end;
+
+    // Detect Firebird array columns (RDB$DIMENSIONS > 0)
+    // These columns cannot be selected as scalar values and must be excluded from entities
+    if SameText(FDConn.DriverName, 'FB') then
+    begin
+      var ArrQry := TFDQuery.Create(nil);
+      try
+        ArrQry.Connection := FDConn;
+        ArrQry.SQL.Text :=
+          'SELECT TRIM(rf.RDB$FIELD_NAME) AS FIELD_NAME ' +
+          'FROM RDB$RELATION_FIELDS rf ' +
+          'JOIN RDB$FIELDS f ON rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME ' +
+          'WHERE TRIM(rf.RDB$RELATION_NAME) = :tablename AND COALESCE(f.RDB$DIMENSIONS, 0) > 0';
+        ArrQry.ParamByName('tablename').AsString := LActualTable;
+        ArrQry.Open;
+        while not ArrQry.Eof do
+        begin
+          var LArrColName := ArrQry.FieldByName('FIELD_NAME').AsString.Trim;
+          for i := 0 to High(Result.Columns) do
+            if SameText(Result.Columns[i].Name, LArrColName) then
+            begin
+              Result.Columns[i].IsArray := True;
+              if Assigned(FConnection.OnLog) then
+                FConnection.OnLog(Format('  [Scaffolding] Skipping array column: %s.%s', [LActualTable, LArrColName]));
+              Break;
+            end;
+          ArrQry.Next;
+        end;
+      finally
+        ArrQry.Free;
+      end;
     end;
     
     Meta.Close;
@@ -856,6 +892,7 @@ begin
 
         for Col in Table.Columns do
         begin
+          if Col.IsArray then Continue; // Skip Firebird array columns (unsupported by scalar SELECT)
           PropName := CleanName(Col.Name);
           FieldName := 'F' + PropName;
           DelphiType := SQLTypeToDelphiType(Col.DataType, Col.Scale, APropertyStyle);
@@ -869,28 +906,40 @@ begin
         begin
           RefClass := 'T' + CleanName(FK.ReferencedTable);
           if RefClass = 'T' then Continue;
-          
+
           NavPropName := CleanName(FK.ColumnName);
           if NavPropName.EndsWith('Id', True) then NavPropName := NavPropName.Substring(0, NavPropName.Length - 2);
           if (NavPropName = '') or SameText(NavPropName, 'Id') then NavPropName := CleanName(FK.ReferencedTable);
-          
+
           if NavPropName = '' then Continue;
+
+          // Step 1: Try the base name directly (no collision with columns or other navs)
           FinalNavName := NavPropName;
-          var Suffix := 1;
-          while ClassUsedNames.ContainsKey(FinalNavName.ToUpper) or ClassUsedNames.ContainsKey(('FNAV' + FinalNavName).ToUpper) do
+          if ClassUsedNames.ContainsKey(FinalNavName.ToUpper) or
+             ClassUsedNames.ContainsKey(('F' + FinalNavName).ToUpper) then
           begin
-            Inc(Suffix);
-            FinalNavName := NavPropName + Suffix.ToString;
+            // Step 2: EF Core convention — append 'Navigation' suffix on collision
+            FinalNavName := NavPropName + 'Navigation';
+            // Step 3: Numeric fallback if 'Navigation' also collides (edge case)
+            var Suffix := 1;
+            while ClassUsedNames.ContainsKey(FinalNavName.ToUpper) or
+                  ClassUsedNames.ContainsKey(('F' + FinalNavName).ToUpper) do
+            begin
+              Inc(Suffix);
+              FinalNavName := NavPropName + 'Navigation' + Suffix.ToString;
+            end;
           end;
+
           ClassUsedNames.AddOrSetValue(FinalNavName.ToUpper, True);
-          ClassUsedNames.AddOrSetValue(('FNAV' + FinalNavName).ToUpper, True);
+          ClassUsedNames.AddOrSetValue(('F' + FinalNavName).ToUpper, True);
           NavInfoList.Add(TPair<TMetaForeignKey, string>.Create(FK, FinalNavName));
-          SB.AppendLine('    FNav' + FinalNavName + ': Lazy<' + RefClass + '>;');
+          SB.AppendLine('    F' + FinalNavName + ': Lazy<' + RefClass + '>;');
         end;
         
         SB.AppendLine('  public');
         for Col in Table.Columns do
         begin
+          if Col.IsArray then Continue; // Skip Firebird array columns (unsupported by scalar SELECT)
           PropName := CleanName(Col.Name);
           var EscapedPropName := EscapeIdentifier(PropName);
           FieldName := 'F' + PropName;
@@ -916,7 +965,7 @@ begin
           FinalNavName := NavInfo.Value;
            var EscapedNavName := EscapeIdentifier(FinalNavName);
            if AMappingStyle = msAttributes then SB.AppendLine('    [ForeignKey(''' + NavInfo.Key.ColumnName + ''')]');
-           SB.AppendLine('    property ' + EscapedNavName + ': Lazy<' + RefClass + '> read FNav' + FinalNavName + ' write FNav' + FinalNavName + ';'); 
+           SB.AppendLine('    property ' + EscapedNavName + ': Lazy<' + RefClass + '> read F' + FinalNavName + ' write F' + FinalNavName + ';');
         end;
         SB.AppendLine('  end;');
         SB.AppendLine('');
@@ -929,7 +978,9 @@ begin
            var EntityClassName := CleanName(Table.Name) + 'Entity';
            SB.AppendLine('  ' + EntityClassName + ' = class(TEntityType<T' + CleanName(Table.Name) + '>)');
            SB.AppendLine('  public');
-           for Col in Table.Columns do SB.AppendLine('    class var ' + EscapeIdentifier(CleanName(Col.Name)) + ': TPropExpression;');
+           for Col in Table.Columns do
+             if not Col.IsArray then
+               SB.AppendLine('    class var ' + EscapeIdentifier(CleanName(Col.Name)) + ': TPropExpression;');
            if TableNavMap.ContainsKey(Table.Name) then
            begin
              for var NavInfo in TableNavMap[Table.Name] do SB.AppendLine('    class var ' + EscapeIdentifier(NavInfo.Value) + ': TPropExpression;');
@@ -953,6 +1004,7 @@ begin
             SB.AppendLine('  ModelBuilder.Entity<' + ClassName + '>.Table(''' + CleanMappingName(Table.Name) + ''')');
             for Col in Table.Columns do
             begin
+               if Col.IsArray then Continue;
                PropName := CleanName(Col.Name);
                if Col.IsPrimaryKey then SB.AppendLine('    .HasKey(''' + PropName + ''')');
                if not SameText(Col.Name, PropName) then SB.AppendLine('    .Prop(''' + PropName + ''').Column(''' + Col.Name + ''')');
@@ -975,7 +1027,9 @@ begin
         begin
            var EntityClassName := CleanName(Table.Name) + 'Entity';
            SB.AppendLine('class constructor ' + EntityClassName + '.Create;' + sLineBreak + 'begin');
-           for Col in Table.Columns do SB.AppendLine('  ' + EscapeIdentifier(CleanName(Col.Name)) + ' := TPropExpression.Create(''' + CleanName(Col.Name) + ''');');
+           for Col in Table.Columns do
+             if not Col.IsArray then
+               SB.AppendLine('  ' + EscapeIdentifier(CleanName(Col.Name)) + ' := TPropExpression.Create(''' + CleanName(Col.Name) + ''');');
            if TableNavMap.ContainsKey(Table.Name) then
            begin
              for var NavInfo in TableNavMap[Table.Name] do SB.AppendLine('  ' + EscapeIdentifier(NavInfo.Value) + ' := TPropExpression.Create(''' + NavInfo.Value + ''');');
