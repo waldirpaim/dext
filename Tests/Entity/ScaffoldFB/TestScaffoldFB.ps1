@@ -1,7 +1,7 @@
 # TestScaffoldFB.ps1 - Manual test for Firebird scaffolding
-$DextExe = "C:\dev\Dext\DextRepository\Apps\dext.exe"
-$DbPath = "C:\dev\Dext\DextRepository\Tests\Output\EMPLOYEE.FDB"
-$OutputDir = "C:\dev\Dext\DextRepository\scratch\ScaffoldFB"
+$DextExe = ".\Apps\dext.exe"
+$DbPath = ".\Tests\Output\EMPLOYEE.FDB"
+$OutputDir = ".\Tests\ScaffoldFB"
 
 if (-not (Test-Path $OutputDir)) { mkdir $OutputDir }
 
