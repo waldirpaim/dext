@@ -252,6 +252,7 @@ type
     function GetJsonValueSQL(const AColumn, APath: string): string; override;
     function GenerateProcedureCallSQL(const AProcName: string; const AParamNames: TArray<string>): string; override;
     function GetLockingSQL(ALockMode: TLockMode): string; override;
+    function GetColumnTypeForField(AFieldType: TFieldType; AIsAutoInc: Boolean = False): string; override;
   end;
 
   /// <summary>
@@ -270,6 +271,7 @@ type
     function GenerateAlterColumn(AOp: TAlterColumnOperation): string; override;
     function GetDialect: TDatabaseDialect; override;
     function GetJsonValueSQL(const AColumn, APath: string): string; override;
+    function GetColumnTypeForField(AFieldType: TFieldType; AIsAutoInc: Boolean = False): string; override;
   end;
 
   /// <summary>
@@ -1130,7 +1132,12 @@ end;
 function TSQLServerDialect.GetColumnType(ATypeInfo: PTypeInfo; AIsAutoInc: Boolean): string;
 begin
   if AIsAutoInc then
-    Exit('INT IDENTITY(1,1)');
+  begin
+    if (ATypeInfo <> nil) and (ATypeInfo.Kind = tkInt64) then
+      Exit('BIGINT IDENTITY(1,1)')
+    else
+      Exit('INT IDENTITY(1,1)');
+  end;
 
   case ATypeInfo.Kind of
     tkInteger: Result := 'INT';
@@ -1253,6 +1260,14 @@ begin
   Result := Format('JSON_VALUE(%s, ''$.%s'')', [AColumn, APath]);
 end;
 
+function TSQLServerDialect.GetColumnTypeForField(AFieldType: TFieldType; AIsAutoInc: Boolean): string;
+begin
+  if AFieldType = ftBoolean then
+    Result := 'BIT'
+  else
+    Result := inherited GetColumnTypeForField(AFieldType, AIsAutoInc);
+end;
+
 { TMySQLDialect }
 
 function TMySQLDialect.BooleanToSQL(AValue: Boolean): string;
@@ -1273,7 +1288,12 @@ end;
 function TMySQLDialect.GetColumnType(ATypeInfo: PTypeInfo; AIsAutoInc: Boolean): string;
 begin
   if AIsAutoInc then
-    Exit('INT AUTO_INCREMENT');
+  begin
+    if (ATypeInfo <> nil) and (ATypeInfo.Kind = tkInt64) then
+      Exit('BIGINT AUTO_INCREMENT')
+    else
+      Exit('INT AUTO_INCREMENT');
+  end;
 
   case ATypeInfo.Kind of
     tkInteger: Result := 'INT';
@@ -1331,6 +1351,14 @@ function TMySQLDialect.GenerateAlterColumn(AOp: TAlterColumnOperation): string;
 begin
   // MySQL uses MODIFY COLUMN
   Result := Format('ALTER TABLE %s MODIFY COLUMN %s', [QuoteIdentifier(AOp.TableName), GenerateColumnDefinition(AOp.Column)]);
+end;
+
+function TMySQLDialect.GetColumnTypeForField(AFieldType: TFieldType; AIsAutoInc: Boolean): string;
+begin
+  if AFieldType = ftBoolean then
+    Result := 'TINYINT(1)'
+  else
+    Result := inherited GetColumnTypeForField(AFieldType, AIsAutoInc);
 end;
 
 function TMySQLDialect.GetDialect: TDatabaseDialect;

@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -43,6 +43,7 @@ uses
   Dext.Entity.TypeConverters,
   Dext.Core.SmartTypes,
   Dext.Core.Reflection,
+  Dext.Threading.Sync,
   Dext.Specifications.Interfaces;
 
 type
@@ -376,7 +377,7 @@ type
     FMaps: IDictionary<PTypeInfo, TEntityMap>;
     FDiscoveryNames: IDictionary<PTypeInfo, string>;
     FFactories: IDictionary<PTypeInfo, IDynamicDbSetFactory>;
-    FLock: TLightweightMREW; // For thread safety (D.1)
+    FLock: TDextMREW; // For thread safety (D.1)
     class constructor Create;
 
     class destructor Destroy;
@@ -1444,7 +1445,7 @@ begin
   FMaps := TCollections.CreateDictionary<PTypeInfo, TEntityMap>(True);
   FDiscoveryNames := TCollections.CreateDictionary<PTypeInfo, string>;
   FFactories := TCollections.CreateDictionary<PTypeInfo, IDynamicDbSetFactory>;
-  // TLightweightMREW is a record and doesn't need explicit allocation
+  // TDextMREW is a record and doesn't need explicit allocation
 end;
 
 destructor TModelBuilder.Destroy;

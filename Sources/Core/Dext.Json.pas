@@ -1255,7 +1255,14 @@ begin
     // Skip non-public/published properties
     if (Prop.Visibility <> mvPublic) and (Prop.Visibility <> mvPublished) then
       Continue;
-      
+
+    // Issue #108: Skip properties declared by TObject or TInterfacedObject.
+    // These are Delphi internal properties (e.g. 'refCount') used for reference
+    // counting and memory management -- they must never appear in JSON output.
+    if (Prop.Parent <> nil) and
+       ((Prop.Parent.Name = 'TObject') or (Prop.Parent.Name = 'TInterfacedObject')) then
+      Continue;
+
     // Skip if has JsonIgnore attribute
     var ShouldSkip := False;
     for var Attr in Prop.GetAttributes do

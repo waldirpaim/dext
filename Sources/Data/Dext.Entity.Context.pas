@@ -53,6 +53,7 @@ uses
   Dext.Specifications.Fluent,
   Dext.Specifications.Types,
   Dext.Core.Reflection,
+  Dext.Threading.Sync,
   Dext.Threading.Async;
 
 type
@@ -195,7 +196,7 @@ type
     
   public
     class var FModelCache: IDictionary<TClass, TModelBuilder>;
-    class var FModelLock: TLightweightMREW; // For thread safety (D.1)
+    class var FModelLock: TDextMREW; // For thread safety (D.1)
     
     constructor Create(const AConnection: IDbConnection; const ADialect: ISQLDialect = nil; const ANamingStrategy: INamingStrategy = nil; const ATenantProvider: ITenantProvider = nil); overload;
     /// <summary>Initializes the context based on a configurable options object.</summary>
@@ -362,7 +363,7 @@ const
 class constructor TDbContext.Create;
 begin
   FModelCache := TCollections.CreateDictionary<TClass, TModelBuilder>(True);
-  // TLightweightMREW is a record
+  // TDextMREW is a record
 end;
 
  class destructor TDbContext.Destroy;
@@ -772,9 +773,17 @@ begin
           if Attr is ForeignKeyAttribute then
           begin
             // Found a FK. Check if the property type is a class we manage.
-            if Prop.PropertyType.TypeKind = tkClass then
+            if True then
             begin
-               var DepType := Prop.PropertyType.Handle;
+               var DepType: PTypeInfo := nil;
+               if Prop.PropertyType.TypeKind = tkClass then
+                 DepType := Prop.PropertyType.Handle
+               else if Prop.PropertyType.TypeKind = tkRecord then
+               begin
+                 var LMeta := TReflection.GetMetadata(Prop.PropertyType.Handle);
+                 if (LMeta <> nil) and (LMeta.InnerType <> nil) then
+                   DepType := LMeta.InnerType;
+               end;
                // Only add dependency if it's in our Cache (managed entity)
                if FCache.ContainsKey(DepType) and (DepType <> Pair.Key) then // Avoid self-dependency
                begin

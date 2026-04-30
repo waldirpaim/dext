@@ -113,7 +113,7 @@ type
   public
     class function GetCascadeSQL(AAction: TCascadeAction): string;
     class function GetColumnNameForProperty(ATyp: TRttiType; const APropName: string; ANamingStrategy: INamingStrategy = nil): string;
-    class function GetRelatedTableAndPK(AClass: TClass; out ATable, APK: string; ANamingStrategy: INamingStrategy = nil): Boolean;
+    class function GetRelatedTableAndPK(AClass: TClass; out ATable, ASchema, APK: string; ANamingStrategy: INamingStrategy = nil): Boolean;
   end;
 
   /// <summary>
@@ -344,13 +344,14 @@ begin
   end;
 end;
 
-class function TSQLGeneratorHelper.GetRelatedTableAndPK(AClass: TClass; out ATable, APK: string; ANamingStrategy: INamingStrategy): Boolean;
+class function TSQLGeneratorHelper.GetRelatedTableAndPK(AClass: TClass; out ATable, ASchema, APK: string; ANamingStrategy: INamingStrategy): Boolean;
 var
   RTyp: TRttiType;
   RProp: TRttiProperty;
   RAttr, SubAttr: TCustomAttribute;
 begin
   Result := False;
+  ASchema := '';
   RTyp := TReflection.GetMetadata(AClass.ClassInfo).RttiType;
   if RTyp = nil then Exit;
   
@@ -361,6 +362,7 @@ begin
     if RAttr is TableAttribute then
     begin
       ATable := TableAttribute(RAttr).Name;
+      ASchema := TableAttribute(RAttr).Schema;
       HasTableAttr := True;
     end;
       
@@ -1909,8 +1911,13 @@ begin
         
         if not IsMapped then Continue;
         
-        // Skip lazy properties from default SELECT
-        if (PropMap <> nil) and PropMap.IsLazy then Continue;
+        // Skip navigation properties and lazy properties from default SELECT
+        if (PropMap <> nil) and (PropMap.IsLazy or PropMap.IsNavigation) then Continue;
+
+        // TypeKind safety net for navigation properties not explicitly marked
+        var LKind := Prop.PropertyType.TypeKind;
+        if LKind in [tkClass, tkInterface] then Continue;
+        if (LKind = tkRecord) and Prop.PropertyType.Name.StartsWith('Lazy<') then Continue;
         
         if not First then SB.Append(', ');
         First := False;
@@ -2086,6 +2093,14 @@ begin
          ColName := FNamingStrategy.GetColumnName(Prop);
 
       if not IsMapped then Continue;
+
+      // Skip navigation properties and lazy properties from default SELECT
+      if (PropMap <> nil) and (PropMap.IsLazy or PropMap.IsNavigation) then Continue;
+
+      // TypeKind safety net for navigation properties not explicitly marked
+      var LKind := Prop.PropertyType.TypeKind;
+      if LKind in [tkClass, tkInterface] then Continue;
+      if (LKind = tkRecord) and Prop.PropertyType.Name.StartsWith('Lazy<') then Continue;
 
       if not First then SB.Append(', ');
       First := False;
@@ -2273,8 +2288,22 @@ begin
          ColName := FNamingStrategy.GetColumnName(Prop);
 
       // Class/Interface detection as a safety net (unless explicitly mapped via attributes/mapping)
-      if IsMapped and (PropMap = nil) and (Prop.PropertyType.TypeKind in [tkClass, tkInterface]) then
-        IsMapped := False;
+      if IsMapped then
+      begin
+        var LKind := Prop.PropertyType.TypeKind;
+        if LKind in [tkClass, tkInterface] then
+        begin
+          // Classes/Interfaces are only mapped if they have a converter (already handled in PropMap.IsNavigation)
+          if (PropMap = nil) or PropMap.IsNavigation then
+            IsMapped := False;
+        end
+        else if LKind = tkRecord then
+        begin
+          var LTypeName := Prop.PropertyType.Name;
+          if LTypeName.StartsWith('Lazy<') then
+             IsMapped := False;
+        end;
+      end;
 
       for Attr in Prop.GetAttributes do
       begin
@@ -2292,30 +2321,51 @@ begin
              var LRelatedTargetType: TRttiType := nil;
              var LFKPropName := FK.ColumnName;
 
-             if (Prop.PropertyType.TypeKind = tkClass) then
+             var LIsNavProp := (Prop.PropertyType.TypeKind = tkClass);
+             if (not LIsNavProp) and (Prop.PropertyType.TypeKind = tkRecord) and Prop.PropertyType.Name.StartsWith('Lazy<') then
+               LIsNavProp := True;
+
+             if LIsNavProp then
              begin
-                // Pattern A: [ForeignKey('RequesterId')] property Requester: TUser
+                // Pattern A: [ForeignKey('RequesterId')] property Requester: TUser (or Lazy<TUser>)
                 LLocalCol := TSQLGeneratorHelper.GetColumnNameForProperty(Typ, LFKPropName, FNamingStrategy);
-                LRelatedTargetType := Prop.PropertyType;
+                if Prop.PropertyType.TypeKind = tkRecord then
+                begin
+                   var LMeta := TReflection.GetMetadata(Prop.PropertyType.Handle);
+                   if LMeta.InnerType <> nil then
+                     LRelatedTargetType := TReflection.Context.GetType(LMeta.InnerType);
+                end
+                else
+                  LRelatedTargetType := Prop.PropertyType;
              end
              else
              begin
                 // Pattern B: [ForeignKey('Requester')] property RequesterId: Integer
                 var NavProp := Typ.GetProperty(LFKPropName);
-                if (NavProp <> nil) and (NavProp.PropertyType.TypeKind = tkClass) then
+                if NavProp <> nil then
                 begin
-                   LRelatedTargetType := NavProp.PropertyType;
-                   // LLocalCol is already the current column name being processed (RequesterId)
+                   if NavProp.PropertyType.TypeKind = tkClass then
+                     LRelatedTargetType := NavProp.PropertyType
+                   else if (NavProp.PropertyType.TypeKind = tkRecord) and NavProp.PropertyType.Name.StartsWith('Lazy<') then
+                   begin
+                     var LMeta := TReflection.GetMetadata(NavProp.PropertyType.Handle);
+                     if LMeta.InnerType <> nil then
+                       LRelatedTargetType := TReflection.Context.GetType(LMeta.InnerType);
+                   end;
                 end;
              end;
 
+             var RelatedSchema: string;
              if (LRelatedTargetType <> nil) and 
-                // logic below renamed to use LRelatedTargetType
-                TSQLGeneratorHelper.GetRelatedTableAndPK(LRelatedTargetType.AsInstance.MetaclassType, RelatedTable, RelatedPK, FNamingStrategy) then
+                TSQLGeneratorHelper.GetRelatedTableAndPK(LRelatedTargetType.AsInstance.MetaclassType, RelatedTable, RelatedSchema, RelatedPK, FNamingStrategy) then
              begin
+                 var LFullRelatedTable := RelatedTable;
+                 if RelatedSchema <> '' then
+                   LFullRelatedTable := RelatedSchema + '.' + RelatedTable;
+
                  LConstraint := Format('FOREIGN KEY (%s) REFERENCES %s (%s)', 
                    [FDialect.QuoteIdentifier(LLocalCol), 
-                    FDialect.QuoteIdentifier(RelatedTable), 
+                    FDialect.QuoteIdentifier(LFullRelatedTable), 
                     FDialect.QuoteIdentifier(RelatedPK)]);
                     
                  if FK.OnDelete <> caNoAction then
