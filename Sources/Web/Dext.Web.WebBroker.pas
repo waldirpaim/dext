@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -124,6 +124,11 @@ type
     procedure AppendCookie(const AName, AValue: string; const AOptions: TCookieOptions); overload;
     procedure AppendCookie(const AName, AValue: string); overload;
     procedure DeleteCookie(const AName: string);
+    procedure Redirect(const AUrl: string; APermanent: Boolean = False);
+    procedure Unauthorized(const AMessage: string = '');
+    procedure Forbidden(const AMessage: string = '');
+    procedure BadRequest(const AMessage: string = '');
+    procedure NotFound(const AMessage: string = '');
     property StatusCode: Integer read GetStatusCode write SetStatusCode;
     property ContentType: string read GetContentType write SetContentType;
   end;
@@ -559,6 +564,39 @@ begin
   AppendCookie(AName, '', Opts);
 end;
 
+procedure TDextWebBrokerResponse.Redirect(const AUrl: string; APermanent: Boolean);
+begin
+  if APermanent then
+    FStatusCode := 301
+  else
+    FStatusCode := 302;
+  AddHeader('Location', AUrl);
+end;
+
+procedure TDextWebBrokerResponse.Unauthorized(const AMessage: string);
+begin
+  FStatusCode := 401;
+  if AMessage <> '' then Write(AMessage);
+end;
+
+procedure TDextWebBrokerResponse.Forbidden(const AMessage: string);
+begin
+  FStatusCode := 403;
+  if AMessage <> '' then Write(AMessage);
+end;
+
+procedure TDextWebBrokerResponse.BadRequest(const AMessage: string);
+begin
+  FStatusCode := 400;
+  if AMessage <> '' then Write(AMessage);
+end;
+
+procedure TDextWebBrokerResponse.NotFound(const AMessage: string);
+begin
+  FStatusCode := 404;
+  if AMessage <> '' then Write(AMessage);
+end;
+
 { TDextWebBrokerContext }
 
 constructor TDextWebBrokerContext.Create(const ARequest: IHttpRequest;
@@ -647,12 +685,14 @@ end;
 { TDextWebBrokerApp }
 
 class procedure TDextWebBrokerApp.Configure(Startup: IStartup);
+var
+  Factory: TServerFactory;
 begin
   FApp := WebApplication;
 
   // Register a server factory that captures pipeline+services and returns a
   // no-op host. WebBroker/IIS owns the actual accept loop.
-  var Factory: TServerFactory := function(Port: Integer; Pipeline: TRequestDelegate;
+  Factory := function(Port: Integer; Pipeline: TRequestDelegate;
     Services: IServiceProvider): IWebHost
   begin
     FPipeline := Pipeline;

@@ -222,6 +222,17 @@ type
     /// <summary>Marks a cookie for removal on the client side.</summary>
     procedure DeleteCookie(const AName: string);
     
+    /// <summary>Performs an HTTP redirect (302 Found by default).</summary>
+    procedure Redirect(const AUrl: string; APermanent: Boolean = False);
+    /// <summary>Sets status to 401 Unauthorized and writes an optional message.</summary>
+    procedure Unauthorized(const AMessage: string = '');
+    /// <summary>Sets status to 403 Forbidden and writes an optional message.</summary>
+    procedure Forbidden(const AMessage: string = '');
+    /// <summary>Sets status to 400 Bad Request and writes an optional message.</summary>
+    procedure BadRequest(const AMessage: string = '');
+    /// <summary>Sets status to 404 Not Found and writes an optional message.</summary>
+    procedure NotFound(const AMessage: string = '');
+    
     /// <summary>HTTP status code (e.g., 200, 404, 500).</summary>
     property StatusCode: Integer read GetStatusCode write SetStatusCode;
     /// <summary>Response MIME type (e.g., application/json).</summary>
@@ -349,14 +360,17 @@ type
     function MapControllers: IWebApplication;
     function GetApplicationBuilder: IApplicationBuilder;
     function GetConfiguration: IConfiguration;
+    function GetServiceProvider: IServiceProvider;
     function BuildServices: IServiceProvider; // ? Automation
     procedure UseServerFactory(const AFactory: TServerFactory);
+    procedure Run; overload;
     procedure Run(Port: Integer); overload;
-    procedure Start(Port: Integer); overload;
     procedure Start; overload;
+    procedure Start(Port: Integer); overload;
     procedure SetDefaultPort(Port: Integer);
 
     property Services: TDextServices read GetServices;
+    property ServiceProvider: IServiceProvider read GetServiceProvider;
     property Builder: TAppBuilder read GetBuilder;
     property Configuration: IConfiguration read GetConfiguration;
     property Port: Integer read GetPort;

@@ -30,6 +30,7 @@ interface
 uses
   System.SysUtils,
   System.Classes,
+  System.Math,
   System.Rtti,
   System.DateUtils,
   System.SyncObjs,
@@ -166,6 +167,11 @@ type
     procedure AppendCookie(const AName, AValue: string; const AOptions: TCookieOptions); overload;
     procedure AppendCookie(const AName, AValue: string); overload;
     procedure DeleteCookie(const AName: string);
+    procedure Redirect(const AUrl: string; APermanent: Boolean = False);
+    procedure Unauthorized(const AMessage: string = '');
+    procedure Forbidden(const AMessage: string = '');
+    procedure BadRequest(const AMessage: string = '');
+    procedure NotFound(const AMessage: string = '');
     property StatusCode: Integer read GetStatusCode write SetStatusCode;
     property ContentType: string read GetContentType write SetContentType;
 
@@ -477,6 +483,8 @@ var
   KeyBuilder: TStringBuilder;
   Header: string;
   HeaderValue: string;
+  QueryArray: TArray<TPair<string, string>>;
+  i: Integer;
 begin
   KeyBuilder := TStringBuilder.Create;
   try
@@ -489,8 +497,8 @@ begin
     if FOptions.VaryByQuery and (AContext.Request.Query.Count > 0) then
     begin
       KeyBuilder.Append('?');
-      var QueryArray := AContext.Request.Query.ToArray;
-      for var i := 0 to High(QueryArray) do
+      QueryArray := AContext.Request.Query.ToArray;
+      for i := 0 to High(QueryArray) do
       begin
         if i > 0 then KeyBuilder.Append('&');
         KeyBuilder.Append(QueryArray[i].Key);
@@ -532,6 +540,8 @@ end;
 procedure TResponseCacheMiddleware.Invoke(AContext: IHttpContext; ANext: TRequestDelegate);
 var
   CacheKey: string;
+  OriginalResponse: IHttpResponse;
+  Wrapper: TResponseCaptureWrapper;
 begin
   // Skip non-cacheable methods (POST, PUT, DELETE, etc.)
   if not IsCacheable(AContext) then
@@ -555,8 +565,8 @@ begin
     Format('public, max-age=%d', [FOptions.DefaultDuration]));
 
   // Wrap the response to capture the body
-  var OriginalResponse := AContext.Response;
-  var Wrapper := TResponseCaptureWrapper.Create(OriginalResponse);
+  OriginalResponse := AContext.Response;
+  Wrapper := TResponseCaptureWrapper.Create(OriginalResponse);
   AContext.Response := Wrapper;
   
   try
@@ -590,9 +600,11 @@ begin
 end;
 
 procedure TResponseCacheMiddleware.CacheResponse(AContext: IHttpContext; const AKey: string; AWrapper: TResponseCaptureWrapper);
+var
+  Body: string;
 begin
   // Store the captured body in the cache
-  var Body := AWrapper.GetCapturedBody;
+  Body := AWrapper.GetCapturedBody;
   if not Body.IsEmpty then
   begin
     FStore.SetValue(AKey, Body, FOptions.DefaultDuration);
@@ -652,11 +664,12 @@ end;
 procedure TResponseCaptureWrapper.Write(const AStream: TStream);
 var
   SS: TStringStream;
+  Pos: Int64;
 begin
   // Capture body
   if AStream.Size > 0 then
   begin
-    var Pos := AStream.Position;
+    Pos := AStream.Position;
     SS := TStringStream.Create('', TEncoding.UTF8);
     try
       SS.CopyFrom(AStream, 0);
@@ -676,8 +689,10 @@ begin
 end;
 
 procedure TResponseCaptureWrapper.Json(const AValue: TValue);
+var
+  JsonStr: string;
 begin
-  var JsonStr := Dext.Json.TDextJson.Serialize(AValue);
+  JsonStr := Dext.Json.TDextJson.Serialize(AValue);
   FBodyBuffer.Append(JsonStr);
   FOriginal.Json(JsonStr);
 end;
@@ -700,6 +715,40 @@ end;
 procedure TResponseCaptureWrapper.DeleteCookie(const AName: string);
 begin
   FOriginal.DeleteCookie(AName);
+end;
+
+procedure TResponseCaptureWrapper.Redirect(const AUrl: string; APermanent: Boolean);
+begin
+  FStatusCode := ifthen(APermanent, 301, 302);
+  FOriginal.Redirect(AUrl, APermanent);
+end;
+
+procedure TResponseCaptureWrapper.Unauthorized(const AMessage: string);
+begin
+  FStatusCode := 401;
+  if AMessage <> '' then FBodyBuffer.Append(AMessage);
+  FOriginal.Unauthorized(AMessage);
+end;
+
+procedure TResponseCaptureWrapper.Forbidden(const AMessage: string);
+begin
+  FStatusCode := 403;
+  if AMessage <> '' then FBodyBuffer.Append(AMessage);
+  FOriginal.Forbidden(AMessage);
+end;
+
+procedure TResponseCaptureWrapper.BadRequest(const AMessage: string);
+begin
+  FStatusCode := 400;
+  if AMessage <> '' then FBodyBuffer.Append(AMessage);
+  FOriginal.BadRequest(AMessage);
+end;
+
+procedure TResponseCaptureWrapper.NotFound(const AMessage: string);
+begin
+  FStatusCode := 404;
+  if AMessage <> '' then FBodyBuffer.Append(AMessage);
+  FOriginal.NotFound(AMessage);
 end;
 
 function TResponseCaptureWrapper.GetCapturedBody: string;

@@ -1,4 +1,4 @@
-{***************************************************************************}
+﻿{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -31,6 +31,7 @@ interface
 uses
   Dext.Configuration.Interfaces,
   Dext.DI.Interfaces,
+  Dext.Json,
   Dext.Logging,
   Dext.Web.ControllerScanner,
   Dext.Web.Interfaces;
@@ -58,6 +59,7 @@ type
     procedure LogWarn(const AMsg: string);
     procedure LogError(const AMsg: string);
     function ResolveLogger: ILogger;
+    function GetServiceProvider: IServiceProvider;
   public
     constructor Create;
     destructor Destroy; override;
@@ -132,6 +134,8 @@ uses
 constructor TWebApplication.Create;
 var
   ConfigBuilder: IConfigurationBuilder;
+  Env: string;
+  LConfig: IConfiguration;
 begin
   inherited Create;
   FDefaultPort := 8080;
@@ -149,7 +153,7 @@ begin
   ConfigBuilder.Add(TYamlConfigurationSource.Create('appsettings.yml', True));
 
   // 2. Environment specific appsettings.{Env}
-  var Env := GetEnvironmentVariable('DEXT_ENVIRONMENT');
+  Env := GetEnvironmentVariable('DEXT_ENVIRONMENT');
   if Env = '' then Env := 'Production'; // Default to Production
   
   if Env <> '' then
@@ -167,7 +171,7 @@ begin
   FServices := TDextServiceCollection.Create;
   
   // Register Configuration
-  var LConfig := FConfiguration;
+  LConfig := FConfiguration;
   FServices.AddSingleton(
     TServiceType.FromInterface(IConfiguration),
     TConfigurationRoot,
@@ -242,6 +246,13 @@ end;
 function TWebApplication.GetBuilder: TAppBuilder;
 begin
   Result := TAppBuilder.Create(GetApplicationBuilder);
+end;
+
+function TWebApplication.GetServiceProvider: IServiceProvider;
+begin
+  if FServiceProvider = nil then
+    BuildServices;
+  Result := FServiceProvider;
 end;
 
 function TWebApplication.BuildServices: IServiceProvider;
@@ -320,25 +331,40 @@ var
   SSLHandler: IIndySSLHandler;
   Lifetime: IHostApplicationLifetime;
   StateControl: IAppStateControl;
+  LifetimeIntf: IInterface;
+  StateIntf: IInterface;
+  DbConfig: IConfigurationSection;
+  DbContextIntf: IInterface;
+  Migrator: TMigrator;
+  ManagerIntf: IInterface;
+  ServerSection: IConfigurationSection;
+  CertFile: string;
+  KeyFile: string;
+  RootFile: string;
+  ProviderName: string;
 begin
   FDefaultPort := Port;
   
-  // Build ServiceProvider now - this is the correct place to do it,
-  // AFTER all services have been registered (including HealthChecks, etc.)
-  FServiceProvider := FServices.BuildServiceProvider;
+  // Build ServiceProvider now if not already built via BuildServices()
+  // This is the correct place to do it, AFTER all services have been registered
+  if FServiceProvider = nil then
+    FServiceProvider := FServices.BuildServiceProvider;
   ResolveLogger; // Force telemetry subscription early
   
   // Update ApplicationBuilder with the final ServiceProvider
   GetApplicationBuilder.SetServiceProvider(FServiceProvider);
   
+  // Bridge ServiceProvider to JSON global settings for automated DI-driven deserialization
+  TDextJson.SetDefaultSettings(TDextJson.GetDefaultSettings.ServiceProvider(FServiceProvider));
+  
   // Get Lifetime & State Service
-  var LifetimeIntf := FServiceProvider.GetServiceAsInterface(TypeInfo(IHostApplicationLifetime));
+  LifetimeIntf := FServiceProvider.GetServiceAsInterface(TypeInfo(IHostApplicationLifetime));
   if LifetimeIntf <> nil then
     Lifetime := LifetimeIntf as IHostApplicationLifetime
   else
     Lifetime := nil;
 
-  var StateIntf := FServiceProvider.GetServiceAsInterface(TypeInfo(IAppStateControl));
+  StateIntf := FServiceProvider.GetServiceAsInterface(TypeInfo(IAppStateControl));
   if StateIntf <> nil then
     StateControl := StateIntf as IAppStateControl
   else
@@ -350,16 +376,16 @@ begin
 
   {$IFDEF DEXT_ENABLE_ENTITY}
   // 🔄 Run Migrations automatically if configured
-  var DbConfig := FConfiguration.GetSection('Database');
+  DbConfig := FConfiguration.GetSection('Database');
   if (DbConfig <> nil) and (SameText(DbConfig['AutoMigrate'], 'true')) then
   begin
     LogInfo('⚙️ AutoMigrate enabled. Checking database schema...');
     
     // Resolve DbContext
-    var DbContextIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IDbContext));
+    DbContextIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IDbContext));
     if DbContextIntf <> nil then
     begin
-      var Migrator := TMigrator.Create(DbContextIntf as IDbContext, ResolveLogger);
+      Migrator := TMigrator.Create(DbContextIntf as IDbContext, ResolveLogger);
       try
         Migrator.Migrate;
       finally
@@ -383,7 +409,7 @@ begin
   HostedManager := nil;
   try
     // ⚠️ Resolve as INTERFACE (enables ARC management)
-    var ManagerIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IHostedServiceManager));
+    ManagerIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IHostedServiceManager));
     if ManagerIntf <> nil then
     begin
       HostedManager := ManagerIntf as IHostedServiceManager;
@@ -403,18 +429,18 @@ begin
 
   // Create WebHost
   SSLHandler := nil;
-  var ServerSection := FConfiguration.GetSection('Server');
+  ServerSection := FConfiguration.GetSection('Server');
   if (ServerSection <> nil) and (SameText(ServerSection['UseHttps'], 'true')) then
   begin
-    var CertFile := ServerSection['SslCert'];
-    var KeyFile := ServerSection['SslKey'];
-    var RootFile := ServerSection['SslRootCert'];
+    CertFile := ServerSection['SslCert'];
+    KeyFile := ServerSection['SslKey'];
+    RootFile := ServerSection['SslRootCert'];
     
     // Only enable SSL if certificate files exist
     if (CertFile <> '') and (KeyFile <> '') and 
        FileExists(CertFile) and FileExists(KeyFile) then
     begin
-      var ProviderName := ServerSection['SslProvider'];
+      ProviderName := ServerSection['SslProvider'];
       if SameText(ProviderName, 'Taurus') then
         SSLHandler := TDextIndyTaurusSSLHandler.Create(CertFile, KeyFile, RootFile)
       else
@@ -437,17 +463,21 @@ var
   StateObserver: IAppStateObserver;
   HostedManager: IHostedServiceManager;
   Lifetime: IHostApplicationLifetime;
+  StateControlIntf: IInterface;
+  StateObserverIntf: IInterface;
+  LifetimeIntf: IInterface;
+  ManagerIntf: IInterface;
 begin
   if FServiceProvider = nil then Exit;
 
   // Resolve services
-  var StateControlIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IAppStateControl));
+  StateControlIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IAppStateControl));
   if StateControlIntf <> nil then
     StateControl := StateControlIntf as IAppStateControl
   else
     StateControl := nil;
 
-  var StateObserverIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IAppStateObserver));
+  StateObserverIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IAppStateObserver));
   if StateObserverIntf <> nil then
     StateObserver := StateObserverIntf as IAppStateObserver
   else
@@ -456,13 +486,13 @@ begin
   // Idempotency check: If already stopped, exit
   if (StateObserver <> nil) and (StateObserver.State = asStopped) then Exit;
 
-  var LifetimeIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IHostApplicationLifetime));
+  LifetimeIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IHostApplicationLifetime));
   if LifetimeIntf <> nil then
     Lifetime := LifetimeIntf as IHostApplicationLifetime
   else
     Lifetime := nil;
     
-  var ManagerIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IHostedServiceManager));
+  ManagerIntf := FServiceProvider.GetServiceAsInterface(TServiceType.FromInterface(IHostedServiceManager));
   if ManagerIntf <> nil then
     HostedManager := ManagerIntf as IHostedServiceManager
   else

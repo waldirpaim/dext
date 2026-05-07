@@ -52,7 +52,7 @@ Utilizar uma variável de ambiente simplifica seus Library Paths e permite alter
     * *Exemplo:* `C:\dev\Dext\DextRepository\Sources`
     * *Nota:* Aponte para a pasta `Sources`, não a raiz.
 
-    ![Variável de Ambiente DEXT](../../../Images/ide-env-var.png)
+    ![Variável de Ambiente DEXT](../../Images/ide-env-var.png)
 
 ## 3. Configuração do Library Path (DCUs)
 
@@ -123,6 +123,18 @@ Para confirmar que a instalação está correta:
     * `Examples\DextExamples.groupproj`
 3. Execute **Build All**.
 4. Se todos os projetos compilarem com sucesso, o ambiente está configurado corretamente.
+
+## 5. Conflitos de Nomes de Componentes (ex: Devart EntityDAC)
+
+Caso você possua outras bibliotecas instaladas (como o Devart EntityDAC) que utilizem os mesmos nomes de componentes (`TEntityDataSet`, `TEntityDataProvider`), você enfrentará um conflito na IDE durante a instalação.
+
+Para resolver isso, o Dext oferece uma opção de prefixo nos nomes:
+
+1. Abra o arquivo `Sources\Dext.inc`.
+2. Descomente a diretiva: `{$DEFINE DEXT_USE_ENTITY_PREFIX}`.
+3. Recompile o framework.
+
+Isso registrará os componentes como **`TDextEntityDataSet`** e **`TDextEntityDataProvider`**, permitindo que coexistam com outras bibliotecas na mesma IDE.
 
 ---
 

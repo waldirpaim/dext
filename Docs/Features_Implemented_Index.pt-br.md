@@ -29,6 +29,7 @@ O Dext foi desenhado para alavancar recursos modernos da linguagem Object Pascal
 
 ### 1.2 Dependency Injection (`Dext.DI.Core`, `Dext.DI.Interfaces`, `Dext.DI.Attributes`)
 - **TDextServices** — Fachada fluente para registro de serviços. Métodos: `AddSingleton<T>`, `AddTransient<T>`, `AddScoped<T>`, `AddSingletonInstance<T>`, `AddSingletonFactory<T>`.
+- **Mapeamento Interface/Implementação** — Desacoplamento total entre definições e lógica concreta.
 - **TServiceCollection** — Repositório interno de `TServiceDescriptor` com busca reversa (LIFO) para permitir override de registros.
 - **TDextServiceProvider** — Container IoC com armazenamento híbrido: `FSingletonInstances` (ARC/Interfaces) + `FSingletonObjects` (Non-ARC/Classes manuais) + `FScopedInstances`/`FScopedObjects` para escopo.
 - **Ciclos de Vida** — `Singleton` (instância única global), `Transient` (nova instância por resolução), `Scoped` (instância única por escopo DI via `CreateScope`).
@@ -57,6 +58,9 @@ O Dext foi desenhado para alavancar recursos modernos da linguagem Object Pascal
 - **DOM Abstraction** — `IDextJsonNode`, `IDextJsonObject`, `IDextJsonArray` com tipagem forte (6 node types: Null, String, Number, Boolean, Object, Array).
 - **TJsonBuilder** — Builder fluente para construção programática de JSON sem strings.
 - **Atributos** — `[JsonName]` (renomear campo), `[JsonIgnore]` (excluir campo), `[JsonCaseStyle]` (override por classe).
+- **Perfis Arquiteturais**:
+  - **Dext DOM (IDextJsonNode)** — Otimizado para 99% dos casos (APIs REST, Configurações). Alta velocidade de acesso aleatório e manipulação de objetos via árvore em memória (engine DataObjects).
+  - **Dext UTF-8 (Low-Level Streaming)** — Ferramenta cirúrgica para Big Data. Processamento sequencial zero-allocation de volumes massivos (GBs) com footprint de memória constante.
 - **TUtf8JsonSerializer** (`Dext.Json.Utf8.Serializer`) — Serializador zero-allocation para records. Opera diretamente sobre `TByteSpan` (UTF-8 raw) sem conversão intermediária para `string`. Cache de `TJsonRecordInfo` por `PTypeInfo` para eliminar overhead RTTI em hot-paths. `ToUtf8JSON` no driver `DextJsonDataObjects` para output UTF-8 nativo.
 
 ### 1.5 Configuration System (`Dext.Configuration.Core`)
@@ -95,6 +99,7 @@ O Dext foi desenhado para alavancar recursos modernos da linguagem Object Pascal
 
 ### 1.8 Memory & Span (`Dext.Core.Span`, `Dext.Core.Memory`)
 - **TSpan\<T\>** — Referência zero-allocation a região contígua de memória. `Slice`, `ToArray`, `Clear`, `GetEnumerator` (for-in). Bounds checking em todos os acessos.
+- **TVector\<T\>** — Vetores dinâmicos e eficientes alocados na stack/heap para alta performance.
 - **TReadOnlySpan\<T\>** — Versão imutável de `TSpan<T>`. Operador implícito `TSpan<T>→TReadOnlySpan<T>` e `TArray<T>→TReadOnlySpan<T>`.
 - **TByteSpan** — Span especializado para bytes. `Equals` via `TDextSimd.EqualsBytes` (SIMD-accelerated). `EqualsString` compara com UTF-8 sem alocação. `IndexOf`, `ToString` (UTF-8→string), `ToBytes`. Otimizado para parsers JSON/REST e protocolos de rede.
 - **ILifetime\<T\>** (`Dext.Core.Memory`) — Wrapper ARC para gerenciamento de lifecycle de objetos Non-ARC. `TLifetime<T>` encapsula objeto e o libera automaticamente quando a interface sai de escopo.
@@ -102,6 +107,7 @@ O Dext foi desenhado para alavancar recursos modernos da linguagem Object Pascal
 
 ### 1.9 Threading & Async (`Dext.Threading.*`)
 - **TAsyncTask** — Implementação fluente de Async/Await para operações assíncronas.
+- **Escalonador Work-Stealing** — Distribuição eficiente de tarefas entre os núcleos da CPU para máxima performance paralela.
 - **ICancellationToken** — Cancelamento cooperativo com `WaitForCancellation(timeout)` e `IsCancellationRequested`. Integrado com Event Bus Lifecycle e Background Services.
 
 ### 1.10 Logging Pipeline (`Dext.Logging`)
@@ -119,25 +125,23 @@ O Dext foi desenhado para alavancar recursos modernos da linguagem Object Pascal
 - **SQL Logging Hooks** — Interceptação automática de comandos SQL, parâmetros e tempo de execução, integrados ao logger do framework.
 - **Activity Tracking** — Suporte a rastreamento de atividades (CorrelationId) para depuração de fluxos complexos e distribuídos.
 
-### 1.11 Collections & Concurrency (`Dext.Collections.*`)
+### 1.13 Collections & Concurrency (`Dext.Collections.*`)
 - **Binary Code Folding** (`TRawList`) — Motor base invisível que consolida centenas de especializações genéricas em uma única implementação manipulando fatias de memória bruta, reduzindo o tempo de compilação em até 60% e eliminando o *Code Bloat* das RTL Generics.
 - **CPU-Friendly Dictionaries** (`TRawDictionary`) — Utiliza Open Addressing com Linear Probing em memória contígua (Hash Metadata), eliminando cache misses causados por ponteiros encadeados (linked-lists) tradicionais. Lookup de até 6.6x mais rápido que a RTL.
 - **SIMD Acceleration** (`Dext.Collections.Simd`) — Varreduras e comparações (AVX2/SSE2) em blocos de 16 a 32 bytes por ciclo de clock. Desempenho extremo (até 6.8x mais veloz) em listas nativas.
 - **Zero-Allocation Vectors** (`Dext.Collections.Vector`) — Integração nativa com `Span<T>` para fatiamento (slicing) e processamento massivo de buffers sem alocação ou cópia no Memory Manager.
 - **TFrozenDictionary\<K,V\> / TFrozenSet\<T\>** (`Dext.Collections.Frozen`) — Coleções imutáveis ("Write Once, Freeze") desenhadas para concorrência agressiva de threads sem contenção (*Lock-Free Read*). O bypass das instâncias `TCriticalSection` otimiza radicalmente a escala.
 - **TChannel\<T\>** (`Dext.Collections.Channel`) — Inspirado na concorrência do Go (Golang). Canais de comunicação assíncrona entre produtores e consumidores (*Lock-Free*), com suporte nativo a **Backpressure** (Bounded Channels) para evitar estrangulamento por consumo descompassado de CPU/memória.
-- **Log Scopes** — `BeginScope(state)` para contexto hierárquico (ex: RequestId, CorrelationId).
-- **Níveis** — `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, `None`.
 
-### 1.11 I/O Writers (`Dext.Core.Writers`)
+### 1.14 I/O Writers (`Dext.Core.Writers`)
 - **IDextWriter** — Abstração thread-safe para output do framework. Implementações: `TConsoleWriter` (stdout), `TWindowsDebugWriter` (OutputDebugString com buffering), `TStringsWriter` (TStringList/TMemo), `TNullWriter` (silent).
 - **SafeWrite / SafeWriteLn** (`Dext.Utils`) — Funções globais que roteiam output via `IDextWriter` ativo. Detecção automática de console disponível. Escrita Unicode nativa via `WriteConsoleW` (Windows) com fallback UTF-8 para pipes.
 - **SafeAttachConsole** — Attach ao console do processo pai (CMD/PowerShell) ou `AllocConsole` para aplicações GUI executadas via F5.
 
-### 1.12 Text Escaping (`Dext.Text.Escaping`)
+### 1.15 Text Escaping (`Dext.Text.Escaping`)
 - **TDextEscaping** — Utilitários centralizados para escaping de texto: `Html`, `Xml`, `Json` (manual character-by-character com suporte a `\uXXXX`), `Url`. Usado por Reporters, Serializers e RestClient.
 
-### 1.13 Date Utilities (`Dext.Core.DateUtils`)
+### 1.16 Date Utilities (`Dext.Core.DateUtils`)
 - **TryParseISODateTime** — Parser robusto de ISO 8601 (`YYYY-MM-DDTHH:NN:SS.ZZZ`) com suporte a variações (separador `T` ou espaço, milissegundos opcionais).
 - **TryParseCommonDate** — Parser multi-formato: ISO 8601 → `dd/mm/yyyy` → `mm/dd/yyyy` → `yyyy/mm/dd` com detecção automática de formato.
 
@@ -279,7 +283,7 @@ Uma das features mais poderosas do Dext: **geração automática de APIs REST co
 ## 📊 4. Dext ORM & Entity Framework (`Sources\Data`)
 
 ### 4.1 Core Persistence
-- **TDbContext** — Unit of Work com **Change Tracking** automático (estados: Added, Modified, Deleted, Unchanged). **Identity Map** para unicidade de instâncias por chave primária.
+- **TDbContext** — Unit of Work with **Change Tracking** automático (estados: Added, Modified, Deleted, Unchanged). **Identity Map** para unicidade de instâncias por chave primária.
 - **DbSet\<T\>** — Repository genérico. Operações: `Add`, `Update`, `Remove`, `Find`, `FirstOrDefault`, `Where`, `Include`, `ToList`.
 - **SaveChanges** — Persiste todas as mudanças rastreadas em uma transação.
 
@@ -324,7 +328,7 @@ Uma das features mais poderosas do Dext: **geração automática de APIs REST co
 - **INSERT com Cast** — `::jsonb` automático no PostgreSQL para `[JsonColumn(True)]`.
 
 ### 4.9 EntityDataSet (`Dext.Data.EntityDataSet`)
-- **Ponte ORM ↔ VCL/FMX** — Conecta componentes legados (DBGrid, FastReport) a coleções `TList<T>` de POCOs preservando a arquitetura limpa.
+- **Ponte ORM ↔ VCL/FMX** — Conecta componentes (DBGrid, FastReport) a coleções `TList<T>` de POCOs preservando a arquitetura limpa.
 - **Zero-Allocation Memory** — Acesso via offsets de memória mapeados pelo `TEntityMap` elimina a necessidade de RTTI ou cópias de string a cada leitura de registro.
 - **`LoadFromUtf8Json`** — Carregamento direto de streams/buffers JSON via `TByteSpan` sem conversão prévia de encoding.
 - **Setup Automático (Parse AST)** — Em design-time, as *Verbs* "Sync Fields" e "Refresh Entity" fazem o parse direto das units `.pas` e criam os `TFields` dinamicamente **sem precisar compilar o projeto**.
@@ -408,25 +412,51 @@ Uma das features mais poderosas do Dext: **geração automática de APIs REST co
 ## 🧪 7. Dext Testing Framework (`Sources\Testing`)
 
 ### 7.1 Test Runner & Dashboard
-- Executor CLI de alta velocidade e host visual interno para monitoramento em tempo real com histórico de falhas.
+- **CLI Runner** — Executor de linha de comando de alta performance (`dext test`) com suporte a filtros por categoria e prioridade.
+- **Live Dashboard** — Host visual embutido para monitoramento em tempo real da execução dos testes com histórico de falhas e análise de stack trace.
+- **Fluent Runner API** (`Dext.Testing.Fluent`) — Configuração programática: `TTest.Configure.Verbose.RegisterFixtures([...]).Run`.
 
-### 7.2 Attribute-Based Runner
-- Escrita de testes baseada em atributos: `[Fixture]`, `[Test]`, `[Setup]`, `[TearDown]`, `[TestCase]` — sem necessidade de herança de classes base.
+### 7.2 Attribute-Based Runner (`Dext.Testing.Attributes`)
+Permite a escrita de testes sem herança de classes base, usando metadados RTTI.
+- **Core Attributes** — `[Fixture]`, `[Test]`, `[Fact]`, `[TestClass]`.
+- **Lifecycle Management** — `[Setup]`, `[TearDown]`, `[BeforeAll]`, `[AfterAll]`, `[AssemblyInitialize]`, `[AssemblyCleanup]`.
+- **Data-Driven Testing** —
+  - `[TestCase(A, B, Expected)]` — Testes parametrizados inline.
+  - `[TestCaseSource('MethodName')]` — Provedores de dados dinâmicos via método.
+  - `[Values(V1, V2)]`, `[Range(Start, Stop, Step)]`, `[Random(Min, Max, Count)]` — Geração automática de casos.
+  - `[Combinatorial]` — Execução de todas as combinações possíveis de parâmetros.
+- **Execution Filters & Control** —
+  - `[Ignore('Reason')]`, `[Skip('Reason')]` — Pular testes.
+  - `[Explicit]` — Testes executados apenas se selecionados nominalmente.
+  - `[Category('Tag')]`, `[Trait('Name', 'Value')]` — Categorização e filtragem.
+  - `[Timeout(ms)]`, `[MaxTime(ms)]`, `[Repeat(n)]`, `[Priority(n)]` — Controle de execução e performance.
+  - `[Platform('Windows, Linux')]` — Restrição por sistema operacional.
 
-### 7.3 Assertions & Mocking
-- API fluente de asserções rica. Framework de **Mocking dinâmico** via Proxies.
-- **Soft Asserts** — `Assert.Multiple` para coletar múltiplas falhas antes de reportar.
-- **Auto-Mocking Container** — `TAutoMocker` para injeção automática de mocks em testes unitários e de integração.
+### 7.3 Fluent Assertions (`Dext.Assertions`)
+API fluente baseada no padrão `Should(Value)`.
+- **Typed Assertions** — Métodos específicos para `ShouldString`, `ShouldInteger`, `ShouldDouble` (aproximação), `ShouldBoolean`, `ShouldDateTime`, `ShouldGuid`, `ShouldUUID`, `ShouldObject`.
+- **List/Collection Assertions** — `Should(List).HaveCount(5).Contain(X).OnlyContain(Predicate).AllSatisfy(Predicate)`.
+- **Structural Comparison** — `BeEquivalentTo` for deep object and collection comparison (order-independent).
+- **Soft Asserts** — `Assert.Multiple(procedure ... end)` to collect multiple failures in a block before interrupting the test.
+- **Action Assertions** — `Should(Proc).Throw<EException>().WithMessageContaining('...')`.
 
 ### 7.4 Snapshot Testing
-- `MatchSnapshot` — Verificação de objetos complexos e payloads via comparação de baselines JSON.
+- **`MatchSnapshot('name')`** — Verificação de objetos complexos e payloads JSON via comparação de baselines em disco.
+- **Structural JSON Compare** — Comparação inteligente que ignora formatação e ordem de propriedades em JSON.
+- **Update Mode** — Variável de ambiente `SNAPSHOT_UPDATE=1` para atualização automática de baselines.
 
-### 7.5 IDE Integration & CI/CD
-- Suporte nativo ao **TestInsight**. Geração de relatórios em HTML, JSON, XML (JUnit), xUnit, TRX (Azure DevOps) e SonarQube.
+### 7.5 Mocking & Interception (`Dext.Mocks`, `Dext.Interception`)
+- **Dynamic Proxies** — `TProxy` (Interfaces) e `TClassProxy` (Classes com métodos virtuais) via `TVirtualInterface` e `TVirtualMethodInterceptor`.
+- **Fluent Mocking** — `Mock<T>.Setup.Returns(Val).When.Method(Args)`.
+- **Argument Matchers** — `Arg.Any<T>`, `Arg.Is<T>`, `Arg.IsNotNull<T>`.
+- **Verification** — `Received(Times.Once)`, `Received(Times.AtLeast(n))`.
+- **Auto-Mocking** — `TAutoMocker` for automated mock injection into the DI container during unit tests.
 
-### 7.6 Code Coverage
-- **`dext test --coverage`** — Geração de relatórios de cobertura de código prontos para integração com SonarQube.
-- **Quality Gates** — Thresholds configuráveis de cobertura mínima para CI/CD pipelines.
+### 7.6 Reporting & CI/CD (`Dext.Testing.Report`)
+- **Multi-Format Export** — JUnit XML, xUnit XML, TRX (Azure DevOps), HTML (Dark Theme), JSON.
+- **SonarQube Integration** — Geração de relatórios de cobertura de código e falhas compatíveis com Quality Gates.
+- **TestInsight Integration** — Suporte nativo para visualização direta na IDE Delphi.
+- **Test Context Injection** — `ITestContext` injetável via parâmetro para `WriteLine`, `AttachFile` (screenshots) e metadados de execução.
 
 ---
 
@@ -511,6 +541,14 @@ Uma das features mais poderosas do Dext: **geração automática de APIs REST co
 - **Interception Engine** — Motor de proxy para intercepção de métodos, base para Mocks e recursos de AOP (Aspect-Oriented Programming).
 - **Design-Time Experts** — Data Preview em IDE Grid e editores de propriedades especializados para metadados.
 
+### 12.5 Design-Time Scaffolding Experts (`Dext.EF.Design.Scaffolding`)
+- **Integração via TSelectionEditor** — Menus de contexto não invasivos para `TFDConnection` e `TDataSet` (FireDAC e Genérico). Os menus do Dext coexistem com os menus nativos da IDE.
+- **TTableSelectionForm** — Interface de seleção avançada com filtro em tempo real, atalhos "Selecionar Tudo/Nenhum" e contadores dinâmicos de tabelas/seleção.
+- **Live Scaffolding Preview** — Janela de preview de alta fidelidade com geração de código em tempo real, estatísticas (Entidades/Metadados/Linhas) e troca de estilo (POCO vs. Smart).
+- **Smart PascalCase Engine** — Lógica de nomenclatura consciente de acrônimos (`EmployeeID` → `EmployeeId`, `ReportsTo` preservado) com suporte a normalização de `snake_case` e `ALL_CAPS`.
+- **Inferência de Metadados Avançada** — Detecção precisa de AutoInc via RTTI e `ftAutoInc`, garantindo paridade 1:1 com o schema do banco de dados.
+- **Automação IOTA** — Criação fluida de novas units em memória e associação automática com o projeto Delphi ativo.
+
 ---
 
 ## 🛠️ 13. Dext CLI & Scaffolding (`Tools\Dext.Tool.Scaffolding`)
@@ -565,12 +603,13 @@ Uma das features mais poderosas do Dext: **geração automática de APIs REST co
 
 O Dext é validado continuamente por uma infraestrutura de testes massiva para garantir a integridade entre seus subsistemas:
 
-- **Centenas de Testes Automatizados** — Milhares de asserções cobrindo desde o core do framework até integrações de alto nível.
-- **Escala de Engenharia** — O projeto ultrapassa **200.000 linhas de código Pascal puro** (excluindo templates e documentação), refletindo um investimento massivo em estabilidade e abstrações de alto nível.
-- **Cross-Database Validation (ORM)** — O motor de persistência é testado exaustivamente em uma matriz real de 5 bancos de dados (PostgreSQL, SQL Server, MySQL, SQLite e Firebird).
-- **Zero Memory Leaks** — Monitoramento rigoroso em cada suíte para garantir estabilidade em ambientes de produção 24/7.
+- **Estatísticas de Engenharia** — O projeto ultrapassa **200.000 linhas de código Pascal puro** (excluindo templates e documentação), refletindo um investimento massivo em estabilidade e abstrações de alto nível.
+- **Cobertura Massiva** — Centenas de suítes de testes com milhares de asserções individuais validando desde o Core (Memory, Collections) até integrações complexas de Web e ORM.
+- **Matriz Multi-DB (ORM)** — O motor de persistência é testado exaustivamente em uma matriz real de 5 bancos de dados: PostgreSQL, SQL Server, MySQL, SQLite e Firebird.
+- **Stress & Concurrency Testing** — Validação de coleções concorrentes, canais e async tasks sob alta carga para garantir ausência de Race Conditions.
+- **Políticas Anti-Leak** — Monitoramento rigoroso de memória em cada suíte; falhas de teste são emitidas se houver vazamento de objetos.
 - **Evidências de Campo** — Framework validado em projetos reais com deploy em **AWS e Azure**, e sistemas de gestão fiscal processando picos de **~800.000 requisições diárias**.
-- **Relatórios & CI/CD** — Integração nativa com SonarQube e Azure DevOps via `dext test`.
+- **CI/CD Quality Gates** — Integração nativa com Azure DevOps e GitHub Actions, forçando thresholds de cobertura e aprovação de snapshots.
 
 ---
 

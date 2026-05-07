@@ -47,6 +47,9 @@ uses
   Dext.Specifications.Interfaces;
 
 type
+  /// <summary>
+  ///   Defines the cardinality and type of an entity relationship.
+  /// </summary>
   TRelationshipType = (rtNone, rtOneToMany, rtManyToOne, rtOneToOne, rtManyToMany);
 
   // Forward declarations
@@ -116,6 +119,7 @@ type
     function HasDisplayFormat(const AValue: string): IPropertyBuilder<T>;
     function HasEditMask(const AValue: string): IPropertyBuilder<T>;
     function HasAlignment(AValue: TAlignment): IPropertyBuilder<T>;
+    function IsReadOnly(AValue: Boolean = True): IPropertyBuilder<T>;
   end;
 
   /// <summary>
@@ -138,6 +142,9 @@ type
   // Internal Model Representation (The result of the mapping)
   // ---------------------------------------------------------------------------
 
+  /// <summary>
+  ///   Holds the mapped configuration for a single entity property or column.
+  /// </summary>
   TPropertyMap = class
   public
     PropertyName: string;
@@ -183,6 +190,7 @@ type
     IsEnum: Boolean; // New: Flag to identify enumeration types
     Prop: TRttiProperty; // Cached RTTI property
     Visible: Boolean;
+    IsReadOnly: Boolean;
     // UI Metadata
     DisplayLabel: string;
     DisplayFormat: string;
@@ -202,6 +210,7 @@ type
     FTableName: string;
     FSchema: string;
     FProperties: IDictionary<string, TPropertyMap>;
+    FOrderedProperties: IList<TPropertyMap>;
     FKeys: IList<string>;
     // Soft Delete Configuration
     FIsSoftDelete: Boolean;
@@ -224,6 +233,7 @@ type
     property TableName: string read FTableName write FTableName;
     property Schema: string read FSchema write FSchema;
     property Properties: IDictionary<string, TPropertyMap> read FProperties;
+    property OrderedProperties: IList<TPropertyMap> read FOrderedProperties;
     property Keys: IList<string> read FKeys;
     
     property IsSoftDelete: Boolean read FIsSoftDelete;
@@ -240,12 +250,16 @@ type
     procedure DiscoverAttributes;
     procedure ProcessAttribute(APropMap: TPropertyMap; AAttr: TCustomAttribute);
     function GetOrAddProperty(const APropName: string): TPropertyMap;
+    function GetOrderedProperties: TArray<TPropertyMap>;
   end;
 
   // ---------------------------------------------------------------------------
   // Fluent API Records
   // ---------------------------------------------------------------------------
 
+  /// <summary>
+  ///   Lightweight, struct-based fluent builder for configuring an entity mapping.
+  /// </summary>
   TEntityBuilder<T: class> = record
   private
     FMap: TEntityMap;
@@ -308,6 +322,9 @@ type
   // Concrete Builders (Legacy / Interface based)
   // ---------------------------------------------------------------------------
 
+  /// <summary>
+  ///   Concrete implementation of IEntityTypeBuilder for configuring entity mappings.
+  /// </summary>
   TEntityTypeBuilder<T: class> = class(TInterfacedObject, IEntityTypeBuilder<T>)
   private
     FMap: TEntityMap;
@@ -332,6 +349,9 @@ type
     function HasQueryFilter(AFilter: IExpression): IEntityTypeBuilder<T>;
   end;
 
+  /// <summary>
+  ///   Concrete implementation of IPropertyBuilder for configuring property mappings.
+  /// </summary>
   TPropertyBuilder<T: class> = class(TInterfacedObject, IPropertyBuilder<T>)
   private
     FPropMap: TPropertyMap;
@@ -357,6 +377,7 @@ type
     function HasDisplayFormat(const AValue: string): IPropertyBuilder<T>;
     function HasEditMask(const AValue: string): IPropertyBuilder<T>;
     function HasAlignment(AValue: TAlignment): IPropertyBuilder<T>;
+    function IsReadOnly(AValue: Boolean = True): IPropertyBuilder<T>;
   end;
 
   /// <summary>
@@ -405,6 +426,9 @@ type
 
   end;
 
+  /// <summary>
+  ///   Concrete implementation of IRelationshipBuilder for configuring relationship mappings.
+  /// </summary>
   TRelationshipBuilder<T: class> = class(TInterfacedObject, IRelationshipBuilder<T>)
   private
     FMap: TEntityMap;
@@ -429,6 +453,7 @@ constructor TEntityMap.Create(AEntityType: PTypeInfo);
 begin
   FEntityType := AEntityType;
   FProperties := TCollections.CreateDictionaryIgnoreCase<string, TPropertyMap>(True);
+  FOrderedProperties := TCollections.CreateList<TPropertyMap>;
   FKeys := TCollections.CreateList<string>;
   FQueryFilters := TCollections.CreateList<IExpression>;
   FIsSoftDelete := False;
@@ -440,6 +465,15 @@ begin
   FIsProxy := False;
 
   DiscoverAttributes;
+end;
+
+destructor TEntityMap.Destroy;
+begin
+  FProperties := nil;
+  FOrderedProperties := nil;
+  FKeys := nil;
+  FQueryFilters := nil;
+  inherited;
 end;
 
 function TypeInfoToFieldType(ATypeInfo: PTypeInfo): TFieldType;
@@ -478,6 +512,7 @@ begin
       (AAttr is UpdatedAtAttribute) or (AAttr is JsonColumnAttribute) or (AAttr is DbTypeAttribute) or
       (AAttr is CaptionAttribute) or (AAttr is DisplayFormatAttribute) or (AAttr is DisplayWidthAttribute) or
       (AAttr is EditMaskAttribute) or (AAttr is AlignmentAttribute) or (AAttr is DefaultValueAttribute) or
+      (AAttr is VisibleAttribute) or (AAttr is ReadOnlyAttribute) or
       (AAttr is LazyAttribute) then
   begin
     if AAttr is LazyAttribute then APropMap.IsLazy := True;
@@ -561,6 +596,8 @@ begin
     if AAttr is EditMaskAttribute then APropMap.EditMask := EditMaskAttribute(AAttr).Value;
     if AAttr is AlignmentAttribute then APropMap.Alignment := AlignmentAttribute(AAttr).Alignment;
     if AAttr is DefaultValueAttribute then APropMap.DefaultValue := DefaultValueAttribute(AAttr).Value;
+    if AAttr is VisibleAttribute then APropMap.Visible := VisibleAttribute(AAttr).Visible;
+    if AAttr is ReadOnlyAttribute then APropMap.IsReadOnly := ReadOnlyAttribute(AAttr).ReadOnly;
   end;
 end;
 
@@ -570,6 +607,15 @@ var
   Attr: TCustomAttribute;
   Prop: TRttiProperty;
   PropMap: TPropertyMap;
+  Fld: TRttiField;
+  Metadata: TTypeMetadata;
+  IsSmart: Boolean;
+  FldName: string;
+  LPropInfo: PPropInfo;
+  LTypeConv: ITypeConverter;
+  BackingFld: TRttiField;
+  Meta: TTypeMetadata;
+  LTypeName: string;
 begin
   Typ := TReflection.Context.GetType(FEntityType);
     if Typ = nil then Exit;
@@ -594,15 +640,15 @@ begin
       if Attr is ProxyAttribute then FIsProxy := True;
     end;
     
-    for var Fld in Typ.GetFields do
+    for Fld in Typ.GetFields do
     begin
       // 1. Smart Properties (detected by TReflection which handles attributes, naming and aliases)
-      var Metadata := TReflection.GetMetadata(Fld.FieldType.Handle);
-      var IsSmart := Metadata.IsSmartProp or Metadata.IsNullable or Metadata.IsLazy;
+      Metadata := TReflection.GetMetadata(Fld.FieldType.Handle);
+      IsSmart := Metadata.IsSmartProp or Metadata.IsNullable or Metadata.IsLazy;
 
       if IsSmart then
       begin
-        var FldName := TReflection.NormalizeFieldName(Fld.Name);
+        FldName := TReflection.NormalizeFieldName(Fld.Name);
           
         PropMap := GetOrAddProperty(FldName);
         PropMap.FieldOffset := -1; // Reset to avoid incorrect null detection for records
@@ -639,7 +685,7 @@ begin
       // 2. Campos normais públicos ou com atributos
       else if (Fld.Visibility in [mvPublic, mvPublished]) or (Length(Fld.GetAttributes) > 0) then
       begin
-        var FldName := Fld.Name;
+        FldName := Fld.Name;
         if (FldName.Length > 1) and (FldName[1] = 'F') then
           FldName := FldName.Substring(1);
           
@@ -674,7 +720,7 @@ begin
       // as it might bypass business logic or calculated values.
       if Prop is TRttiInstanceProperty then
       begin
-        var LPropInfo := TRttiInstanceProperty(Prop).PropInfo;
+        LPropInfo := TRttiInstanceProperty(Prop).PropInfo;
         if Assigned(LPropInfo) then
         begin
           // If GetProc points to a field (high-byte $FF), it's a direct field access property (e.g., 'read FCurrencyVal').
@@ -704,7 +750,7 @@ begin
       begin
         // Filter out classes that have a registered converter (e.g. TStrings)
         // These should be treated as columns, not navigation properties.
-        var LTypeConv := TTypeConverterRegistry.Instance.GetConverter(Prop.PropertyType.Handle);
+        LTypeConv := TTypeConverterRegistry.Instance.GetConverter(Prop.PropertyType.Handle);
         
         if LTypeConv = nil then
         begin
@@ -726,13 +772,13 @@ begin
       // Try to find the backing field by convention (FPropName) if offset is not set
       if PropMap.FieldValueOffset <= 0 then
       begin
-        var BackingFld := Typ.GetField(TReflection.NormalizeFieldName(Prop.Name));
+        BackingFld := Typ.GetField(TReflection.NormalizeFieldName(Prop.Name));
         if BackingFld <> nil then
         begin
            // If the backing field is a SmartProp, we need to extract the inner offset
            if TReflection.IsSmartProp(BackingFld.FieldType.Handle) then
            begin
-             var Meta := TReflection.GetMetadata(BackingFld.FieldType.Handle);
+             Meta := TReflection.GetMetadata(BackingFld.FieldType.Handle);
                 if Meta.IsSmartProp then
                 begin
                   // Detect Lazy
@@ -776,19 +822,11 @@ begin
       // Automatically mark large types (TStrings, TBytes) as Lazy
       if (PropMap.Converter <> nil) and not PropMap.IsPK and not PropMap.IsNavigation then
       begin
-          var LTypeName := string(Prop.PropertyType.Handle.Name);
+          LTypeName := string(Prop.PropertyType.Handle.Name);
           if (LTypeName = 'TStrings') or (LTypeName = 'TBytes') then
             PropMap.IsLazy := True;
       end;
     end;
-end;
-
-destructor TEntityMap.Destroy;
-begin
-  FQueryFilters := nil;
-  FKeys := nil;
-  FProperties := nil;
-  inherited;
 end;
 
 function TEntityMap.GetOrAddProperty(const APropName: string): TPropertyMap;
@@ -797,7 +835,13 @@ begin
   begin
     Result := TPropertyMap.Create(APropName);
     FProperties.Add(APropName, Result);
+    FOrderedProperties.Add(Result);
   end;
+end;
+
+function TEntityMap.GetOrderedProperties: TArray<TPropertyMap>;
+begin
+  Result := FOrderedProperties.ToArray;
 end;
 
 { TPropertyMap }
@@ -1429,6 +1473,12 @@ end;
 function TPropertyBuilder<T>.HasAlignment(AValue: TAlignment): IPropertyBuilder<T>;
 begin
   FPropMap.Alignment := AValue;
+  Result := Self;
+end;
+
+function TPropertyBuilder<T>.IsReadOnly(AValue: Boolean): IPropertyBuilder<T>;
+begin
+  FPropMap.IsReadOnly := AValue;
   Result := Self;
 end;
 

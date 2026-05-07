@@ -19,9 +19,19 @@ uses
   Dext.Utils;
 
 type
+  /// <summary>
+  ///   Event triggered when a unit source file is refreshed by the data provider.
+  /// </summary>
   TRefreshUnitEvent = procedure(AProvider: TComponent; const AFileName: string) of object;
+  
+  /// <summary>
+  ///   Event to request source code content for a given filename during metadata synchronization.
+  /// </summary>
   TGetSourceContentEvent = function(const AFileName: string): string;
 
+  /// <summary>
+  ///   Provider component that discovers, parses, and provides runtime entity metadata and preview capabilities.
+  /// </summary>
   TEntityDataProvider = class(TComponent, IEntityDataProvider)
   private
     FModelUnits: TStrings;
@@ -33,7 +43,10 @@ type
     FLastRefreshSummary: string;
     FEntitiesMetadata: TEntityClassCollection;
     FOnRefreshUnit: TRefreshUnitEvent;
+    FDataSets: IList<TComponent>;
+    FOldAfterDisconnect: TNotifyEvent;
     procedure SetEntitiesMetadata(const Value: TEntityClassCollection);
+    procedure NotifyConnectionClosed(Sender: TObject);
     function BuildEntityMap(AClass: TClass): TEntityMap;
     function BuildColumnList(AClass: TClass; const AClassName: string): string;
     function GetEntityCount: Integer;
@@ -61,10 +74,13 @@ type
     function ResolveEntityClass(const AClassName: string): TClass;
     function BuildPreviewSql(const AClassName: string; AMaxRows: Integer = 50): string;
     function CreatePreviewItems(const AClassName: string; AMaxRows: Integer = 50): IObjectList;
+    function GetPreviewData(const AClassName: string; AMaxRows: Integer = 50): IList<IDictionary<string, Variant>>;
     /// <summary>
     ///   Forces a design-time synchronization of metadata from source code for a specific entity.
     /// </summary>
     procedure SyncMetadata(const AEntityClassName: string);
+    procedure RegisterDataSet(ADataSet: TComponent);
+    procedure UnregisterDataSet(ADataSet: TComponent);
   published
     property DatabaseConnection: TFDCustomConnection read FDatabaseConnection write SetDatabaseConnection;
     property ModelUnits: TStrings read FModelUnits write SetModelUnits;
@@ -90,28 +106,70 @@ begin
   TStringList(FModelUnits).OnChange := OnModelUnitsChange;
   FEntitiesMetadata := TEntityClassCollection.Create(Self);
   FMetadataCache := TCollections.CreateDictionary<string, TEntityClassMetadata>(False);
+  FDataSets := TCollections.CreateList<TComponent>;
   FPreviewMaxRows := 50;
   FDialect := ddUnknown;
 end;
 
 destructor TEntityDataProvider.Destroy;
 begin
+  FDataSets := nil;
   FMetadataCache := nil;
   FEntitiesMetadata.Free;
   FModelUnits.Free;
   inherited;
 end;
 
+procedure TEntityDataProvider.RegisterDataSet(ADataSet: TComponent);
+begin
+  if FDataSets.IndexOf(ADataSet) < 0 then
+    FDataSets.Add(ADataSet);
+end;
+
+procedure TEntityDataProvider.UnregisterDataSet(ADataSet: TComponent);
+begin
+  FDataSets.Remove(ADataSet);
+end;
+
+procedure TEntityDataProvider.NotifyConnectionClosed(Sender: TObject);
+var
+  i: Integer;
+  DS: TComponent;
+begin
+  if Assigned(FOldAfterDisconnect) then
+    FOldAfterDisconnect(Sender);
+
+  for i := FDataSets.Count - 1 downto 0 do
+  begin
+    DS := FDataSets[i];
+    if DS is TDataSet then
+      TDataSet(DS).Active := False;
+  end;
+end;
+type
+  TEntityMapEnricher = class
+  public
+    class procedure Enrich(AMap: TEntityMap; AMetadata: TEntityClassMetadata);
+  end;
+
 function TEntityDataProvider.BuildEntityMap(AClass: TClass): TEntityMap;
+var
+  Metadata: TEntityClassMetadata;
 begin
   Result := TEntityMap.Create(AClass.ClassInfo);
   Result.DiscoverAttributes;
+  
+  // Enrich with parser metadata if available (Design-Time or Runtime cached)
+  Metadata := GetEntityMetadata(AClass.ClassName);
+  if Metadata <> nil then
+    TEntityMapEnricher.Enrich(Result, Metadata);
 end;
 
 function TEntityDataProvider.BuildColumnList(AClass: TClass; const AClassName: string): string;
 var
   EntityMap: TEntityMap;
   Columns: IList<string>;
+  PropMap: TPropertyMap;
 begin
   Columns := TCollections.CreateList<string>;
 
@@ -119,7 +177,7 @@ begin
   begin
     EntityMap := BuildEntityMap(AClass);
     try
-      for var PropMap in EntityMap.Properties.Values do
+      for PropMap in EntityMap.Properties.Values do
       begin
         if PropMap.IsIgnored or PropMap.IsNavigation or PropMap.IsShadow then
           Continue;
@@ -176,9 +234,10 @@ end;
 function TEntityDataProvider.GetEntities: TArray<string>;
 var
   List: IList<string>;
+  i: Integer;
 begin
   List := TCollections.CreateList<string>;
-  for var i := 0 to FEntitiesMetadata.Count - 1 do
+  for i := 0 to FEntitiesMetadata.Count - 1 do
     List.Add(FEntitiesMetadata[i].EntityClassName);
   Result := List.ToArray;
 end;
@@ -207,6 +266,7 @@ var
   ParsedList: IList<TEntityClassMetadata>;
   MD: TEntityClassMetadata;
   Found: Boolean;
+  I: Integer;
 begin
   if not (csDesigning in ComponentState) then
     Exit;
@@ -219,7 +279,7 @@ begin
 
   // Find the full path in ModelUnits
   FileName := '';
-  for var I := 0 to FModelUnits.Count - 1 do
+  for I := 0 to FModelUnits.Count - 1 do
   begin
     if SameText(ChangeFileExt(ExtractFileName(FModelUnits[I]), ''), UnitName) then
     begin
@@ -325,6 +385,8 @@ var
   Obj: TObject;
   PropMap: TPropertyMap;
   FieldValue: TValue;
+  CurrentPropMap: TPropertyMap;
+  I: Integer;
 begin
   Result := nil;
 
@@ -342,7 +404,7 @@ begin
   EntityMap := BuildEntityMap(EntityClass);
   try
     ColumnMap := TCollections.CreateDictionaryIgnoreCase<string, TPropertyMap>;
-    for var CurrentPropMap in EntityMap.Properties.Values do
+    for CurrentPropMap in EntityMap.Properties.Values do
     begin
       if CurrentPropMap.IsIgnored or CurrentPropMap.IsNavigation or CurrentPropMap.IsShadow then
         Continue;
@@ -369,7 +431,7 @@ begin
         Obj := TReflection.CreateInstance(EntityClass);
         if Obj <> nil then
         begin
-          for var I := 0 to Query.Fields.Count - 1 do
+          for I := 0 to Query.Fields.Count - 1 do
           begin
             if not ColumnMap.TryGetValue(Query.Fields[I].FieldName, PropMap) then
               Continue;
@@ -415,10 +477,12 @@ begin
 end;
 
 procedure TEntityDataProvider.Loaded;
+var
+  i: Integer;
 begin
   inherited;
   FMetadataCache.Clear;
-  for var i := 0 to FEntitiesMetadata.Count - 1 do
+  for i := 0 to FEntitiesMetadata.Count - 1 do
     FMetadataCache.AddOrSetValue(FEntitiesMetadata[i].EntityClassName, FEntitiesMetadata[i]);
 end;
 
@@ -500,6 +564,9 @@ begin
     begin
       FDatabaseConnection.FreeNotification(Self);
       
+      FOldAfterDisconnect := FDatabaseConnection.AfterDisconnect;
+      FDatabaseConnection.AfterDisconnect := NotifyConnectionClosed;
+
       // Auto-infer dialect from connection if not manually set
       if (FDialect = ddUnknown) and (FDatabaseConnection.DriverName <> '') then
         FDialect := TDialectFactory.DetectDialect(FDatabaseConnection.DriverName);
@@ -510,6 +577,82 @@ end;
 procedure TEntityDataProvider.SetModelUnits(const Value: TStrings);
 begin
   FModelUnits.Assign(Value);
+end;
+
+function TEntityDataProvider.GetPreviewData(const AClassName: string; AMaxRows: Integer): IList<IDictionary<string, Variant>>;
+var
+  Sql: string;
+  Query: TFDQuery;
+  Row: IDictionary<string, Variant>;
+  i: Integer;
+begin
+  Result := TCollections.CreateList<IDictionary<string, Variant>>;
+  Sql := BuildPreviewSql(AClassName, AMaxRows);
+  if (Sql = '') or (FDatabaseConnection = nil) or (not FDatabaseConnection.Connected) then
+    Exit;
+
+  Query := TFDQuery.Create(nil);
+  try
+    Query.Connection := FDatabaseConnection;
+    Query.SQL.Text := Sql;
+    try
+      Query.Open;
+      while not Query.Eof do
+      begin
+        Row := TCollections.CreateDictionary<string, Variant>;
+        for i := 0 to Query.Fields.Count - 1 do
+          Row.Add(Query.Fields[i].FieldName, Query.Fields[i].Value);
+        Result.Add(Row);
+        Query.Next;
+      end;
+    except
+      // Silently ignore preview errors
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+class procedure TEntityMapEnricher.Enrich(AMap: TEntityMap; AMetadata: TEntityClassMetadata);
+var
+  i: Integer;
+  MemberMD: TEntityMemberMetadata;
+  PropMap: TPropertyMap;
+begin
+  if (AMap = nil) or (AMetadata = nil) then Exit;
+  
+  if AMetadata.TableName <> '' then
+    AMap.TableName := AMetadata.TableName;
+
+  for i := 0 to AMetadata.Members.Count - 1 do
+  begin
+    MemberMD := AMetadata.Members[i];
+    PropMap := AMap.GetOrAddProperty(MemberMD.Name);
+    
+    if MemberMD.DisplayLabel <> '' then
+      PropMap.DisplayLabel := MemberMD.DisplayLabel;
+      
+    if MemberMD.DisplayWidth > 0 then
+      PropMap.DisplayWidth := MemberMD.DisplayWidth;
+      
+    if MemberMD.DisplayFormat <> '' then
+      PropMap.DisplayFormat := MemberMD.DisplayFormat;
+      
+    if MemberMD.EditMask <> '' then
+      PropMap.EditMask := MemberMD.EditMask;
+      
+    if MemberMD.Alignment <> taLeftJustify then
+      PropMap.Alignment := MemberMD.Alignment;
+      
+    PropMap.IsReadOnly := MemberMD.IsReadOnly;
+    PropMap.Visible := MemberMD.Visible;
+    PropMap.IsRequired := MemberMD.IsRequired;
+    PropMap.IsPK := MemberMD.IsPrimaryKey;
+    PropMap.IsAutoInc := MemberMD.IsAutoInc;
+    
+    if MemberMD.MaxLength > 0 then
+      PropMap.MaxLength := MemberMD.MaxLength;
+  end;
 end;
 
 end.

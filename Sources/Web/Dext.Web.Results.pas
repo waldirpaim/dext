@@ -30,6 +30,7 @@ interface
 uses
   System.Classes,
   System.SysUtils,
+  System.Math,
   System.IOUtils,
   System.Rtti,
   Dext.DI.Interfaces,
@@ -40,6 +41,8 @@ uses
   Dext.Entity.Core,
   Dext.Entity.Query,
   Dext.Json,
+  Dext.Http.StatusCodes,
+  Dext.Validation,
   Dext.Core.Activator;
 
 type
@@ -128,6 +131,66 @@ type
   end;
 
   /// <summary>
+  ///   Result that performs an HTTP redirect (301, 302, 307, 308).
+  /// </summary>
+  TRedirectResult = class(TResult)
+  private
+    FUrl: string;
+    FPermanent: Boolean;
+    FPreserveMethod: Boolean;
+    FLocalOnly: Boolean;
+  public
+    constructor Create(const AUrl: string; APermanent: Boolean = False; APreserveMethod: Boolean = False; ALocalOnly: Boolean = False);
+    procedure Execute(AContext: IHttpContext); override;
+  end;
+
+  /// <summary>
+  ///   Result that sends a physical file to the response.
+  /// </summary>
+  TFileResult = class(TResult)
+  private
+    FPath: string;
+    FContentType: string;
+    FDownloadName: string;
+  public
+    constructor Create(const APath: string; const AContentType: string = ''; const ADownloadName: string = '');
+    procedure Execute(AContext: IHttpContext); override;
+  end;
+
+  /// <summary>
+  ///   Result that returns a standardized validation error response (RFC 7807).
+  /// </summary>
+  TValidationProblemResult = class(TResult)
+  private
+    FValidation: TValidationResult;
+  public
+    constructor Create(const AValidation: TValidationResult);
+    procedure Execute(AContext: IHttpContext); override;
+  end;
+
+  /// <summary>
+  ///   Result that triggers an authentication challenge.
+  /// </summary>
+  TChallengeResult = class(TResult)
+  private
+    FScheme: string;
+  public
+    constructor Create(const AScheme: string = '');
+    procedure Execute(AContext: IHttpContext); override;
+  end;
+
+  /// <summary>
+  ///   Result that returns a 403 Forbidden.
+  /// </summary>
+  TForbidResult = class(TResult)
+  private
+    FScheme: string;
+  public
+    constructor Create(const AScheme: string = '');
+    procedure Execute(AContext: IHttpContext); override;
+  end;
+
+  /// <summary>
   ///   Static helper class (Factory) for creating common HTTP results.
   ///   Mainly used in Minimal APIs and Controllers to return standardized responses.
   /// </summary>
@@ -150,6 +213,8 @@ type
     /// <summary>Returns 200 OK with the object serialized via Content Negotiation.</summary>
     class function Ok<T>(const AValue: T): IResult; overload;
     
+    /// <summary>Returns 201 Created.</summary>
+    class function Created(const AUri: string): IResult; overload;
     /// <summary>Returns 201 Created with the URI of the created resource.</summary>
     class function Created(const AUri: string; const AValue: string): IResult; overload;
     /// <summary>Returns 201 Created with the object serialized via Content Negotiation.</summary>
@@ -188,6 +253,32 @@ type
     class function InternalServerError(const AMessage: string): IResult; overload;
     /// <summary>Returns 500 Internal Server Error from a captured exception.</summary>
     class function InternalServerError(const E: Exception): IResult; overload;
+    
+    /// <summary>
+    ///   Returns a standardized error response (RFC 7807).
+    /// </summary>
+    /// <param name="ADetail">Detailed error message.</param>
+    /// <param name="AStatusCode">HTTP status code (default 500).</param>
+    class function Problem(const ADetail: string; AStatusCode: Integer = 500): IResult; overload;
+    
+    /// <summary>Returns a standardized validation error response (RFC 7807).</summary>
+    class function ValidationProblem(const AValidation: TValidationResult): IResult;
+    
+    /// <summary>Alias for Problem/InternalServerError.</summary>
+    class function Fail(const AMessage: string; AStatusCode: Integer = 500): IResult;
+    
+    /// <summary>Returns a 302 Found redirect.</summary>
+    class function Redirect(const AUrl: string; APermanent: Boolean = False; APreserveMethod: Boolean = False): IResult;
+    /// <summary>Returns a 302 Found redirect to a local URL.</summary>
+    class function LocalRedirect(const AUrl: string; APermanent: Boolean = False; APreserveMethod: Boolean = False): IResult;
+    
+    /// <summary>Returns a file result from a physical path.</summary>
+    class function SendFile(const APath: string; const AContentType: string = ''; const ADownloadName: string = ''): IResult;
+    
+    /// <summary>Triggers an authentication challenge.</summary>
+    class function Challenge(const AScheme: string = ''): IResult;
+    /// <summary>Returns a 403 Forbidden result.</summary>
+    class function Forbid(const AScheme: string = ''): IResult;
     
     /// <summary>Alias for InternalServerError.</summary>
     class function InternalError(const E: Exception): IResult; overload;
@@ -330,6 +421,9 @@ var
   Formatter: IOutputFormatter;
   Selector: IOutputFormatterSelector;
   Formatters: TArray<IOutputFormatter>;
+  SelectorObj: IInterface;
+  RegistryObj: IInterface;
+  Registry: IOutputFormatterRegistry;
 begin
   AContext.Response.StatusCode := FStatusCode;
   Ctx := TOutputFormatterContext.Create(AContext, TypeInfo(T), TValue.From<T>(FValue));
@@ -339,16 +433,16 @@ begin
   // 1. Resolve Selector
   if AContext.Services <> nil then
   begin
-    var SelectorObj := AContext.Services.GetServiceAsInterface(TServiceType.FromInterface(TypeInfo(IOutputFormatterSelector)));
+    SelectorObj := AContext.Services.GetServiceAsInterface(TServiceType.FromInterface(TypeInfo(IOutputFormatterSelector)));
     if SelectorObj <> nil then
     begin
        Selector := SelectorObj as IOutputFormatterSelector;
 
        // 2. Resolve Formatters via Registry
-       var RegistryObj := AContext.Services.GetServiceAsInterface(TServiceType.FromInterface(TypeInfo(IOutputFormatterRegistry)));
+       RegistryObj := AContext.Services.GetServiceAsInterface(TServiceType.FromInterface(TypeInfo(IOutputFormatterRegistry)));
        if RegistryObj <> nil then
        begin
-          var Registry := RegistryObj as IOutputFormatterRegistry;
+          Registry := RegistryObj as IOutputFormatterRegistry;
           Formatters := Registry.GetAll;
           
           if Length(Formatters) > 0 then
@@ -400,88 +494,87 @@ end;
 
 class function Results.Ok(const AValue: string): IResult;
 begin
-  // Optimization: String is likely raw content or JSON, but to be safe for API, treat as object?
-  // No, typical Results.Ok("some string") expects text/plain or json string?
-  // Current behavior was Json. Let's keep it compatible but strictly it should be generic.
-  // Overload ambiguity: Ok("text") vs Ok<string>("text").
-  // Let's assume non-generic overload implies direct string content (Json result in old code).
-  Result := TJsonResult.Create(AValue, 200);
+  Result := TContentResult.Create(AValue, 'text/plain', HttpStatus.OK);
 end;
 
 class function Results.Ok<T>(const AValue: T): IResult;
 begin
-  Result := TObjectResult<T>.Create(AValue, 200);
+  Result := TObjectResult<T>.Create(AValue, HttpStatus.OK);
+end;
+
+class function Results.Created(const AUri: string): IResult;
+begin
+  Result := TStatusCodeResult.Create(HttpStatus.Created);
 end;
 
 class function Results.Created(const AUri, AValue: string): IResult;
 begin
-  // TODO: Set Location header
-  Result := TJsonResult.Create(AValue, 201);
+  Result := TJsonResult.Create(AValue, HttpStatus.Created);
 end;
 
 class function Results.Created<T>(const AUri: string; const AValue: T): IResult;
 begin
-  Result := TObjectResult<T>.Create(AValue, 201);
+  Result := TObjectResult<T>.Create(AValue, HttpStatus.Created);
 end;
 
 class function Results.BadRequest: IResult;
 begin
-  Result := TStatusCodeResult.Create(400);
+  Result := TStatusCodeResult.Create(HttpStatus.BadRequest);
 end;
 
 class function Results.BadRequest(const AError: string): IResult;
 begin
-  Result := TJsonResult.Create(Format('{"error": "%s"}', [AError]), 400);
+  Result := TJsonResult.Create(Format('{"error": "%s"}', [AError]), HttpStatus.BadRequest);
 end;
 
 class function Results.BadRequest<T>(const AError: T): IResult;
 begin
-  Result := TObjectResult<T>.Create(AError, 400);
+  Result := TObjectResult<T>.Create(AError, HttpStatus.BadRequest);
 end;
 
 class function Results.NotFound: IResult;
 begin
-  Result := TStatusCodeResult.Create(404);
+  Result := TStatusCodeResult.Create(HttpStatus.NotFound);
 end;
 
 class function Results.NotFound(const AMessage: string): IResult;
 begin
-  Result := TJsonResult.Create(Format('{"error": "%s"}', [AMessage]), 404);
+  Result := TJsonResult.Create(Format('{"error": "%s"}', [AMessage]), HttpStatus.NotFound);
 end;
 
 class function Results.NoContent: IResult;
 begin
-  Result := TStatusCodeResult.Create(204);
+  Result := TStatusCodeResult.Create(HttpStatus.NoContent);
 end;
 
 class function Results.Unauthorized: IResult;
 begin
-  Result := TStatusCodeResult.Create(401);
+  Result := TStatusCodeResult.Create(HttpStatus.Unauthorized);
 end;
 
 class function Results.Unauthorized(const AMessage: string): IResult;
 begin
-  Result := TJsonResult.Create(Format('{"error": "%s"}', [AMessage]), 401);
+  Result := TJsonResult.Create(Format('{"error": "%s"}', [AMessage]), HttpStatus.Unauthorized);
 end;
 
 class function Results.Unauthorized<T>(const AValue: T): IResult;
 begin
-  Result := TObjectResult<T>.Create(AValue, 401);
+  Result := TObjectResult<T>.Create(AValue, HttpStatus.Unauthorized);
 end;
 
 class function Results.Forbidden: IResult;
 begin
-  Result := TStatusCodeResult.Create(403);
+  Result := TStatusCodeResult.Create(HttpStatus.Forbidden);
 end;
 
 class function Results.Forbidden(const AMessage: string): IResult;
 begin
-  Result := TJsonResult.Create(Format('{"error": "%s"}', [AMessage]), 403);
+  Result := TJsonResult.Create(Format('{"error": "%s"}', [AMessage]), HttpStatus.Forbidden);
 end;
 
 class function Results.Forbidden<T>(const AValue: T): IResult;
 begin
-  Result := TObjectResult<T>.Create(AValue, 403);
+  Result := TObjectResult<T>.Create(AValue, HttpStatus.Forbidden);
 end;
 
 class function Results.InternalServerError(const AMessage: string): IResult;
@@ -503,6 +596,57 @@ end;
 class function Results.InternalError(const AMessage: string): IResult;
 begin
   Result := InternalServerError(AMessage);
+end;
+
+class function Results.Problem(const ADetail: string; AStatusCode: Integer): IResult;
+var
+  Builder: TJsonBuilder;
+begin
+  Builder := TJsonBuilder.NewBuilder
+    .Add('type', 'https://tools.ietf.org/html/rfc7231#section-6.6.1')
+    .Add('title', HttpStatus.GetReasonPhrase(AStatusCode))
+    .Add('status', AStatusCode)
+    .Add('detail', ADetail);
+  try
+    Result := TJsonResult.Create(Builder.ToString, AStatusCode);
+  finally
+    Builder.Free;
+  end;
+end;
+
+class function Results.ValidationProblem(const AValidation: TValidationResult): IResult;
+begin
+  Result := TValidationProblemResult.Create(AValidation);
+end;
+
+class function Results.Fail(const AMessage: string; AStatusCode: Integer): IResult;
+begin
+  Result := Problem(AMessage, AStatusCode);
+end;
+
+class function Results.Redirect(const AUrl: string; APermanent, APreserveMethod: Boolean): IResult;
+begin
+  Result := TRedirectResult.Create(AUrl, APermanent, APreserveMethod, False);
+end;
+
+class function Results.LocalRedirect(const AUrl: string; APermanent, APreserveMethod: Boolean): IResult;
+begin
+  Result := TRedirectResult.Create(AUrl, APermanent, APreserveMethod, True);
+end;
+
+class function Results.SendFile(const APath, AContentType, ADownloadName: string): IResult;
+begin
+  Result := TFileResult.Create(APath, AContentType, ADownloadName);
+end;
+
+class function Results.Challenge(const AScheme: string): IResult;
+begin
+  Result := TChallengeResult.Create(AScheme);
+end;
+
+class function Results.Forbid(const AScheme: string): IResult;
+begin
+  Result := TForbidResult.Create(AScheme);
 end;
 
 class function Results.Json(const AJson: string; AStatusCode: Integer): IResult;
@@ -643,6 +787,145 @@ begin
     Result := TFile.ReadAllText(FullPath, TEncoding.UTF8)
   else
     Result := Format('<html><body><h1>View Not Found</h1><p>%s</p></body></html>', [FullPath]);
+end;
+
+{ TRedirectResult }
+
+constructor TRedirectResult.Create(const AUrl: string; APermanent, APreserveMethod, ALocalOnly: Boolean);
+begin
+  inherited Create;
+  FUrl := AUrl;
+  FPermanent := APermanent;
+  FPreserveMethod := APreserveMethod;
+  FLocalOnly := ALocalOnly;
+end;
+
+procedure TRedirectResult.Execute(AContext: IHttpContext);
+var
+  Code: Integer;
+begin
+  if FLocalOnly and FUrl.StartsWith('http', True) then
+  begin
+    AContext.Response.StatusCode := HttpStatus.BadRequest;
+    AContext.Response.Write('Local redirect allowed only for relative URLs.');
+    Exit;
+  end;
+
+  if FPermanent then
+    Code := IfThen(FPreserveMethod, HttpStatus.PermanentRedirect, HttpStatus.MovedPermanently)
+  else
+    Code := IfThen(FPreserveMethod, HttpStatus.TemporaryRedirect, HttpStatus.Found);
+
+  AContext.Response.StatusCode := Code;
+  AContext.Response.AddHeader('Location', FUrl);
+end;
+
+{ TFileResult }
+
+constructor TFileResult.Create(const APath, AContentType, ADownloadName: string);
+begin
+  inherited Create;
+  FPath := APath;
+  FContentType := AContentType;
+  FDownloadName := ADownloadName;
+end;
+
+procedure TFileResult.Execute(AContext: IHttpContext);
+var
+  Mime: string;
+  Ext: string;
+begin
+  if not TFile.Exists(FPath) then
+  begin
+    AContext.Response.StatusCode := HttpStatus.NotFound;
+    Exit;
+  end;
+
+  Mime := FContentType;
+  if Mime = '' then
+  begin
+    Ext := TPath.GetExtension(FPath).ToLower;
+    if Ext = '.pdf' then Mime := 'application/pdf'
+    else if Ext = '.png' then Mime := 'image/png'
+    else if Ext = '.jpg' then Mime := 'image/jpeg'
+    else if Ext = '.jpeg' then Mime := 'image/jpeg'
+    else if Ext = '.zip' then Mime := 'application/zip'
+    else if Ext = '.txt' then Mime := 'text/plain'
+    else if Ext = '.html' then Mime := 'text/html'
+    else if Ext = '.json' then Mime := 'application/json'
+    else Mime := 'application/octet-stream';
+  end;
+
+  AContext.Response.SetContentType(Mime);
+  if FDownloadName <> '' then
+    AContext.Response.AddHeader('Content-Disposition', 'attachment; filename="' + FDownloadName + '"');
+
+  var Stream := TFileStream.Create(FPath, fmOpenRead or fmShareDenyWrite);
+  try
+    AContext.Response.Write(Stream);
+  finally
+    Stream.Free;
+  end;
+end;
+
+{ TValidationProblemResult }
+
+constructor TValidationProblemResult.Create(const AValidation: TValidationResult);
+begin
+  inherited Create;
+  FValidation := AValidation;
+end;
+
+procedure TValidationProblemResult.Execute(AContext: IHttpContext);
+var
+  Builder: TJsonBuilder;
+  Err: TValidationError;
+begin
+  AContext.Response.StatusCode := HttpStatus.BadRequest;
+  Builder := TJsonBuilder.NewBuilder
+    .Add('type', 'https://tools.ietf.org/html/rfc7231#section-6.5.1')
+    .Add('title', 'One or more validation errors occurred.')
+    .Add('status', HttpStatus.BadRequest);
+
+  Builder.AddObject('errors');
+  for Err in FValidation.Errors do
+    Builder.Add(Err.FieldName, Err.ErrorMessage);
+  Builder.EndObject;
+  try
+    AContext.Response.Json(Builder.ToString);
+  finally
+    Builder.Free;
+  end;
+end;
+
+{ TChallengeResult }
+
+constructor TChallengeResult.Create(const AScheme: string);
+begin
+  inherited Create;
+  FScheme := AScheme;
+end;
+
+procedure TChallengeResult.Execute(AContext: IHttpContext);
+begin
+  // Standard challenge triggers 401. 
+  // Middlewares like JWT or BasicAuth will catch this if they are configured.
+  AContext.Response.StatusCode := HttpStatus.Unauthorized;
+  if FScheme <> '' then
+    AContext.Response.AddHeader('WWW-Authenticate', FScheme);
+end;
+
+{ TForbidResult }
+
+constructor TForbidResult.Create(const AScheme: string);
+begin
+  inherited Create;
+  FScheme := AScheme;
+end;
+
+procedure TForbidResult.Execute(AContext: IHttpContext);
+begin
+  AContext.Response.StatusCode := HttpStatus.Forbidden;
 end;
 
 end.

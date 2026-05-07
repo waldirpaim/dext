@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -176,6 +176,11 @@ type
     procedure AppendCookie(const AName, AValue: string; const AOptions: TCookieOptions); overload;
     procedure AppendCookie(const AName, AValue: string); overload;
     procedure DeleteCookie(const AName: string);
+    procedure Redirect(const AUrl: string; APermanent: Boolean = False);
+    procedure Unauthorized(const AMessage: string = '');
+    procedure Forbidden(const AMessage: string = '');
+    procedure BadRequest(const AMessage: string = '');
+    procedure NotFound(const AMessage: string = '');
     property StatusCode: Integer read GetStatusCode write SetStatusCode;
     property ContentType: string read GetContentType write SetContentType;
   end;
@@ -329,13 +334,14 @@ procedure TDextDCSRequest.BuildFiles;
 var
   I: Integer;
   MultiPart: THttpMultiPartFormData;
+  Field: TFormField;
 begin
   if FRequest.BodyType = btMultiPart then
   begin
     MultiPart := FRequest.Body as THttpMultiPartFormData;
     for I := 0 to MultiPart.Count - 1 do
     begin
-      var Field := MultiPart.Items[I];
+      Field := MultiPart.Items[I];
       if Field.FileName <> '' then // only actual file uploads
         FFiles.Add(TDextDCSFormFile.Create(Field));
     end;
@@ -383,6 +389,7 @@ var
   Bytes: TBytes;
   Params: THttpUrlParams;
   Encoded: string;
+  EncodedBytes: TBytes;
 begin
   if FBody = nil then
   begin
@@ -398,7 +405,7 @@ begin
           Params := FRequest.Body as THttpUrlParams;
           Encoded := Params.Encode;
           FBody := TMemoryStream.Create;
-          var EncodedBytes := TEncoding.UTF8.GetBytes(Encoded);
+          EncodedBytes := TEncoding.UTF8.GetBytes(Encoded);
           if Length(EncodedBytes) > 0 then
             FBody.WriteBuffer(EncodedBytes[0], Length(EncodedBytes));
           FBody.Position := 0;
@@ -641,6 +648,39 @@ begin
   Opts := TCookieOptions.Default;
   Opts.Expires := Now - 1; // yesterday → MaxAge < 0 → browser deletes
   AppendCookie(AName, '', Opts);
+end;
+
+procedure TDextDCSResponse.Redirect(const AUrl: string; APermanent: Boolean);
+begin
+  if APermanent then
+    FStatusCode := 301
+  else
+    FStatusCode := 302;
+  AddHeader('Location', AUrl);
+end;
+
+procedure TDextDCSResponse.Unauthorized(const AMessage: string);
+begin
+  FStatusCode := 401;
+  if AMessage <> '' then Write(AMessage);
+end;
+
+procedure TDextDCSResponse.Forbidden(const AMessage: string);
+begin
+  FStatusCode := 403;
+  if AMessage <> '' then Write(AMessage);
+end;
+
+procedure TDextDCSResponse.BadRequest(const AMessage: string);
+begin
+  FStatusCode := 400;
+  if AMessage <> '' then Write(AMessage);
+end;
+
+procedure TDextDCSResponse.NotFound(const AMessage: string);
+begin
+  FStatusCode := 404;
+  if AMessage <> '' then Write(AMessage);
 end;
 
 { TDextDCSContext }

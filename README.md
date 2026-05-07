@@ -1,342 +1,102 @@
 [🇧🇷 Português](README.pt-br.md)
 
-# Dext Framework - Modern Full-Stack Development for Delphi
+# Dext Framework
+**Modern Full-Stack Development for Delphi**
 
-> ⚠️ **Status: Beta (v1.0 Preview)**
-> > The project has reached the Beta milestone. Core APIs are stable, but minor breaking changes might still occur before the final v1.0 release.
->
-> 📌 **Check out the [Roadmap & Plan](Docs/Book/roadmap.md)** for a detailed list of features, pending tasks, and future plans.
-
-> 📢 **[Novidades / Changelog](CHANGELOG.md)** — Últimas atualizações, breaking changes e novas features / Latest updates, breaking changes and new features
-
-**Dext** is a complete ecosystem for modern Delphi development. It brings the productivity and architectural patterns of frameworks like **ASP.NET Core** and **Spring Boot** to the native performance of Object Pascal.
-
-The goal is not merely to build APIs, but to provide a solid foundation (DI, Configuration, Logging, ORM) enabling you to build robust and testable enterprise applications.
-
-## 🎯 Philosophy and Goals
-
-* **Inspired by .NET Patterns**: The goal is to bring the robust architectural patterns of the .NET ecosystem (ASP.NET Core, EF Core) to Delphi, achieving high compatibility with its design principles.
-* **Native Performance**: After functional stabilization of v1, the focus will shift entirely to **performance optimization**, aiming to compete with high-speed frameworks.
-* **Innovation**: While inspired by .NET, Dext is not limited to it, seeking to implement solutions that specifically make sense for the Delphi language.
-
-## 📄 License
-
-This project is licensed under the **Apache License 2.0** (the same used by .NET Core). This allows free use in commercial and open-source projects, with the security of a permissive and modern license.
-
-## 🧠 Design & Philosophy
-
-Dext's development is guided by two engineering principles that define every architectural decision made in the project:
-
-> **"Simplicity is Complicated."** — *Rob Pike*
-
-Hiding the complexity of HTTP servers, memory management, and concurrency requires sophisticated internal engineering. We embrace this internal complexity to ensure that your public API is **clean, intuitive, and noise-free**.
-
-* **In practice:** You write `App.MapGet`, and the framework quietly resolves routing, JSON serialization, and error handling.
-
-> **"Make what is right easy and what is wrong difficult."** — *Steve "Ardalis" Smith*
-
-A good framework should guide the developer into the "Pit of Success". Dext was designed so that best practices—such as Dependency Injection, interface segregation, and using DTOs—are the natural default, not a burdensome extra configuration.
-
-## 🚀 Main Modules
-
-### 🌐 Dext.Web (Web Framework)
-
-A lightweight and powerful HTTP framework for building REST APIs and microservices.
-
-* **Minimal APIs**: Concise fluent syntax for route definition.
-* **Controllers**: Traditional class-based support for complex APIs.
-* **Advanced Model Binding**: Automatic binding from multiple sources (Body, Query, Route, Header, Services) directly to Records/Classes.
-* **Middlewares**: Modular and extensible request pipeline.
-* **SSL/HTTPS**: Pluggable support for OpenSSL and TaurusTLS (OpenSSL 1.1x/3.x).
-* **First-Class UUID**: Native support for binding `TUUID` (RFC 9562) in Routes/Body.
-* **Multipart/Form-Data**: Native support for file uploads via `IFormFile`.
-* **Response Compression**: Built-in GZip compression middleware.
-* **Cookies**: Full support for reading and writing cookies with `TCookieOptions`.
-* **OpenAPI**: Native Swagger integration with auto-generated documentation.
-* **Database as API**: Zero-code REST endpoints from entities with `TDataApiHandler<T>.Map` or the new fluent `App.Services.MapDataApi<T>`.
-* **Zero-Allocation JSON**: Extremely fast response generation using `TUtf8JsonWriter` for direct streaming.
-* **Dynamic Specification Mapping**: Automatic QueryString filtering integration (`_gt`, `_lt`, `_sort`, etc).
-* **WebBroker Server Adapter** ⭐ NEW: Deploy as ISAPI/CGI via WebBroker in IIS/Apache with zero code changes, running alongside Indy.
-* **DCS Server Adapter** ⭐ NEW: High-performance non-blocking HTTP engine (epoll/IOCP) powered by Delphi-Cross-Socket.
-* **Real-Time Communication** ⭐ NOVO: SignalR-compatible Hubs for real-time messaging. Supports groups, user targeting, and broadcast with `Dext.Web.Hubs`. [Learn more](Docs/Book/07-real-time/hubs-signalr.md)
-* **SSR & View Engines** ⭐ NOVO: Agnostic Server-Side Rendering support with Flyweight Iterators for O(1) memory loops and native integration with **Web Stencils** (Delphi 12.2+) with optimized fluent DSL.
-* **Observability & Telemetry (S03)** ⭐ NOVO: Real-time instrumentation infrastructure via `TDiagnosticSource`. Includes `Telemetry Bridge` for logging HTTP and SQL events directly to the console.
-* **Auto-Migrations (S11)** ⭐ NOVO: Automatic schema synchronization during web server startup with intelligent renaming detection.
-
-### 🗄️ Dext.Entity (ORM)
-
-A modern ORM focused on productivity and performance.
-
-* **Code-First**: Define your database using Delphi classes.
-* **Scaffolding**: Database-First support to generate entities from existing schemas and CLI-based project scaffolding.
-* **Migrations (S11)**: Database schema version control (`migrate:up`, `migrate:down`, `migrate:generate`) with attribute-based renaming detection.
-* **Fluent Query API**: Strongly typed and expressive queries.
-* **Smart Properties**: Type-safe query expressions without magic strings. Write `u.Age > 18` and get compile-time checks, IntelliSense, and automatic SQL generation. [Learn more](Docs/Book/05-orm/smart-properties.md)
-* **Change Tracking**: Automatic change tracking and optimized persistence.
-* **Advanced Types**: Native support for **UUID v7** (Time-Ordered), JSON/JSONB, and Arrays.
-* **DbType Propagation**: Explicit control over database types via `[DbType]` attribute, ensuring data integrity beyond Delphi types.
-* **Legacy Paging Support**: Automatic query wrapping (e.g., `ROWNUM`) for older versions of Oracle and SQL Server.
-* **Multi-Tenancy**:
-  * **Shared Database**: Automatic filtering by `TenantId`.
-  * **Schema-based Isolation**: High-performance isolation via schemas (PostgreSQL `search_path`, SQL Server prefixing).
-  * **Tenant per Database**: Dynamic connection string resolution based on tenant.
-  * **Automatic Schema Creation**: `EnsureCreated` automatically sets up per-tenant schemas.
-* **Advanced Querying**:
-  * **FromSql**: Execute raw SQL and map results to entities automatically.
-  * **Multi-Mapping ([Nested])**: Dapper-style recursive hydration for complex objects.
-  * **Pessimistic Locking**: Support for `FOR UPDATE` and `UPDLOCK` in fluent queries.
-  * **Stored Procedures**: Declarative mapping via `[StoredProcedure]` and `[DbParam]`.
-* **Inheritance Mapping**:
-  * **Table-Per-Hierarchy (TPH)**: Full support for base classes and subclasses in a single table.
-  * **Polymorphic Hydration**: Automatic instantiation of the correct subclass during data retrieval.
-  * **Attribute-based Mapping**: Use `[Inheritance]`, `[DiscriminatorColumn]`, and `[DiscriminatorValue]`.
-* **Multi-Database**: Fully tested support for **SQL Server, PostgreSQL, Firebird, MySQL/MariaDB**, and **SQLite** (165 tests passing on all). Oracle in beta.
-* **Dialect Auto-Detection**: Deterministic identification via Enum (`ddPostgreSQL`, etc) for zero-config setup.
-* **High-Performance Drivers**:
-  * **Standard FireDAC Driver**: Full-featured with TDataSet compatibility
-  * **FireDAC Phys Driver**: "Bare metal" access bypassing TDataSet for maximum performance
-  * Direct access to FireDAC's physical layer (IFDPhysConnection) for ultra-fast queries
-* **Performance**: High-Speed Metadata Cache (singleton-based) to minimize reflection overhead.
-
-### 🌐 Dext.Net (Networking) ⭐ NEW
-
-A high-performance, fluent HTTP client for modern connectivity.
-
-* **Fluent API**: Builder pattern for intuitive request construction (`Client.Get('/api').Header(...).Start`).
-* **Connection Pooling**: Native thread-safe pool reuses `THttpClient` instances for maximum throughput.
-* **Resilience**: Built-in support for Retries, Timeouts, and Circuit Breaker patterns.
-* **Authentication**: Pluggable providers (Bearer, Basic, ApiKey).
-* **Serialization**: Automatic JSON serialization/deserialization integration with `Dext.Json`.
-* **HTTP File Parser** ⭐ NEW: Parse and execute `.http` files (VS Code/IntelliJ REST Client format) with variable interpolation and environment variable support.
-
-### ⚙️ Dext.Core (Infrastructure)
-
-The foundation of the framework, usable in any type of application.
-
-* **Dependency Injection**: Full and fast IOC container.
-* **Configuration**: Flexible configuration system (JSON, YAML, Environment Variables).
-* **Logging**: Structured logging abstraction.
-* **Async/Await**: Primitives for real asynchronous programming.
-* **Collections** ⭐ **NEW**: High-performance interface-based collections (`IList<T>`, `IDictionary<K,V>`) with automatic memory management and extensive LINQ-inspired support (`Where`, `Select`, `Any`, `OrderBy`). Elimina "Memory Leaks" e simplifica lógica de dados.
-* **Specifications**: Business rule encapsulation and composition (DDD).
-* **Expressions**: Expression tree primitives for dynamic logic evaluation.
-* **JSON Serialization**:
-  * **High-Performance UTF-8**: Direct UTF-8 serialization/deserialization without intermediate string conversions
-  * **Zero-Copy Parsing**: Optimized for minimal memory allocations
-  * **Smart Type Support**: Native handling of GUID, Enums, DateTime, and custom types
-  * **Pluggable Drivers**: Support for JsonDataObjects (default) and System.JSON
-
-### 🧪 Dext.Testing
-
-The definitive, modern testing framework for Delphi, inspired by NUnit, FluentAssertions, and Moq.
-
-* **Attribute-Based Runner** ⭐ NEW: Write tests with `[TestFixture]`, `[Test]`, `[Setup]`, `[TearDown]` - no base class inheritance required.
-* **Unified Fluent Assertions**: A rich `Should(Value)` syntax for everything—from Primitives (Int64, GUID, Variant) to Objects, Lists, and Actions. Includes **Soft Asserts** (`Assert.Multiple`) for collecting multiple failures, Chaining (`.AndAlso`), localized checks (`.BeOneOf`, `.Satisfy`), and RTTI inspection (`.HaveProperty`).
-* **Powerful Mocking**: Create strict or loose mocks for Interfaces and Classes with `Mock<T>`. Supports Partial Mocks (`CallsBase`), Sequence setup, and Argument Matchers (`Arg.Is<T>`).
-* **Auto-Mocking Container**: Effortlessly test classes with many dependencies. `TAutoMocker` automatically injects mocks into your System Under Test (SUT).
-* **Snapshot Testing**: Simplify complex object verification by comparing against JSON baselines (`MatchSnapshot`).
-* **Test-Centric DI**: Specialized `TTestServiceProvider` to easily swap production services with mocks during integration tests.
-* **CI/CD Integration** ⭐ NEW: Export reports to JUnit XML, JSON, xUnit, TRX (Azure DevOps), SonarQube, and beautiful standalone HTML.
-* **Live Dashboard** ⭐ NEW: Monitor your tests in real-time with a beautiful dark-themed web dashboard and historical analysis.
-* **Code Coverage & CLI (S01)**: Run tests and generate SonarQube-ready coverage reports with `dext test --coverage`. Enforce quality gates with thresholds.
-* **Advanced Scaffolding (S01)** ⭐ NOVO: Powerful CLI motor for generating projects and components (`dext new`, `dext add`) utilizing the integrated template engine.
-
-### 🧩 Dext.Collections ⭐ **NEW**
-
-High-performance collection library inspired by .NET 8.
-
-* **Standard & Concurrent**: Optimized implementations of List, Dictionary, HashSet, and thread-safe versions like `ConcurrentQueue`.
-* **Frozen Collections**: Immutable, high-performance data structures for read-heavy scenarios.
-* **Channels**: Go-style asynchronous communication primitives (Producer/Consumer) for data pipelines.
-* **Hardware Acceleration**: SIMD & Vector (AVX/SSE) support for batch processing.
-
-### 🖥️ Dext.UI (Desktop Framework) ⭐ NEW
-
-A modern UI framework for building professional VCL desktop applications.
-
-* **Navigator Framework**: Flutter-inspired navigation with middleware pipeline support.
-  * Push/Pop/Replace navigation patterns
-  * Middleware support (Logging, Auth guards, Role checks)
-  * Pluggable adapters (Container, PageControl, MDI)
-  * `INavigationAware` lifecycle hooks (`OnNavigatedTo`, `OnNavigatedFrom`)
-* **Magic Binding**: Automatic two-way binding via attributes.
-  * `[BindEdit]`, `[BindText]`, `[BindCheckBox]` for property sync
-  * `[OnClickMsg]` for message-based event dispatch
-* **MVVM Patterns**: Clean architecture for desktop apps.
-  * ViewModel pattern with validation
-  * Controller pattern for orchestration
-  * View interfaces for decoupling
-
-### ⚙️ Dext.Core (Extensions)
-
-* **Smart Reflection**: High-performance metadata engine with global type caching.
-* **Greedy Activator**: Intelligent constructor resolution for complex dependency trees.
-* **Memory Optimization**: `Dext.Core.Span` (Zero-allocation) and advanced memory management.
+<p align="center">
+  <img src="Docs/Images/dext-mascot.png" alt="Dext Framework Mascot">
+</p>
 
 ---
 
-## 📚 Documentation Index
+> [!IMPORTANT]
+> Dext Framework is currently in **Version 1 Release Candidate (RC1)**.
 
-### 🚀 Getting Started
+**Dext Framework** is a native and integrated ecosystem for Delphi development.
 
-* **📖 [The Dext Book](Docs/Book/README.md)**
+It brings together Dependency Injection, ORM, Web Pipeline, and Testing into a single, high-performance architecture. Designed to eliminate the need for connecting isolated libraries and to drastically reduce boilerplate code, Dext handles the infrastructure complexity so your team can focus strictly on business logic.
 
-### 🌐 Web API
+## Where to Use?
 
-* **Routing & Endpoints**
-  * [Minimal API](Docs/Book/02-web-framework/minimal-apis.md)
-  * [Validation & Binding](Docs/Book/02-web-framework/model-binding.md)
+Dext was specifically designed to solve the real-world pain points faced by Delphi developers:
 
-* **Security & Middleware**
-  * [JWT Authentication](Docs/Book/03-authentication/jwt-auth.md)
-  * [HTTPS/SSL Configuration](Examples/Web.SslDemo/README.md)
-  * [CORS](Docs/Book/04-api-features/cors.md)
-  * [Rate Limiting](Docs/Book/04-api-features/rate-limiting.md)
-* **Advanced**
-  * [Database as API](Docs/Book/06-database-as-api/crud-zero-code.md)
-  * [Background Services](Docs/Book/10-advanced/background-services.md)
-  * [Action Filters](Docs/Book/04-api-features/filters.md)
-  * [Swagger / OpenAPI](Docs/Book/04-api-features/openapi-swagger.md)
-  * [Real-Time Hubs](Docs/Book/07-real-time/hubs-signalr.md) ⭐ NEW
-
-### 🗄️ Data Access (ORM)
-
-* [Database Configuration](Docs/Book/05-orm/getting-started.md)
-* [Fluent Query API](Docs/Book/05-orm/querying.md)
-* [Smart Properties](Docs/Book/05-orm/smart-properties.md) ⭐ NEW
-* [Migrations](Docs/Book/05-orm/migrations.md)
-* [Relationships (Lazy/Eager)](Docs/Book/05-orm/relationships.md)
-* [Bulk Operations](Docs/Archive/loose/bulk-operations.md)
-* [Soft Delete](Docs/Book/05-orm/soft-delete.md)
-
-### ⚙️ Core & Infrastructure
-
-* [Dependency Injection & Scopes](Docs/Book/10-advanced/dependency-injection.md)
-* [Application Configuration](Docs/Book/10-advanced/configuration.md)
-* [Options Pattern](Docs/Book/10-advanced/configuration.md)
-* [Application Lifecycle](Docs/Book/02-web-framework/lifecycle.md)
-* [Async Programming](Docs/Book/10-advanced/async-api.md)
-* [Caching](Docs/Book/04-api-features/cache.md)
-* [CLI Tool](Docs/Book/09-cli/commands.md) ⭐ NEW
-
-### 🧪 Testing
-
-* [Getting Started](Docs/Book/08-testing/README.md)
-
-### 📰 Articles & Tutorials
-
-* [The Story behind Dext Framework: Why we built it](https://www.cesarromero.com.br/en/blog/dext-story/)
-
-* [Domain Model & CQRS: Modernizing your Delphi Architecture](https://www.cesarromero.com.br/en/blog/enterprise-patterns-delphi/)
-* [Database as API: High Performance without Controllers](https://www.cesarromero.com.br/en/blog/database-as-api-cqrs/)
+* **Web Applications:** Develop complete web applications with Server-Side rendering using WebStencils or native templates integrated into the pipeline.
+* **High-Performance APIs:** Build robust RESTful backends using *Minimal APIs*, *Controllers*, or generating direct endpoints with the `[DataApi]` attribute.
+* **Concurrency and Asynchrony:** Use *Dext Threading* (Async Task, Cancellation Token, Async Rest Client) to create background routines and non-blocking workflows, replacing the complex manual usage of the `TThread` class.
+* **Mobile Backend (iOS/Android):** Provide the integration, connectivity, and security infrastructure needed to support mobile applications efficiently.
+* **Legacy Modernization:** Gradually integrate with old 3-tier systems (like DataSnap), ISAPI/Apache middlewares, or Desktop monoliths (VCL) without having to rewrite your 20-year-old ERP. Dext acts as a modern foundation within existing systems.
+* **Background Services and Microservices:** Robust data extraction, high-performance scheduled tasks, and connectivity between applications.
 
 ---
 
-## 💻 Requirements
+## Quick Start
 
-* **Delphi**: Recommended Delphi 10.4 Sydney or higher (due to extensive use of modern language features).
-* **Indy**: Uses Indy components (already included in Delphi) for the HTTP transport layer (subject to future replacement/optimization).
+See how Dext's structure simplifies complex flows into clean, typed, and object-oriented code. Exploring the framework's pillars:
 
-## 📦 Installation and Configuration
+### Minimal API
 
-> 📖 **Detailed Guide**: For a complete step-by-step walkthrough and advanced configuration, please read the [Installation Guide](Docs/Book/01-getting-started/installation.md).
-
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://github.com/dext-framework/dext.git
-   ```
-
-   > 📦 **Package Note**: The project is organized into modular packages located in the `Sources` directory (e.g., `Dext.Core.dpk`, `Dext.Web.Core.dpk`, `Dext.Data.dpk`). You can open `Sources/DextFramework.groupproj` to load all packages at once.
-
-2. **Configure Environment Variable (Optional but Recommended):**
-   To simplify configuration and easily switch between versions, create a User Environment Variable named `DEXT` pointing to the `Sources` directory.
-
-   * Go to: **Tools** > **Options** > **IDE** > **Environment Variables**
-   * Under **User System Overrides**, click **New...**
-   * **Variable Name**: `DEXT`
-   * **Variable Value**: `C:\path\to\dext\Sources` (e.g., `C:\dev\Dext\Sources`)
-
-   ![DEXT Environment Variable](Docs/Images/ide-env-var.png)
-
-3. **Configure Paths in Delphi:**
-
-   * **Library Path** (for compilation):
-       * `$(DEXT)\..\Output\$(ProductVersion)_$(Platform)_$(Config)`
-
-   * **Browsing Path** (for code navigation):
-       * `$(DEXT)`
-       * `$(DEXT)\Core`
-       * `$(DEXT)\Data`
-       * `$(DEXT)\Hosting`
-       * `$(DEXT)\Web`
-       * *(See [Installation Guide](Docs/Book/01-getting-started/installation.md) for the complete list)*
-
-   > 📝 **Note**: Compiled files (`.dcu`, binaries) will be generated in the `.\Output` directory.
-
-4. **Dependencies:**
-   * The framework uses `FastMM5` (recommended for memory debugging).
-   * Native database drivers (FireDAC, etc.) are supported.
-
----
-
-## ⚡ Quick Example (Minimal API)
+Creating a high-performance endpoint integrated with Dependency Injection requires minimal effort:
 
 ```pascal
 program MyAPI;
 
-uses
-  Dext.Web;
+uses Dext.Web;
 
 begin
-  // The global function WebApplication returns IWebApplication (ARC safe)
   var App := WebApplication;
-  var Builder := App.Builder;
+  
+  // Simple endpoint
+  App.MapGet('/hello', function: string
+  begin
+    Result := 'Hello from Dext! Modern full-stack for Delphi.';
+  end);
 
-  // Simple Route
-  Builder.MapGet<IResult>('/hello', 
-    function: IResult
+  // Endpoint with native Automatic Dependency Injection (DI) and Model Binding
+  App.MapPost<TUserDto, IEmailService, IResult>('/register',
+    function(Dto: TUserDto; EmailService: IEmailService): IResult
     begin
-      Result := Results.Ok('{"message": "Hello Dext!"}');
-    end);
-
-  // Route with parameter and binding
-  Builder.MapGet<Integer, IResult>('/users/{id}',
-    function(Id: Integer): IResult
-    begin
-      Result := Results.Json(Format('{"userId": %d}', [Id]));
+      EmailService.SendWelcome(Dto.Email);
+      Result := Results.Created('/login', 'User successfully registered');
     end);
 
   App.Run(8080);
 end.
 ```
 
-## 🧩 Model Binding & Dependency Injection
+### Simple Entity (COC, DataApi, and Smart Properties)
 
-Dext automatically resolves dependencies and deserializes JSON bodies into Records/Classes:
+Automatic mapping via *Convention over Configuration* and structured properties for advanced relational mapping:
 
 ```pascal
-// 1. Register Services
-App.Services.AddSingleton<IEmailService, TEmailService>;
-
-// 2. Define Endpoint with Dependencies
-// - 'Dto': Automatically bound from JSON Body (Smart Binding)
-// - 'EmailService': Automatically injected from DI Container
-App.Builder.MapPost<TUserDto, IEmailService, IResult>('/register',
-  function(Dto: TUserDto; EmailService: IEmailService): IResult
-  begin
-    EmailService.SendWelcome(Dto.Email);
-    Result := Results.Created('/login', 'User registered');
-  end);
+[Table]
+[DataApi('/api/orders')] // Automatically exposed as a REST API (Zero-Code API)!
+TOrder = class
+private
+  FId: IntType;
+  FStatus: Prop<TOrderStatus>;
+  FNotes: StringType;
+  FTotal: Nullable<CurrencyType>;
+  FItems: Lazy<IList<TOrderItem>>;
+public
+  [PK, AutoInc]
+  property Id: IntType read FId write FId;
+  property Status: Prop<TOrderStatus> read FStatus write FStatus;
+  property Notes: StringType read FNotes write FNotes;
+  
+  // Smart Types to natively handle nulls, validation, and Lazy Loading
+  property Total: Nullable<CurrencyType> read FTotal write FTotal;
+  property Items: Lazy<IList<TOrderItem>> read FItems write FItems;
+end;
 ```
 
-## 💎 ORM Example (Fluent Query)
+### ORM and Strongly Typed Queries (Type-Safe)
 
-Dext ORM allows expressive and strongly typed queries, eliminating magical SQL strings:
+No more magic strings or broken queries at runtime. Dext generates the Abstract Syntax Tree (AST) of your code:
 
 ```pascal
-// Complex Query with Joins and Filters
-// O: TOrder (Alias/Proxy)
+// Complex query with Joins and Filters interpreted as clean code
+var O := Prototype.Entity<TOrder>;
+
 var Orders := DbContext.Orders
   .Where((O.Status = TOrderStatus.Paid) and (O.Total > 1000))
   .Include('Customer') // Eager Loading
@@ -345,105 +105,151 @@ var Orders := DbContext.Orders
   .Take(50)
   .ToList;
 
-// High-Performance Bulk Update
+// High-performance Bulk Update directly in the DBMS without loading records into memory
 DbContext.Products
-  .Where(P.Category = 'Outdated') // P: TProduct
-  .Update                         // Starts bulk update
+  .Where(Prototype.Entity<TProduct>.Category = 'Outdated')
+  .Update
   .Execute;
 ```
 
-## ⚡ Async Example (Fluent Tasks)
+### Async Processing (Fluent Tasks)
 
-Forget `TThread` complexity. Use a modern API based on Promises/Tasks:
+The complexity of `TThread` transformed into modern asynchronous chained pipelines. The `Fluent Async Tasks` abstraction delivers superpowers over the `PPL` (*Parallel Programming Library*) and `Future<T>`, allowing pipelines based on the *Thread Pool*:
 
 ```pascal
-// Asynchronous Task Chaining
-var Task := TAsyncTask.Run<TUserProfile>(
-  function: TUserProfile
-  begin
-    // Runs on background
-    Result := ExternalApi.GetUserProfile(UserId);
-  end)
-  .ThenBy<Boolean>(
-    function(Profile: TUserProfile): Boolean
-    begin
-      Result := Profile.IsVerified and Profile.HasCredit;
-    end)
-  .OnComplete( // Returns to UI Thread automatically
-    procedure(IsVerified: Boolean)
-    begin
-      if IsVerified then
-        ShowSuccess('User Verified!')
-      else
-        ShowError('Verification Failed');
-    end)
-  .Start; // Starts execution
-
-// Timeout & Cancellation Handling
 var CTS := TCancellationTokenSource.Create;
 
-TAsyncTask.Run<TReport>(
-  function: TReport
+TAsyncTask.Run<TStream>(
+  function: TStream
   begin
-    // Pass token to long-running operation
-    Result := ReportService.GenerateHeavyReport(CTS.Token);
+    // Requests a free Task from the Thread Pool for network download
+    Result := AsyncClient.DownloadStream('https://api.company.com/data', CTS.Token);
   end)
-  .WithCancellation(CTS.Token) // Links token to Task pipeline
+  .Then<TReport>(
+    function(Stream: TStream): TReport
+    begin
+      // Chains a new processing Task as soon as the previous one finishes
+      Result := JsonSerializer.Deserialize<TReport>(Stream);
+      Stream.Free;
+    end)
   .OnComplete(
     procedure(Report: TReport)
     begin
+      // Automatically and safely synchronizes the return with the Original Thread (UI)
       ShowReport(Report);
     end)
   .OnException(
     procedure(Ex: Exception)
     begin
-      if Ex is EOperationCancelled then
-        ShowMessage('Operation timed out!')
-      else
-        ShowError(Ex.Message);
+      ShowError('Process failed: ' + Ex.Message);
     end)
   .Start;
 ```
 
-## 🧪 Examples and Tests
+### Configuration, Options & DI
 
-The repository contains practical example projects:
+Structured environment for registering services and external configurations using `JSON`, `YAML`, or Environment Variables:
 
-* **`Examples/Orm.EntityDemo`**: Comprehensive demo focused on ORM features (CRUD, Migrations, Querying).
-* **`Examples/Web.ControllerExample`**: Demonstrates Controller-based API implementation (includes a minimal **Vite** frontend client).
-* **`Examples/Web.SwaggerExample`**: Shows how to integrate and customize OpenAPI/Swagger documentation.
-* **`Examples/Web.TaskFlowAPI`**: A complete "Real World" REST API demonstrating layered architecture, ORM, Auth, and DI.
-* **`Examples/Web.SslDemo`**: Demonstrates SSL/HTTPS configuration using OpenSSL or TaurusTLS.
-* **`Examples/Web.Dext.Starter.Admin`**: **(Recommended)** A Modern Admin Panel with HTMX, Service Layer, and Minimal APIs. [Read the Guide](Examples/Web.Dext.Starter.Admin/README.md).
-* **`Examples/Web.DatabaseAsApi`**: Demonstrates Database as API feature - zero-code REST endpoints from entities.
-* **`Examples/Web.SmartPropsDemo`**: Demonstrates usage of Smart Properties with Model Binding and ORM persistence.
-* **`Examples/Hubs/HubsExample`** ⭐ NEW: Real-time communication demo with groups, messaging, and server-time broadcast. [Read the Guide](Examples/Hubs/README.md).
-* **`Examples/Desktop.MVVM.CustomerCRUD`** ⭐ NEW: Modern Desktop MVVM pattern with Navigator, DI, and unit testing. [Read the Guide](Examples/Desktop.MVVM.CustomerCRUD/README.md).
-* **`Examples/Web.MultiTenancy`** ⭐ NEW: Demonstrates multi-tenant isolation strategies (Schema vs Database).
-* **`Examples/Web.HelpDesk`** ⭐ NEW: A complete help desk system with layered architecture and integration tests.
-* **`Examples/Web.MinimalAPI`** ⭐ NEW: Minimalist API examples showing the power of fluent route definitions.
-* **`Personal/Web.eShopOnWebByDomain`** ⭐ NEW: The classic eShopOnWeb implementation, showcasing Dext's full potential in complex domains.
+```pascal
+  var Builder := WebApplication.CreateBuilder;
+  
+  // Load hierarchical configuration sources
+  Builder.Configuration
+    .AddJsonFile('appsettings.json')
+    .AddYamlFile('config.yaml')
+    .AddEnvironmentVariables;
+  
+  Builder.Services
+    // Natively binds configuration to a strongly-typed class
+    .Configure<TDatabaseSettings>(Builder.Configuration.GetSection('Database'))
+    
+    // Complete Dependency Injection for repositories and services
+    .AddSingleton<IEmailService, TSmtpEmailService>
+    .AddScoped<IOrderRepository, TDbOrderRepository>;
+    
+  var App := Builder.Build;
+```
 
----
+### Full VCL Compatibility (TEntityDataSet)
 
----
+The `TEntityDataSet` converts the ORM's object orientation (POCOs) into *DataSet-compatible* structures consumable by your VCL grids, data-aware components, and Design Time reports, without losing performance!
 
-## 🗺️ Roadmaps
-
-Follow the project development:
-
-* [Main Roadmap](Docs/Book/roadmap.md) 🚀
-* [Pending Tasks (Trackers)](Docs/Book/roadmap/pending-tasks.md) 📋
-* [Architecture Guide](Docs/architecture/README.md) 🏗️
-
-#### Historical Documents
-* [Architecture & Performance](Docs/History/loose/architecture-performance.md)
-* [ORM Roadmap (Legacy)](Docs/History/roadmaps/orm-roadmap.md)
-* [Web Framework Roadmap (Legacy)](Docs/History/roadmaps/web-roadmap.md)
-* [Infra & IDE Roadmap (Legacy)](Docs/History/roadmaps/infra-roadmap.md)
-* [V1.0 Release Plan (Legacy)](Docs/History/roadmaps/v1-release-plan.md)
+> Design-Time Support: Native *TFields* creation from entity code and record visualization directly in the IDE.
 
 ---
 
-**Dext Framework** - *Native performance, modern productivity.*
-Developed with ❤️ by the Delphi community.
+## Core Features
+
+<p align="center">
+  <img src="Docs/Images/dext_ecosystem.png" alt="Dext Ecosystem Architecture" width="80%">
+</p>
+
+Dext is composed of flexible and minimalist modules. You retain full control over the architecture and include only the vital components for your solution:
+
+* **Core Technologies:** Enterprise-grade Dependency Injection (Singleton, Transient, Scoped), optimized Reflection cache, advanced event support, and IOptions.
+* **Clean Native Collections:** Elimination of memory leaks using interfaces (`IList`, `IDictionary`). Dext solves the classic *Generic Bloat* with Binary Code Folding, significantly reducing huge binaries.
+* **Data Access (ORM):** Robust management via *Unit of Work*, automatic transaction control (DAO support), and multi-database support.
+* **Web Frameworks:** Embedded HTTP server, *Minimal APIs*, *Controllers*, *DataAPI* REST generator, modular middlewares, *WebSockets* (Hubs), native CORS, and extremely fast rendering.
+* **Testing & Quality:** Coupled TestContext framework, automated *Mock Objects* (`TAutoMocker`), test coverage, and reporting.
+
+**[See the full features list and Dext modules](Docs/Features_Implemented_Index.md)**
+
+---
+
+## Installation
+
+Dext distribution prioritizes minimalism, without opaque installers that inject clutter into your system directory:
+
+1. Download the source code: `git clone https://github.com/cesarliws/dext.git`
+2. Add `Library Paths` in Delphi referencing Dext's main modules.
+3. Compile the project through the `Sources\DextFramework.groupproj` group.
+
+**[Read Detailed Setup and Installation Instructions](Docs/Book/01-getting-started/installation.md)**
+
+### Requirements and Compatibility
+* **Delphi:** 10.3 Rio or higher (Full support for 10.4, 11, and 12 Athens).
+* **Legacy Versions:** Can be compiled on 10.1 Berlin with limitations.
+* **Dependencies:** No mandatory external dependencies (uses native components).
+
+**[Detailed Compatibility Matrix](Docs/Delphi_Compatibility_Matrix.md)**
+
+---
+
+## Design and Philosophy: Born for Performance
+
+Delphi has historically been chosen for domains that did not tolerate overheads; however, recent frameworks have adopted unrestrained allocation patterns based on developer convenience. **Dext returns the performance while maintaining modern ease of use:**
+
+<p align="center">
+  <img src="Docs/Images/dext_performance_graph.png" alt="Dext Performance Graph" width="80%">
+</p>
+
+1. **Zero-Allocation Pipeline:** When the server exposes JSON or data, common components instantiate and process gigabytes of temporary `string`s, causing deadly spikes in the Memory Manager and forced pauses. Dext bypasses classic conversion through *Direct-to-JSON streaming*, reading entire blocks via immutable memory structures (`TSpan`).
+2. **Hardware Affinity (SIMD):** The underlying layers benefit from parallel computing using SIMD (Single Instruction, Multiple Data) in parsing to ensure response in very few CPU ticks.
+
+---
+
+## Open Source and License
+
+**Dext** is developed and maintained publicly and provided under the **Apache License 2.0**.
+It is fully and unconditionally free (for open-source scenarios or strict enterprise/commercial development). Create billion-dollar software, distribute, or encapsulate at will. No catches.
+
+---
+
+## Join the Community
+
+Dext is driven by the community. Whether you are an enthusiastic user or an infrastructure-focused developer, there are many ways to help:
+
+* **Spread the word:** If Dext is useful to you, please consider **leaving a star** on the repository. This helps the project gain visibility and attract more contributors.
+* **Share your Success:** Built something amazing with Dext? We would love to hear about your use case. Share your story in the [Discussions](https://github.com/cesarliws/dext/discussions).
+* **For Users:** Start using the framework in your projects and give us real feedback on your experience.
+* **For Contributors:** Report instabilities (*issues*), suggest improvements, or send a pull request.
+  * Follow the [Contribution Instructions](CONTRIBUTING.md)
+  * Want to submit new Features? Follow the [Features and Improvements Workflow](Docs/CONTRIBUTING_IMPROVEMENTS.md)
+
+Check out our [Roadmap](Docs/ROADMAP.md) metrics and steps, and see our **[Code of Conduct](./CODE_OF_CONDUCT.md)** to keep this hub welcoming.
+
+<br>
+<p align="center">
+  <i>Stop rebuilding foundations and spend energy on your customers' problems. Dext takes care of the rest.</i><br>
+  <b>Built with pride for the entire Delphi Ecosystem.</b>
+</p>

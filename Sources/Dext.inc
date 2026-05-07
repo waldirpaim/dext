@@ -40,6 +40,16 @@
 // System.Hash unit (Introduced in Delphi XE8)
 {$IFDEF DEXT_DELPHIXE8_UP}
   {$DEFINE DEXT_HAS_SYSTEM_HASH}
+  {$DEFINE DEXT_HAS_NETHTTP}
+{$ENDIF}
+
+// Parallel Programming Library (Introduced in Delphi XE7)
+{$IFDEF VER280} {$DEFINE DEXT_HAS_PPL} {$ENDIF} // XE7
+{$IFDEF DEXT_DELPHIXE8_UP} {$DEFINE DEXT_HAS_PPL} {$ENDIF}
+
+// [Weak] Attribute (Introduced for all platforms in Delphi 10.1 Berlin)
+{$IFDEF DEXT_DELPHI101_UP}
+  {$DEFINE DEXT_HAS_WEAK}
 {$ENDIF}
 
 // Web Stencils support (Introduced in Delphi 12.2)
@@ -80,6 +90,7 @@
 //---------------------------------------------------------------------------
 
 {$IFDEF DEXT_ENABLE_ENTITY}
+  {.$DEFINE DEXT_USE_ENTITY_PREFIX}
   // Enable/Disable specific database drivers to avoid unnecessary dependencies.
   // Useful for Delphi Professional/Community editions.
   // ---------------------------------------------------------------------------

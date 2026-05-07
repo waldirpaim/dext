@@ -37,6 +37,9 @@ uses
   Dext.DI.Interfaces,
   Dext.DI.Attributes;
 type
+  /// <summary>
+  /// Represents a cached constructor resolution entry, holding the method to invoke and its required parameter types.
+  /// </summary>
   TConstructorEntry = record
     Method: TRttiMethod;
     ParamTypes: TArray<PTypeInfo>;
@@ -61,12 +64,31 @@ type
     /// <summary>Instantiates a type (Class or Interface) based on PTypeInfo. Supports auto-instantiation of IList, IEnumerable, and IDictionary.</summary>
     class function CreateInstance(AProvider: IServiceProvider; AType: PTypeInfo): TValue; overload;
 
+    /// <summary>Instantiates a class using a generic type parameter, relying on the parameterless constructor or manual arguments.</summary>
     class function CreateInstance<T: class>(const AArgs: array of TValue): T; overload;
+    
+    /// <summary>Instantiates a class using a generic type parameter without any manual arguments.</summary>
     class function CreateInstance<T: class>: T; overload;
 
+    /// <summary>
+    ///   Creates an instance using only RTTI, without requiring a configured ServiceProvider.
+    ///   Prefers the parameterless constructor. For interface types, handles IList, IDictionary,
+    ///   and types registered via RegisterDefault. Returns TValue.Empty when instantiation is
+    ///   not possible. In DEBUG builds, emits diagnostic messages via OutputDebugString.
+    ///   Designed for standalone JSON serialization in legacy projects without full DI setup.
+    /// </summary>
+    class function CreateInstanceRttiOnly(AType: PTypeInfo): TValue;
+
+    /// <summary>Registers a default implementation class for a specific base class.</summary>
     class procedure RegisterDefault(ABase: TClass; AImpl: TClass); overload;
+    
+    /// <summary>Registers a default implementation class for a specific interface type.</summary>
     class procedure RegisterDefault(AInterface: PTypeInfo; AImpl: TClass); overload;
+    
+    /// <summary>Registers a default implementation class for a generic service interface.</summary>
     class procedure RegisterDefault<TService: IInterface; TImplementation: class>; overload;
+    
+    /// <summary>Resolves the configured default implementation for a given class. Returns the original class if no default is registered.</summary>
     class function ResolveImplementation(AClass: TClass): TClass;
     /// <summary>Detects if a PTypeInfo represents a list type (IList, TList, IEnumerable, etc.).</summary>
     class function IsListType(AType: PTypeInfo): Boolean;
@@ -96,6 +118,9 @@ implementation
 
 uses
   System.Classes,
+  {$IFDEF MSWINDOWS}
+  Winapi.Windows,
+  {$ENDIF}
   Dext.Core.Reflection;
 
 { TActivator }
@@ -123,6 +148,104 @@ end;
 class function TActivator.GetRttiContext: TRttiContext;
 begin
   Result := TReflection.Context;
+end;
+
+class function TActivator.CreateInstanceRttiOnly(AType: PTypeInfo): TValue;
+var
+  BestMethod: TRttiMethod;
+  Entry: TConstructorEntry;
+  HasDIConstructors: Boolean;
+  Method: TRttiMethod;
+  RegisteredImpl: TClass;
+  TargetClass: TClass;
+  TypeObj: TRttiType;
+begin
+  Result := TValue.Empty;
+  if AType = nil then
+    Exit;
+
+  case AType.Kind of
+    tkClass:
+    begin
+      TargetClass := ResolveImplementation(AType.TypeData.ClassType);
+
+      // Fast path: reuse cached parameterless constructor
+      FLock.BeginRead;
+      try
+        if FConstructorCache.TryGetValue(TargetClass, Entry) then
+          if (Entry.Method <> nil) and (Length(Entry.ParamTypes) = 0) then
+            Exit(TValue.From(Entry.Method.Invoke(TargetClass, []).AsObject));
+      finally
+        FLock.EndRead;
+      end;
+
+      TypeObj := GetRttiContext.GetType(TargetClass);
+      if TypeObj = nil then
+        Exit;
+
+      BestMethod := nil;
+      HasDIConstructors := False;
+      for Method in TypeObj.GetMethods do
+      begin
+        if not Method.IsConstructor then Continue;
+        if Length(Method.GetParameters) = 0 then
+        begin
+          BestMethod := Method;
+          Break;
+        end;
+        if (Length(Method.GetParameters) > 0) and
+           (Method.GetParameters[0].ParamType.TypeKind in [tkInterface, tkClass]) then
+          HasDIConstructors := True;
+      end;
+
+      if BestMethod <> nil then
+      begin
+        Entry.Method := BestMethod;
+        Entry.ParamTypes := nil;
+        FLock.BeginWrite;
+        try
+          FConstructorCache.AddOrSetValue(TargetClass, Entry);
+        finally
+          FLock.EndWrite;
+        end;
+        {$IFDEF DEBUG}
+        if HasDIConstructors then
+          OutputDebugString(PChar(
+            '[Dext.Json] INFO: Deserializing "' + TargetClass.ClassName + '" via RTTI-only ' +
+            '(no ServiceProvider configured). DI constructor detected but ignored. ' +
+            'Use JsonSettings.ServiceProvider(sp) for full DI support.'));
+        {$ENDIF}
+        Result := TValue.From(BestMethod.Invoke(TargetClass, []).AsObject);
+      end
+      else
+      begin
+        {$IFDEF DEBUG}
+        OutputDebugString(PChar(
+          '[Dext.Json] WARNING: Cannot instantiate "' + TargetClass.ClassName + '" — ' +
+          'no parameterless constructor found. ' +
+          'Use JsonSettings.ServiceProvider(sp) to enable DI-based construction.'));
+        {$ENDIF}
+      end;
+    end;
+
+    tkInterface:
+    begin
+      // IList<T>, IDictionary<K,V> and RegisterDefault mappings work with nil provider
+      if IsListType(AType) or IsDictionaryType(AType) or
+         FInterfaceDefaultImpl.TryGetValue(AType, RegisteredImpl) then
+        Result := CreateInstance(nil, AType)
+      else
+      begin
+        {$IFDEF DEBUG}
+        OutputDebugString(PChar(
+          '[Dext.Json] WARNING: Cannot instantiate interface "' + string(AType^.Name) + '" — ' +
+          'no implementation registered. ' +
+          'Use TActivator.RegisterDefault<IService, TImpl> or ' +
+          'configure a ServiceProvider via JsonSettings.ServiceProvider(sp).'));
+        {$ENDIF}
+      end;
+    end;
+  end;
 end;
 
 class procedure TActivator.RegisterDefault(ABase: TClass; AImpl: TClass);
@@ -406,6 +529,7 @@ var
   TargetClass: TClass;
   Entry: TConstructorEntry;
   Attr: TCustomAttribute;
+  WinnerParams: TArray<TRttiParameter>;
 begin
   TargetClass := ResolveImplementation(AClass);
 
@@ -539,7 +663,7 @@ begin
     begin
       // Cache the winner
       Entry.Method := BestMethod;
-      var WinnerParams := BestMethod.GetParameters;
+      WinnerParams := BestMethod.GetParameters;
       SetLength(Entry.ParamTypes, Length(WinnerParams));
       for I := 0 to High(WinnerParams) do
         Entry.ParamTypes[I] := WinnerParams[I].ParamType.Handle;
@@ -688,6 +812,21 @@ var
   ServiceType: TServiceType;
   ElementType: PTypeInfo;
   KeyType, ValueType: PTypeInfo;
+  RegisteredImpl: TClass;
+  InstanceObj: TObject;
+  Intf: IInterface;
+  Guid: TGUID;
+  ImplRtti: TRttiType;
+  TypeName, ElementTypeName, ImplName: string;
+  TmpType: TRttiType;
+  AddM: TRttiMethod;
+  TargetClass: TClass;
+  BestConstructor: TRttiMethod;
+  Method: TRttiMethod;
+  InstanceVal: TValue;
+  KeyName, ValName: string;
+  CtorArgs: TArray<TValue>;
+  J: Integer;
 begin
   if AType = nil then
     Exit(TValue.Empty);
@@ -702,26 +841,24 @@ begin
       RttiType := Context.GetType(AType);
       
       // 1. Try explicit mapping
-      var RegisteredImpl: TClass;
-      if FInterfaceDefaultImpl.TryGetValue(AType, RegisteredImpl) then
+      if (RttiType <> nil) and FInterfaceDefaultImpl.TryGetValue(AType, RegisteredImpl) then
       begin
-        var Instance := CreateInstance(AProvider, RegisteredImpl);
-        var Intf: IInterface;
-        if Instance.GetInterface(TRttiInterfaceType(RttiType).GUID, Intf) then
+        InstanceObj := CreateInstance(AProvider, RegisteredImpl);
+        if InstanceObj.GetInterface(TRttiInterfaceType(RttiType).GUID, Intf) then
           TValue.Make(@Intf, AType, Result)
         else
-          Result := TValue.From(Instance);
+          Result := TValue.From(InstanceObj);
         Exit;
       end;
 
       // 2. Try to resolve via DI
-      if AProvider <> nil then
+      if (AProvider <> nil) and (RttiType <> nil) then
       begin
-        var Guid := TRttiInterfaceType(RttiType).GUID;
+        Guid := TRttiInterfaceType(RttiType).GUID;
         if Guid <> TGUID.Empty then
         begin
           ServiceType := TServiceType.FromInterface(Guid);
-          var Intf := AProvider.GetServiceAsInterface(ServiceType);
+          Intf := AProvider.GetServiceAsInterface(ServiceType);
           if Intf <> nil then
           begin
             TValue.Make(@Intf, AType, Result);
@@ -730,19 +867,18 @@ begin
         end;
       end;
 
-      // 2. Fallback for Collections (IList/IEnumerable)
+      // 3. Fallback for Collections (IList/IEnumerable)
       if IsListType(AType) then
       begin
         ElementType := GetListElementType(AType);
         if ElementType = nil then
           raise EArgumentException.CreateFmt('TActivator: Could not determine element type for %s', [string(AType^.Name)]);
 
-        var ImplRtti: TRttiType;
-        var TypeName := string(AType^.Name);
-        var ElementTypeName := string(ElementType^.Name);
+        TypeName := string(AType^.Name);
+        ElementTypeName := string(ElementType^.Name);
         
         // Create implementation name from interface name (e.g., IList<T> -> TList<T>)
-        var ImplName := TypeName.Replace('IList<', 'TList<').Replace('IEnumerable<', 'TList<');
+        ImplName := TypeName.Replace('IList<', 'TList<').Replace('IEnumerable<', 'TList<');
         
         ImplRtti := Context.FindType(ImplName);
         if ImplRtti = nil then
@@ -751,11 +887,11 @@ begin
         // Strategy B: Scan all types for ANY TList<ElementType> or TSmartList<ElementType>
         if ImplRtti = nil then
         begin
-          for var TmpType in Context.GetTypes do
+          for TmpType in Context.GetTypes do
           begin
             if TmpType.IsInstance and (TmpType.Name.StartsWith('TList<') or TmpType.Name.StartsWith('TSmartList<')) then
             begin
-               var AddM := TmpType.GetMethod('Add');
+               AddM := TmpType.GetMethod('Add');
                if Assigned(AddM) and (Length(AddM.GetParameters) = 1) then
                  if AddM.GetParameters[0].ParamType.Handle = ElementType then
                  begin
@@ -771,10 +907,10 @@ begin
 
         if (ImplRtti <> nil) and (ImplRtti is TRttiInstanceType) then
         begin
-            var TargetClass := TRttiInstanceType(ImplRtti).MetaclassType;
-            var BestConstructor: TRttiMethod := nil;
+            TargetClass := TRttiInstanceType(ImplRtti).MetaclassType;
+            BestConstructor := nil;
             // Prefer parameterless constructor for collections
-            for var Method in ImplRtti.GetMethods do
+            for Method in ImplRtti.GetMethods do
               if Method.IsConstructor then
               begin
                 if (Length(Method.GetParameters) = 0) then 
@@ -789,22 +925,20 @@ begin
 
             if BestConstructor <> nil then
             begin
-              var Instance: TValue;
               if Length(BestConstructor.GetParameters) = 0 then 
-                Instance := BestConstructor.Invoke(TargetClass, [])
+                InstanceVal := BestConstructor.Invoke(TargetClass, [])
               else 
-                Instance := BestConstructor.Invoke(TargetClass, [TValue.FromOrdinal(TypeInfo(Boolean), 0)]); // OwnsObjects = False
+                InstanceVal := BestConstructor.Invoke(TargetClass, [TValue.FromOrdinal(TypeInfo(Boolean), 0)]); // OwnsObjects = False
                  
               if AType.Kind = tkInterface then
               begin
-                var Intf: IInterface;
-                if Instance.AsObject.GetInterface(TRttiInterfaceType(RttiType).GUID, Intf) then
+                if InstanceVal.AsObject.GetInterface(TRttiInterfaceType(RttiType).GUID, Intf) then
                   TValue.Make(@Intf, AType, Result)
                 else 
-                  Result := Instance;
+                  Result := InstanceVal;
               end
               else 
-                Result := Instance;
+                Result := InstanceVal;
               Exit;
             end;
         end;
@@ -817,14 +951,14 @@ begin
         ValueType := GetDictionaryValueType(AType);
         if (KeyType <> nil) and (ValueType <> nil) then
         begin
-          var ImplRtti: TRttiType := nil;
-          var KeyName := string(KeyType^.Name);
-          var ValName := string(ValueType^.Name);
+          ImplRtti := nil;
+          KeyName := string(KeyType^.Name);
+          ValName := string(ValueType^.Name);
           
-          for var TmpType in Context.GetTypes do
+          for TmpType in Context.GetTypes do
             if TmpType.IsInstance and TmpType.Name.StartsWith('TDictionary<') then
             begin
-               var AddM := TmpType.GetMethod('Add');
+               AddM := TmpType.GetMethod('Add');
                if Assigned(AddM) and (Length(AddM.GetParameters) = 2) then
                  if (AddM.GetParameters[0].ParamType.Handle = KeyType) and 
                     (AddM.GetParameters[1].ParamType.Handle = ValueType) then
@@ -836,9 +970,9 @@ begin
 
           if (ImplRtti <> nil) and (ImplRtti is TRttiInstanceType) then
           begin
-            var TargetClass := TRttiInstanceType(ImplRtti).MetaclassType;
-            var BestConstructor: TRttiMethod := nil;
-            for var Method in ImplRtti.GetMethods do
+            TargetClass := TRttiInstanceType(ImplRtti).MetaclassType;
+            BestConstructor := nil;
+            for Method in ImplRtti.GetMethods do
               if Method.IsConstructor then
               begin
                 if Length(Method.GetParameters) = 0 then begin BestConstructor := Method; Break; end;
@@ -848,21 +982,19 @@ begin
 
             if BestConstructor <> nil then
             begin
-              var CtorArgs: TArray<TValue>;
               SetLength(CtorArgs, Length(BestConstructor.GetParameters));
-              for var J := 0 to High(CtorArgs) do CtorArgs[J] := TValue.Empty; 
+              for J := 0 to High(CtorArgs) do CtorArgs[J] := TValue.Empty; 
               
-              var Instance := BestConstructor.Invoke(TargetClass, CtorArgs);
+              InstanceVal := BestConstructor.Invoke(TargetClass, CtorArgs);
               if AType.Kind = tkInterface then
               begin
-                var Intf: IInterface;
-                if Instance.AsObject.GetInterface(TRttiInterfaceType(RttiType).GUID, Intf) then
+                if InstanceVal.AsObject.GetInterface(TRttiInterfaceType(RttiType).GUID, Intf) then
                   Result := TValue.From<IInterface>(Intf)
                 else 
-                  Result := Instance;
+                  Result := InstanceVal;
               end
               else 
-                Result := Instance;
+                Result := InstanceVal;
               Exit;
             end;
           end;
@@ -912,8 +1044,9 @@ end;
 class function TActivator.CreateInstance<T>(const AArgs: array of TValue): T;
 var
   TypeObj: TRttiType;
+  TI: PTypeInfo;
 begin
-  var TI := TypeInfo(T);
+  TI := TypeInfo(T);
   if TI = nil then
     raise EArgumentException.Create('Type information not found for T');
 

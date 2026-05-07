@@ -1,4 +1,4 @@
-{***************************************************************************}
+﻿{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -29,6 +29,7 @@ interface
 
 uses
   System.SysUtils,
+  System.Character,
   System.Classes,
   FireDAC.Comp.Client,
   Dext.Collections.Base,
@@ -38,6 +39,9 @@ uses
   Dext.Utils;
 
 type
+  /// <summary>
+  ///   Metadata representing a database table column.
+  /// </summary>
   TMetaColumn = record
     Name: string;
     DataType: string; // SQL Type
@@ -50,6 +54,9 @@ type
     IsArray: Boolean; // Firebird array columns (e.g. VARCHAR[1:5]) — unsupported by standard SELECT
   end;
 
+  /// <summary>
+  ///   Metadata representing a database foreign key constraint.
+  /// </summary>
   TMetaForeignKey = record
     Name: string;
     ColumnName: string;
@@ -59,21 +66,36 @@ type
     OnUpdate: string;
   end;
 
+  /// <summary>
+  ///   Metadata representing a database table.
+  /// </summary>
   TMetaTable = record
     Name: string;
     Columns: TArray<TMetaColumn>;
     ForeignKeys: TArray<TMetaForeignKey>;
   end;
 
+  /// <summary>
+  ///   Interface for database schema extraction providers.
+  /// </summary>
   ISchemaProvider = interface
     ['{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}']
     function GetTables: TArray<string>;
     function GetTableMetadata(const ATableName: string): TMetaTable;
   end;
 
+  /// <summary>
+  ///   Defines the style of ORM mapping to generate (attributes or fluent).
+  /// </summary>
   TMappingStyle = (msAttributes, msFluent);
+  /// <summary>
+  ///   Defines the style of generated properties (POCO or smart types).
+  /// </summary>
   TPropertyStyle = (psPOCO, psSmart);
 
+  /// <summary>
+  ///   Interface for generating entity code from database metadata.
+  /// </summary>
   IEntityGenerator = interface
     ['{B1C2D3E4-F5A6-7890-1234-567890ABCDEF}']
     function GenerateUnit(const AUnitName: string; const ATables: TArray<TMetaTable>; 
@@ -83,6 +105,9 @@ type
   end;
 
   // FireDAC Implementation
+  /// <summary>
+  ///   FireDAC implementation of the schema provider for extracting database metadata.
+  /// </summary>
   TFireDACSchemaProvider = class(TInterfacedObject, ISchemaProvider)
   private
     FConnection: IDbConnection;
@@ -100,6 +125,9 @@ type
   end;
 
   // Delphi Generator Implementation
+  /// <summary>
+  ///   Generator that produces Delphi entity classes from database metadata.
+  /// </summary>
   TDelphiEntityGenerator = class(TInterfacedObject, IEntityGenerator)
   private
     function SQLTypeToDelphiType(const ASQLType: string; AScale: Integer; APropertyStyle: TPropertyStyle = psPOCO): string;
@@ -163,6 +191,8 @@ function TFireDACSchemaProvider.GetTables: TArray<string>;
 var
   FDConn: TFDConnection;
   List: TStringList;
+  LCatalog, LSchema: string;
+  i: Integer;
 begin
   if not (FConnection is TFireDACConnection) then
     raise Exception.Create('Connection is not a FireDAC connection');
@@ -170,8 +200,8 @@ begin
   FDConn := TFireDACConnection(FConnection).Connection;
   List := TStringList.Create;
   try
-    var LCatalog := FDConn.Params.Values['Database'];
-    var LSchema := FDConn.Params.Values['MetaCurSchema'];
+    LCatalog := FDConn.Params.Values['Database'];
+    LSchema := FDConn.Params.Values['MetaCurSchema'];
     if LSchema = '' then LSchema := FDConn.Params.Values['Schema'];
     if LSchema = '' then LSchema := FDConn.Params.Values['MetaDefSchema'];
 
@@ -183,7 +213,7 @@ begin
       
     FDConn.GetTableNames(LCatalog, LSchema, '', List, [osMy, osOther], [tkTable, tkView], True);
     
-    for var i := List.Count - 1 downto 0 do
+    for i := List.Count - 1 downto 0 do
     begin
        if List[i].StartsWith('pg_catalog.', True) or 
           List[i].StartsWith('information_schema.', True) or
@@ -215,6 +245,11 @@ var
   TableList: TArray<string>;
   FDConn: TFDConnection;
   Qry: TFDQuery;
+  LFullTableName, LColName, LTrimmedName, TName: string;
+  ExistingFK: TMetaForeignKey;
+  i: Integer;
+  LLookupName: string;
+  LFound: Boolean;
 begin
   if FIsCached then Exit;
   FIsCached := True;
@@ -252,7 +287,7 @@ begin
       while not Qry.Eof do
       begin
         LTableName := Qry.FieldByName('table_name').AsString;
-        var LFullTableName := LTableName;
+        LFullTableName := LTableName;
         if (LSchema <> '') and (LSchema <> 'public') then
           LFullTableName := LSchema + '.' + LTableName;
 
@@ -290,15 +325,15 @@ begin
       while not Qry.Eof do
       begin
         LTableName := Qry.FieldByName('table_name').AsString;
-        var LFullTableName := LTableName;
+        LFullTableName := LTableName;
         if (LSchema <> '') and (LSchema <> 'public') then
           LFullTableName := LSchema + '.' + LTableName;
 
-        var LColName := Qry.FieldByName('column_name').AsString;
+        LColName := Qry.FieldByName('column_name').AsString;
         LTable := Default(TMetaTable);
         if (FCache.TryGetValue(LFullTableName, LTable)) then
         begin
-          for var i := 0 to High(LTable.Columns) do
+          for i := 0 to High(LTable.Columns) do
             if SameText(LTable.Columns[i].Name, LColName) then
             begin
               LTable.Columns[i].IsPrimaryKey := True;
@@ -325,7 +360,7 @@ begin
       while not Qry.Eof do
       begin
         LTableName := Qry.FieldByName('table_name').AsString;
-        var LFullTableName := LTableName;
+        LFullTableName := LTableName;
         if (LSchema <> '') and (LSchema <> 'public') then
           LFullTableName := LSchema + '.' + LTableName;
 
@@ -354,9 +389,9 @@ begin
       // PASSO 1: Carrega colunas e PKs de cada tabela via ExtractTableMetadataInternal.
       // As FKs carregadas aqui serão descartadas em seguida para evitar duplicação
       // com a query global abaixo, que é a fonte definitiva para o Firebird.
-      for var TName in TableList do
+      for TName in TableList do
       begin
-         var LTrimmedName := TName.Trim;
+         LTrimmedName := TName.Trim;
          if not FCache.TryGetValue(LTrimmedName, LTable) then
          begin
             LTable := ExtractTableMetadataInternal(TName);
@@ -367,9 +402,9 @@ begin
 
       // PASSO 1b: Zerar as FKs carregadas individualmente. A query global abaixo
       // será a única fonte de verdade para FKs no Firebird, evitando duplicação.
-      for var TName in TableList do
+      for TName in TableList do
       begin
-        var LTrimmedName := TName.Trim;
+        LTrimmedName := TName.Trim;
         if FCache.TryGetValue(LTrimmedName, LTable) then
         begin
           LTable.ForeignKeys := [];
@@ -397,7 +432,7 @@ begin
         while not Qry.Eof do
         begin
           LTableName := Qry.FieldByName('table_name').AsString.Trim;
-          var LLookupName := LTableName;
+          LLookupName := LTableName;
           LTable := Default(TMetaTable);
           if not FCache.TryGetValue(LLookupName, LTable) then
           begin
@@ -417,8 +452,8 @@ begin
             // (o Firebird pode retornar múltiplas linhas para a mesma FK em índices compostos)
             if (LFK.ColumnName <> '') and (LFK.ReferencedTable <> '') then
             begin
-              var LFound := False;
-              for var ExistingFK in LTable.ForeignKeys do
+              LFound := False;
+              for ExistingFK in LTable.ForeignKeys do
                 // Group by Constraint Name to avoid duplicates in composite keys
                 if SameText(ExistingFK.Name, LFK.Name) or
                    (SameText(ExistingFK.ColumnName, LFK.ColumnName) and
@@ -447,9 +482,9 @@ begin
   end
   else
   begin
-    for var TName in TableList do
+    for TName in TableList do
     begin
-      var LTrimmedName := TName.Trim;
+      LTrimmedName := TName.Trim;
       if not FCache.TryGetValue(LTrimmedName, LTable) then
       begin
         LTable := ExtractTableMetadataInternal(TName);
@@ -468,12 +503,16 @@ var
   Meta: TFDMetaInfoQuery;
   LCol: TMetaColumn;
   LFK: TMetaForeignKey;
-  LActualSchema, LActualTable: string;
-  LDotPos, i: Integer;
+  LDotPos, i, FkIndex: Integer;
   FDConn: TFDConnection;
+  LSchema, LColName, LArrColName: string;
+  ArrQry, Qry: TFDQuery;
+  ExistingFK: TMetaForeignKey;
+  LActualSchema, LActualTable: string;
+  LFound: Boolean;
 begin
   FDConn := TFireDACConnection(FConnection).Connection;
-  var LSchema := FDConn.Params.Values['MetaCurSchema'];
+  LSchema := FDConn.Params.Values['MetaCurSchema'];
   if LSchema = '' then LSchema := FDConn.Params.Values['Schema'];
   if LSchema = '' then LSchema := FDConn.Params.Values['MetaDefSchema'];
 
@@ -520,7 +559,7 @@ begin
     // These columns cannot be selected as scalar values and must be excluded from entities
     if SameText(FDConn.DriverName, 'FB') then
     begin
-      var ArrQry := TFDQuery.Create(nil);
+      ArrQry := TFDQuery.Create(nil);
       try
         ArrQry.Connection := FDConn;
         ArrQry.SQL.Text :=
@@ -532,7 +571,7 @@ begin
         ArrQry.Open;
         while not ArrQry.Eof do
         begin
-          var LArrColName := ArrQry.FieldByName('FIELD_NAME').AsString.Trim;
+          LArrColName := ArrQry.FieldByName('FIELD_NAME').AsString.Trim;
           for i := 0 to High(Result.Columns) do
             if SameText(Result.Columns[i].Name, LArrColName) then
             begin
@@ -558,7 +597,7 @@ begin
       Meta.Open;
       while not Meta.Eof do
       begin
-        var LColName := Meta.FieldByName('COLUMN_NAME').AsString;
+        LColName := Meta.FieldByName('COLUMN_NAME').AsString;
         for i := 0 to High(Result.Columns) do
           if SameText(Result.Columns[i].Name, LColName) then
           begin
@@ -572,16 +611,16 @@ begin
 
     if SameText(FDConn.DriverName, 'SQLite') then
     begin
-      var Qry := TFDQuery.Create(nil);
+      Qry := TFDQuery.Create(nil);
       try
         Qry.Connection := FDConn;
-        Qry.SQL.Text := 'PRAGMA table_info("' + LActualTable + '")';
+        Qry.SQL.Text := 'PRAGMA table_info(''' + LActualTable + ''')';
         Qry.Open;
         while not Qry.Eof do
         begin
           if Qry.FieldByName('pk').AsInteger > 0 then
           begin
-            var LColName := Qry.FieldByName('name').AsString;
+            LColName := Qry.FieldByName('name').AsString;
             for i := 0 to High(Result.Columns) do
               if SameText(Result.Columns[i].Name, LColName) then
               begin
@@ -629,8 +668,8 @@ begin
         if Meta.FindField('REF_COLUMN_NAME') <> nil then LFK.ReferencedColumn := Meta.FieldByName('REF_COLUMN_NAME').AsString.Trim
         else if Meta.FindField('PK_COLUMN_NAME') <> nil then LFK.ReferencedColumn := Meta.FieldByName('PK_COLUMN_NAME').AsString.Trim;
 
-        var LFound := False;
-        for var ExistingFK in Result.ForeignKeys do
+        LFound := False;
+        for ExistingFK in Result.ForeignKeys do
           if SameText(ExistingFK.ColumnName, LFK.ColumnName) and 
              SameText(ExistingFK.ReferencedTable, LFK.ReferencedTable) then
           begin
@@ -650,13 +689,13 @@ begin
       Result.ForeignKeys := [];
       if SameText(FDConn.DriverName, 'SQLite') then
       begin
-        var Qry := TFDQuery.Create(nil);
+        Qry := TFDQuery.Create(nil);
         try
           Qry.Connection := FDConn;
-          Qry.SQL.Text := 'PRAGMA foreign_key_list("' + LActualTable + '")';
+          Qry.SQL.Text := 'PRAGMA foreign_key_list(''' + LActualTable + ''')';
           try
             Qry.Open;
-            var FkIndex := 0;
+            FkIndex := 0;
             while not Qry.Eof do
             begin
               LFK := Default(TMetaForeignKey);
@@ -665,8 +704,8 @@ begin
               LFK.ColumnName := Qry.FieldByName('from').AsString;
               LFK.ReferencedColumn := Qry.FieldByName('to').AsString;
 
-              var LFound := False;
-              for var ExistingFK in Result.ForeignKeys do
+              LFound := False;
+              for ExistingFK in Result.ForeignKeys do
                 if SameText(ExistingFK.ColumnName, LFK.ColumnName) and 
                    SameText(ExistingFK.ReferencedTable, LFK.ReferencedTable) then
                 begin
@@ -687,7 +726,7 @@ begin
       end
       else if SameText(FDConn.DriverName, 'FB') then
       begin
-        var Qry := TFDQuery.Create(nil);
+        Qry := TFDQuery.Create(nil);
         try
           Qry.Connection := FDConn;
           Qry.SQL.Text := 
@@ -703,7 +742,7 @@ begin
             'JOIN RDB$INDEX_SEGMENTS IS3 ON R2.RDB$INDEX_NAME = IS3.RDB$INDEX_NAME ' +
             'WHERE R.RDB$CONSTRAINT_TYPE = ''FOREIGN KEY'' ' +
             '  AND R.RDB$RELATION_NAME = :TABLE_NAME';
-          Qry.ParamByName('TABLE_NAME').AsString := LActualTable.ToUpper;
+          Qry.ParamByName('TABLE_NAME').AsString := UpperCase(LActualTable);
           try
             Qry.Open;
             while not Qry.Eof do
@@ -714,8 +753,8 @@ begin
               LFK.ReferencedTable := Qry.FieldByName('REF_TABLE_NAME').AsString;
               LFK.ReferencedColumn := Qry.FieldByName('REF_COLUMN_NAME').AsString;
 
-              var LFound := False;
-              for var ExistingFK in Result.ForeignKeys do
+              LFound := False;
+              for ExistingFK in Result.ForeignKeys do
                 if SameText(ExistingFK.ColumnName, LFK.ColumnName) and 
                    SameText(ExistingFK.ReferencedTable, LFK.ReferencedTable) then
                 begin
@@ -763,9 +802,10 @@ end;
 
 function TDelphiEntityGenerator.CleanName(const AName: string): string;
 var
+  CleanedName: string;
+  i: Integer;
   Parts: TArray<string>;
   S: string;
-  CleanedName: string;
 begin
   Result := '';
   CleanedName := AName.Replace('"', '').Replace('''', '').Replace('[', '').Replace(']', '');
@@ -776,7 +816,22 @@ begin
   end;
   Parts := CleanedName.Split(['_', '-', ' '], TStringSplitOptions.ExcludeEmpty);
   for S in Parts do
-    if S.Length > 0 then Result := Result + UpperCase(S.Chars[0]) + S.Substring(1).ToLower;
+  begin
+    if S.Length > 0 then
+    begin
+      Result := Result + UpperCase(S.Chars[0]);
+      for i := 1 to S.Length - 1 do
+      begin
+        // If current is uppercase and previous was also uppercase, lowercase it (acronym handling)
+        // e.g., EmployeeID -> EmployeeId, HTTP -> Http
+        if (S.Chars[i] >= 'A') and (S.Chars[i] <= 'Z') and
+           (S.Chars[i-1] >= 'A') and (S.Chars[i-1] <= 'Z') then
+          Result := Result + S.Chars[i].ToLower
+        else
+          Result := Result + S.Chars[i];
+      end;
+    end;
+  end;
 end;
 
 function TDelphiEntityGenerator.CleanMappingName(const AName: string): string;
@@ -836,16 +891,24 @@ end;
 function TDelphiEntityGenerator.GenerateUnit(const AUnitName: string; const ATables: TArray<TMetaTable>; 
   AMappingStyle: TMappingStyle; APropertyStyle: TPropertyStyle; AGenerateMetadata: Boolean): string;
 var
-  SB: TStringBuilder;
+  KnownClasses: Dext.Collections.Dict.IDictionary<string, Boolean>;
+  TableNavMap: IDictionary<string, IList<TPair<TMetaForeignKey, string>>>;
+  ClassUsedNames: IDictionary<string, Boolean>;
+  NavInfoList: IList<TPair<TMetaForeignKey, string>>;
+  NavInfo: TPair<TMetaForeignKey, string>;
+  Suffix, I: Integer;
+  Attrs: IList<string>;
+  EscapedPropName, EscapedNavName, EntityClassName: string;
+  LLookupName, LFound: Boolean; // Reusing for local logic flags
   Table: TMetaTable;
   Col: TMetaColumn;
   FK: TMetaForeignKey;
-  ClassName, PropName, FieldName, DelphiType, RefClass, NavPropName, FinalNavName: string;
-  LActualUnitName: string;
-  KnownClasses: Dext.Collections.Dict.IDictionary<string, Boolean>;
+  SB: TStringBuilder;
+  LActualUnitName, PropName, FieldName, DelphiType, ClassName: string;
+  RefClass, NavPropName, FinalNavName: string;
 begin
   LActualUnitName := ExtractFileName(AUnitName);
-  if LActualUnitName.EndsWith('.pas', True) then LActualUnitName := LActualUnitName.Substring(0, LActualUnitName.Length - 4);
+  if SameText(ExtractFileExt(LActualUnitName), '.pas') then LActualUnitName := ChangeFileExt(LActualUnitName, '');
   LActualUnitName := LActualUnitName.Replace(' ', '_');
   if LActualUnitName = '' then LActualUnitName := 'Dext.Entities';
 
@@ -866,7 +929,8 @@ begin
     SB.AppendLine('  Dext.Types.Lazy,');
     if AGenerateMetadata then
     begin
-      SB.AppendLine('  Dext.Entity.TypeSystem,');
+      if APropertyStyle = psPOCO then
+        SB.AppendLine('  Dext.Entity.TypeSystem,');
       SB.AppendLine('  Dext.Specifications.Types,');
     end;
     SB.AppendLine('  System.SysUtils,');
@@ -877,8 +941,7 @@ begin
 
     for Table in ATables do SB.AppendLine('  T' + CleanName(Table.Name) + ' = class;');
     SB.AppendLine('');
-
-    var TableNavMap := TCollections.CreateDictionary<string, IList<TPair<TMetaForeignKey, string>>>;
+    TableNavMap := TCollections.CreateDictionary<string, IList<TPair<TMetaForeignKey, string>>>;
     try
       for Table in ATables do
       begin
@@ -886,8 +949,8 @@ begin
         if AMappingStyle = msAttributes then SB.AppendLine('  [Table(''' + CleanMappingName(Table.Name) + ''')]');
         SB.AppendLine('  ' + ClassName + ' = class');
         SB.AppendLine('  private');
-        var ClassUsedNames := TCollections.CreateDictionary<string, Boolean>;
-        var NavInfoList := TCollections.CreateList<TPair<TMetaForeignKey, string>>;
+        ClassUsedNames := TCollections.CreateDictionary<string, Boolean>;
+        NavInfoList := TCollections.CreateList<TPair<TMetaForeignKey, string>>;
         TableNavMap.Add(Table.Name, NavInfoList);
 
         for Col in Table.Columns do
@@ -921,12 +984,12 @@ begin
             // Step 2: EF Core convention — append 'Navigation' suffix on collision
             FinalNavName := NavPropName + 'Navigation';
             // Step 3: Numeric fallback if 'Navigation' also collides (edge case)
-            var Suffix := 1;
+            Suffix := 1;
             while ClassUsedNames.ContainsKey(FinalNavName.ToUpper) or
                   ClassUsedNames.ContainsKey(('F' + FinalNavName).ToUpper) do
             begin
               Inc(Suffix);
-              FinalNavName := NavPropName + 'Navigation' + Suffix.ToString;
+              FinalNavName := NavPropName + 'Navigation' + IntToStr(Suffix);
             end;
           end;
 
@@ -941,13 +1004,13 @@ begin
         begin
           if Col.IsArray then Continue; // Skip Firebird array columns (unsupported by scalar SELECT)
           PropName := CleanName(Col.Name);
-          var EscapedPropName := EscapeIdentifier(PropName);
+          EscapedPropName := EscapeIdentifier(PropName);
           FieldName := 'F' + PropName;
           DelphiType := SQLTypeToDelphiType(Col.DataType, Col.Scale, APropertyStyle);
           if (APropertyStyle = psPOCO) and Col.IsNullable and (DelphiType <> 'string') and (DelphiType <> 'TBytes') then DelphiType := 'Nullable<' + DelphiType + '>';
           if AMappingStyle = msAttributes then
           begin
-              var Attrs := TCollections.CreateList<string>;
+              Attrs := TCollections.CreateList<string>;
               if Col.IsPrimaryKey then Attrs.Add('PK');
               if Col.IsAutoInc then Attrs.Add('AutoInc');
               if not Col.IsNullable then Attrs.Add('Required');
@@ -959,11 +1022,11 @@ begin
           SB.AppendLine('    property ' + EscapedPropName + ': ' + DelphiType + ' read ' + FieldName + ' write ' + FieldName + ';');
         end;
         
-        for var NavInfo in NavInfoList do
+        for NavInfo in NavInfoList do
         begin
           RefClass := 'T' + CleanName(NavInfo.Key.ReferencedTable);
           FinalNavName := NavInfo.Value;
-           var EscapedNavName := EscapeIdentifier(FinalNavName);
+           EscapedNavName := EscapeIdentifier(FinalNavName);
            if AMappingStyle = msAttributes then SB.AppendLine('    [ForeignKey(''' + NavInfo.Key.ColumnName + ''')]');
            SB.AppendLine('    property ' + EscapedNavName + ': Lazy<' + RefClass + '> read F' + FinalNavName + ' write F' + FinalNavName + ';');
         end;
@@ -971,11 +1034,11 @@ begin
         SB.AppendLine('');
       end;
       
-      if AGenerateMetadata then
+      if AGenerateMetadata and (APropertyStyle = psPOCO) then
       begin
         for Table in ATables do
         begin
-           var EntityClassName := CleanName(Table.Name) + 'Entity';
+           EntityClassName := CleanName(Table.Name) + 'Entity';
            SB.AppendLine('  ' + EntityClassName + ' = class(TEntityType<T' + CleanName(Table.Name) + '>)');
            SB.AppendLine('  public');
            for Col in Table.Columns do
@@ -983,7 +1046,7 @@ begin
                SB.AppendLine('    class var ' + EscapeIdentifier(CleanName(Col.Name)) + ': TPropExpression;');
            if TableNavMap.ContainsKey(Table.Name) then
            begin
-             for var NavInfo in TableNavMap[Table.Name] do SB.AppendLine('    class var ' + EscapeIdentifier(NavInfo.Value) + ': TPropExpression;');
+             for NavInfo in TableNavMap[Table.Name] do SB.AppendLine('    class var ' + EscapeIdentifier(NavInfo.Value) + ': TPropExpression;');
            end;
            SB.AppendLine('');
            SB.AppendLine('    class constructor Create;');
@@ -1014,25 +1077,25 @@ begin
             end;
             if TableNavMap.ContainsKey(Table.Name) then
             begin
-              for var NavInfo in TableNavMap[Table.Name] do SB.AppendLine('    .Prop(''' + NavInfo.Value + ''').HasForeignKey(''' + NavInfo.Key.ColumnName + ''')');
+              for NavInfo in TableNavMap[Table.Name] do SB.AppendLine('    .Prop(''' + NavInfo.Value + ''').HasForeignKey(''' + NavInfo.Key.ColumnName + ''')');
             end;
             SB.AppendLine('    ;');
          end;
          SB.AppendLine('end;' + sLineBreak);
       end;
       
-      if AGenerateMetadata then
+      if AGenerateMetadata and (APropertyStyle = psPOCO) then
       begin
         for Table in ATables do
         begin
-           var EntityClassName := CleanName(Table.Name) + 'Entity';
+           EntityClassName := CleanName(Table.Name) + 'Entity';
            SB.AppendLine('class constructor ' + EntityClassName + '.Create;' + sLineBreak + 'begin');
            for Col in Table.Columns do
              if not Col.IsArray then
                SB.AppendLine('  ' + EscapeIdentifier(CleanName(Col.Name)) + ' := TPropExpression.Create(''' + CleanName(Col.Name) + ''');');
            if TableNavMap.ContainsKey(Table.Name) then
            begin
-             for var NavInfo in TableNavMap[Table.Name] do SB.AppendLine('  ' + EscapeIdentifier(NavInfo.Value) + ' := TPropExpression.Create(''' + NavInfo.Value + ''');');
+             for NavInfo in TableNavMap[Table.Name] do SB.AppendLine('  ' + EscapeIdentifier(NavInfo.Value) + ' := TPropExpression.Create(''' + NavInfo.Value + ''');');
            end;
            SB.AppendLine('end;');
            SB.AppendLine('');

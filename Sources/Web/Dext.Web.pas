@@ -36,7 +36,6 @@ uses
   {$IFDEF DEXT_ENABLE_ENTITY}
   Dext.Entity,
   {$ENDIF}
-  Dext.Web.ResponseHelper,
   // {BEGIN_DEXT_USES}
   // Generated Uses
   Dext.Auth.Attributes,
@@ -79,6 +78,7 @@ uses
   Dext.Web.Pipeline,
   Dext.Web.Results,
   Dext.Web.View,
+  Dext.Web.View.Native,
   {$IFDEF DEXT_ENABLE_WEB_STENCILS}
   Dext.Web.View.WebStencils,
   {$ENDIF}
@@ -138,6 +138,7 @@ type
   TClaimsIdentity = Dext.Auth.Identity.TClaimsIdentity;
   TClaimsPrincipal = Dext.Auth.Identity.TClaimsPrincipal;
   TClaimTypes = Dext.Auth.Identity.TClaimTypes;
+  HttpStatus = Dext.Http.StatusCodes.HttpStatus;
   IClaimsBuilder = Dext.Auth.Identity.IClaimsBuilder;
   TClaimsBuilder = Dext.Auth.Identity.TClaimsBuilder;
 
@@ -520,9 +521,6 @@ type
   TStaticFileMiddleware = Dext.Web.StaticFiles.TStaticFileMiddleware;
   TApplicationBuilderStaticFilesExtensions = Dext.Web.StaticFiles.TApplicationBuilderStaticFilesExtensions;
 
-  // Dext.Http.StatusCodes (moved to Core for shared use by Dext.Web and Dext.Net)
-  HttpStatus = Dext.Http.StatusCodes.HttpStatus;
-
   // Dext.Web.Versioning
   IApiVersionReader = Dext.Web.Versioning.IApiVersionReader;
   TQueryStringApiVersionReader = Dext.Web.Versioning.TQueryStringApiVersionReader;
@@ -651,6 +649,14 @@ type
     ///   Enables content negotiation and registers default formatters.
     /// </summary>
     function AddContentNegotiation: TDextServices;
+
+    /// <summary>
+    ///   Enables the native Dext Templating engine for server-side rendering (SSR).
+    /// </summary>
+    function AddDextTemplating: TDextServices; overload;
+    function AddDextTemplating(AConfig: TProc<TViewOptions>): TDextServices; overload;
+    function AddDextTemplating(const AOptions: TViewOptions): TDextServices; overload;
+    function AddDextTemplating(const ABuilder: TViewOptionsBuilder): TDextServices; overload;
 
     /// <summary>
     ///  Enables Web Stencils view engine using default conventions (CoC):
@@ -968,13 +974,6 @@ function ViewOptions: TViewOptionsBuilder;
 function DataApiOptions: TDataApiOptions<TObject>;
 {$ENDIF}
 
-procedure RespondJson(const AContext: IHttpContext; AStatusCode: Integer; const AJson: string); overload;
-procedure RespondJson(const AContext: IHttpContext; AStatusCode: Integer; const AFormat: string; const AArgs: array of const); overload;
-procedure RespondError(const AContext: IHttpContext; AStatusCode: Integer; const AMessage: string);
-procedure RespondOk(const AContext: IHttpContext; const AJson: string);
-procedure RespondCreated(const AContext: IHttpContext; const AJson: string);
-procedure RespondNoContent(const AContext: IHttpContext);
-
 implementation
 
 uses
@@ -1017,36 +1016,6 @@ begin
   Result := Dext.Web.DataApi.DataApiOptions;
 end;
 {$ENDIF}
-
-procedure RespondJson(const AContext: IHttpContext; AStatusCode: Integer; const AJson: string);
-begin
-  Dext.Web.ResponseHelper.RespondJson(AContext, AStatusCode, AJson);
-end;
-
-procedure RespondJson(const AContext: IHttpContext; AStatusCode: Integer; const AFormat: string; const AArgs: array of const);
-begin
-  Dext.Web.ResponseHelper.RespondJson(AContext, AStatusCode, AFormat, AArgs);
-end;
-
-procedure RespondError(const AContext: IHttpContext; AStatusCode: Integer; const AMessage: string);
-begin
-  Dext.Web.ResponseHelper.RespondError(AContext, AStatusCode, AMessage);
-end;
-
-procedure RespondOk(const AContext: IHttpContext; const AJson: string);
-begin
-  Dext.Web.ResponseHelper.RespondOk(AContext, AJson);
-end;
-
-procedure RespondCreated(const AContext: IHttpContext; const AJson: string);
-begin
-  Dext.Web.ResponseHelper.RespondCreated(AContext, AJson);
-end;
-
-procedure RespondNoContent(const AContext: IHttpContext);
-begin
-  Dext.Web.ResponseHelper.RespondNoContent(AContext);
-end;
 
 { TWebServicesHelper }
 
@@ -1658,40 +1627,113 @@ end;
 {$ENDIF}
 
 function TWebServicesHelper.AddWebStencils: TDextServices;
-var
-  Options: TViewOptions;
 begin
-  Options := TViewOptions.Create;
-  Result := AddWebStencils(Options);
+  Result := AddWebStencils(TProc<TViewOptions>(nil));
 end;
 
 function TWebServicesHelper.AddWebStencils(AConfig: TProc<TViewOptions>): TDextServices;
-begin
-  var Options: TViewOptions := TViewOptions.Create;
-  if Assigned(AConfig) then
-    AConfig(Options);
-    
-  Result := AddWebStencils(Options);
-end;
-
-function TWebServicesHelper.AddWebStencils(const AOptions: TViewOptions): TDextServices;
+{$IFDEF DEXT_ENABLE_WEB_STENCILS}
+var
+  LConfig: TProc<TViewOptions>;
+{$ENDIF}
 begin
   Result := Self;
   {$IFDEF DEXT_ENABLE_WEB_STENCILS}
-  var Options := AOptions;
+  LConfig := AConfig;
   TWebStencilsViewEngine.RegisterWebStencilsFunctions;
-  var Factory: TFunc<IServiceProvider, TObject> := function(Provider: IServiceProvider): TObject
+  Self.AddSingleton<IViewEngine, TWebStencilsViewEngine>(
+    function(Provider: IServiceProvider): TObject
+    var
+      Options: TViewOptions;
+    begin
+      Options := TViewOptions.Create;
+      if Assigned(LConfig) then
+        LConfig(Options);
+      Result := TWebStencilsViewEngine.Create(Options);
+    end);
+  {$ENDIF}
+end;
+
+function TWebServicesHelper.AddWebStencils(const AOptions: TViewOptions): TDextServices;
+{$IFDEF DEXT_ENABLE_WEB_STENCILS}
+var
+  Options: TViewOptions;
+{$ENDIF}
+begin
+  Result := Self;
+  {$IFDEF DEXT_ENABLE_WEB_STENCILS}
+  Options := AOptions;
+  TWebStencilsViewEngine.RegisterWebStencilsFunctions;
+  Self.AddSingleton<IViewEngine, TWebStencilsViewEngine>(
+    function(Provider: IServiceProvider): TObject
     begin
       Result := TWebStencilsViewEngine.Create(Options);
-    end;
-  
-  Self.AddSingleton<IViewEngine, TWebStencilsViewEngine>(Factory);
+    end);
   {$ENDIF}
 end;
 
 function TWebServicesHelper.AddWebStencils(const ABuilder: TViewOptionsBuilder): TDextServices;
+{$IFDEF DEXT_ENABLE_WEB_STENCILS}
+var
+  OptionsBuilder: TViewOptionsBuilder;
+{$ENDIF}
 begin
-  Result := AddWebStencils(TViewOptions(ABuilder));
+  Result := Self;
+  {$IFDEF DEXT_ENABLE_WEB_STENCILS}
+  OptionsBuilder := ABuilder;
+  TWebStencilsViewEngine.RegisterWebStencilsFunctions;
+  Self.AddSingleton<IViewEngine, TWebStencilsViewEngine>(
+    function(Provider: IServiceProvider): TObject
+    begin
+      Result := TWebStencilsViewEngine.Create(TViewOptions(OptionsBuilder));
+    end);
+  {$ENDIF}
+end;
+
+function TWebServicesHelper.AddDextTemplating: TDextServices;
+begin
+  Result := AddDextTemplating(TProc<TViewOptions>(nil));
+end;
+
+function TWebServicesHelper.AddDextTemplating(AConfig: TProc<TViewOptions>): TDextServices;
+var
+  LConfig: TProc<TViewOptions>;
+begin
+  LConfig := AConfig;
+  Result := Self.AddSingleton<IViewEngine, TDextNativeViewEngine>(
+    function(Provider: IServiceProvider): TObject
+    var
+      Options: TViewOptions;
+    begin
+      Options := TViewOptions.Create;
+      if Assigned(LConfig) then
+        LConfig(Options);
+      Result := TDextNativeViewEngine.Create(Options);
+    end);
+end;
+
+function TWebServicesHelper.AddDextTemplating(const AOptions: TViewOptions): TDextServices;
+var
+  Options: TViewOptions;
+begin
+  Options := AOptions;
+  Result := Self.AddSingleton<IViewEngine, TDextNativeViewEngine>(
+    function(Provider: IServiceProvider): TObject
+    begin
+      Result := TDextNativeViewEngine.Create(Options);
+    end);
+end;
+
+function TWebServicesHelper.AddDextTemplating(const ABuilder: TViewOptionsBuilder): TDextServices;
+var
+  OptionsBuilder: TViewOptionsBuilder;
+begin
+  OptionsBuilder := ABuilder;
+  Result := Self.AddSingleton<IViewEngine, TDextNativeViewEngine>(
+    function(Provider: IServiceProvider): TObject
+    begin
+      Result := TDextNativeViewEngine.Create(TViewOptions(OptionsBuilder));
+    end);
 end;
 
 function THttpAppBuilderHelper.UseViewEngine: AppBuilder;

@@ -71,4 +71,27 @@ To check or toggle this setting, see `Dext.MM.pas`:
 
 ---
 
+## JSON Performance: Architectural Profiles
+
+Dext features two distinct JSON architectures designed for different performance profiles. Understanding the trade-offs is key to choosing the right tool for your scenario.
+
+### 1. Dext DOM (IDextJsonNode)
+This is the default engine used by `TDextJson.Serialize/Deserialize`. It constructs an in-memory tree (DOM) of the JSON structure.
+
+*   **Best For**: 99% of applications, including REST APIs, configuration files, and complex object manipulation.
+*   **Strengths**: High-speed random access, intuitive object-oriented API, and exceptional performance in finding properties within deeply nested structures.
+*   **Memory Usage**: Proportional to the size of the JSON document.
+
+### 2. Dext UTF-8 (Low-Level Streaming)
+This is a high-performance streaming API found in the `Dext.Json.Utf8` namespace. It operates directly on raw memory slices (`TByteSpan`).
+
+*   **Best For**: Big Data scenarios, exporting/importing millions of records, or processing multi-gigabyte files.
+*   **Strengths**: **Zero-allocation** processing. It can process massive volumes of data with a constant and minimal memory footprint, regardless of the file size.
+*   **Trade-offs**: As a streaming parser, it does not index the document. Finding a specific property requires sequential scanning from the start of the buffer, which can be slower for random-access benchmarks but is irrelevant for sequential throughput.
+
+> [!TIP]
+> Use **Dext DOM** for your daily API development. Switch to **Dext UTF-8** only when memory consumption becomes a bottleneck or when processing massive data streams.
+
+---
+
 [← Advanced Topics](README.md)

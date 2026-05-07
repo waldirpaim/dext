@@ -66,8 +66,31 @@ Para aplicações de alta performance, o Dext inclui suporte nativo ao **FastMM5
 Para verificar ou alterar essa configuração, consulte `Dext.MM.pas`:
 
 ```pascal
-{$DEFINE DEXT_USE_FASTMM5} // Habilitado para gerenciamento de memória de nível industrial
+{$DEFINE DEXT_USE_FASTMM5} // Habilitado para gerenciamento de memória de nível enterprise
 ```
+
+---
+
+## Performance JSON: Perfis Arquiteturais
+
+O Dext possui duas arquiteturas de JSON distintas, projetadas para diferentes perfis de performance. Entender essas diferenças é fundamental para escolher a ferramenta certa para o seu cenário.
+
+### 1. Dext DOM (IDextJsonNode)
+Este é o motor padrão utilizado por `TDextJson.Serialize/Deserialize`. Ele constrói uma árvore em memória (DOM) da estrutura JSON.
+
+*   **Ideal para**: 99% das aplicações, incluindo APIs REST, arquivos de configuração e manipulação complexa de objetos.
+*   **Pontos Fortes**: Alta velocidade de acesso aleatório, API orientada a objetos intuitiva e performance excepcional na localização de propriedades em estruturas profundamente aninhadas.
+*   **Uso de Memória**: Proporcional ao tamanho do documento JSON.
+
+### 2. Dext UTF-8 (Low-Level Streaming)
+Esta é uma API de streaming de alta performance encontrada no namespace `Dext.Json.Utf8`. Ela opera diretamente sobre fatias de memória bruta (`TByteSpan`).
+
+*   **Ideal para**: Cenários de Big Data, exportação/importação de milhões de registros ou processamento de arquivos de vários gigabytes.
+*   **Pontos Fortes**: Processamento **zero-allocation**. Consegue processar volumes massivos de dados com um footprint de memória constante e mínimo, independentemente do tamanho do arquivo.
+*   **Trade-offs**: Como é um streaming parser, ele não indexa o documento. Localizar uma propriedade específica requer uma varredura sequencial desde o início do buffer, o que pode ser mais lento em benchmarks de acesso aleatório, mas é irrelevante para throughput sequencial.
+
+> [!TIP]
+> Use o **Dext DOM** para o desenvolvimento diário de suas APIs. Mude para o **Dext UTF-8** apenas quando o consumo de memória se tornar um gargalo ou quando estiver processando fluxos massivos de dados.
 
 ---
 

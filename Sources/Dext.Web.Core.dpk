@@ -101,7 +101,6 @@ contains
   Dext.Web.MultiTenancy in 'Web\Dext.Web.MultiTenancy.pas',
   Dext.Web in 'Web\Dext.Web.pas',
   Dext.Web.Pipeline in 'Web\Dext.Web.Pipeline.pas',
-  Dext.Web.ResponseHelper in 'Web\Dext.Web.ResponseHelper.pas',
   Dext.Web.Results in 'Web\Dext.Web.Results.pas',
   Dext.Web.Routing in 'Web\Dext.Web.Routing.pas',
   Dext.Web.RoutingMiddleware in 'Web\Dext.Web.RoutingMiddleware.pas',
@@ -110,6 +109,7 @@ contains
   Dext.Web.View in 'Web\Dext.Web.View.pas',
   Dext.Web.View.WebStencils in 'Web\Dext.Web.View.WebStencils.pas',
   Dext.Web.WebBroker in 'Web\Dext.Web.WebBroker.pas',
-  Dext.WebHost in 'Web\Dext.WebHost.pas';
+  Dext.WebHost in 'Web\Dext.WebHost.pas',
+  Dext.Web.View.Native in 'Web\Dext.Web.View.Native.pas';
 
 end.

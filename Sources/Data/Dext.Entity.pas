@@ -16,6 +16,7 @@ uses
   Dext.DI.Core,
   Dext.Configuration.Interfaces,
   Dext.Logging.Extensions,
+  Dext.Collections.Dict,
   // {BEGIN_DEXT_USES}
   // Generated Uses
   Dext.Entity.Attributes,
@@ -96,8 +97,31 @@ type
   TypeConverterAttribute = Dext.Entity.Attributes.TypeConverterAttribute;
   StoredProcedureAttribute = Dext.Entity.Attributes.StoredProcedureAttribute;
   DbParamAttribute = Dext.Entity.Attributes.DbParamAttribute;
+  CurrencyAttribute = Dext.Entity.Attributes.CurrencyAttribute;
+  CaptionAttribute = Dext.Entity.Attributes.CaptionAttribute;
+  DisplayLabelAttribute = Dext.Entity.Attributes.DisplayLabelAttribute;
+  DisplayFormatAttribute = Dext.Entity.Attributes.DisplayFormatAttribute;
+  AlignmentAttribute = Dext.Entity.Attributes.AlignmentAttribute;
+  EditMaskAttribute = Dext.Entity.Attributes.EditMaskAttribute;
+  DisplayWidthAttribute = Dext.Entity.Attributes.DisplayWidthAttribute;
   LockTokenAttribute = Dext.Entity.Attributes.LockTokenAttribute;
-  LockExpirationAttribute = Dext.Entity.Attributes.LockExpirationAttribute;
+  LockExpirationAttribute = Dext.Entity.Attributes.LockExpirationAttribute;  
+  VisibleAttribute = Dext.Entity.Attributes.VisibleAttribute;
+  ReadOnlyAttribute = Dext.Entity.Attributes.ReadOnlyAttribute;
+  DefaultValueAttribute = Dext.Entity.Attributes.DefaultValueAttribute;
+
+  // Short Aliases
+  PK = Dext.Entity.Attributes.PK;
+  FK = Dext.Entity.Attributes.FK;
+  Caption = Dext.Entity.Attributes.Caption;
+  DisplayLabel = Dext.Entity.Attributes.DisplayLabel;
+  DisplayFormat = Dext.Entity.Attributes.DisplayFormat;
+  Alignment = Dext.Entity.Attributes.Alignment;
+  EditMask = Dext.Entity.Attributes.EditMask;
+  DisplayWidth = Dext.Entity.Attributes.DisplayWidth;
+  Visible = Dext.Entity.Attributes.Visible;
+  ReadOnly = Dext.Entity.Attributes.ReadOnly;
+  DefaultValue = Dext.Entity.Attributes.DefaultValue;
 
   // Dext.Entity.Cache
   TSQLCache = Dext.Entity.Cache.TSQLCache;
@@ -398,6 +422,9 @@ type
     function AddLogging(const AConfigure: TProc<ILoggingBuilder> = nil): TDextServices;
   end;
 
+  /// <summary>
+  ///   Helper class for DbContext dependency injection registration.
+  /// </summary>
   TPersistence = class
   public
     /// <summary>
@@ -442,6 +469,18 @@ end;
 class procedure TPersistence.AddDbContext<T>(Services: IServiceCollection; Config: TProc<TDbContextOptions>);
 var
   TemplateOptions: TDbContextOptions;
+  DriverName: string;
+  ConnectionString: string;
+  ConnectionDefName: string;
+  ConnectionDefString: string;
+  Pooling: Boolean;
+  PoolMax: Integer;
+  Optimizations: TFireDACOptimizations;
+  DialectOverride: ISQLDialect;
+  NamingStrategy: INamingStrategy;
+  ParamsText: string;
+  SL: TStringList;
+  Pair: TPair<string, string>;
 begin
   // 1. Process configuration ONCE during registration to capture stable values
   TemplateOptions := TDbContextOptions.Create;
@@ -450,21 +489,20 @@ begin
       Config(TemplateOptions);
       
     // 2. Capture stable values into local variables for the closure
-    var DriverName := TemplateOptions.DriverName;
-    var ConnectionString := TemplateOptions.ConnectionString;
-    var ConnectionDefName := TemplateOptions.ConnectionDefName;
-    var ConnectionDefString := TemplateOptions.ConnectionDefString;
-    var Pooling := TemplateOptions.Pooling;
-    var PoolMax := TemplateOptions.PoolMax;
-    var Optimizations := TemplateOptions.Optimizations;
-    var DialectOverride := TemplateOptions.Dialect;
-    var NamingStrategy := TemplateOptions.BuildNamingStrategy;
+    DriverName := TemplateOptions.DriverName;
+    ConnectionString := TemplateOptions.ConnectionString;
+    ConnectionDefName := TemplateOptions.ConnectionDefName;
+    ConnectionDefString := TemplateOptions.ConnectionDefString;
+    Pooling := TemplateOptions.Pooling;
+    PoolMax := TemplateOptions.PoolMax;
+    Optimizations := TemplateOptions.Optimizations;
+    DialectOverride := TemplateOptions.Dialect;
+    NamingStrategy := TemplateOptions.BuildNamingStrategy;
     
     // Convert dictionary to local copy for capture (capturing strings for automatic lifecycle)
-    var ParamsText: string;
-    var SL := TStringList.Create;
+    SL := TStringList.Create;
     try
-      for var Pair in TemplateOptions.Params do
+      for Pair in TemplateOptions.Params do
         SL.Values[Pair.Key] := Pair.Value;
       ParamsText := SL.Text;
     finally
@@ -480,13 +518,15 @@ begin
         FDConn: TFDConnection;
         Dialect: ISQLDialect;
         DetectedDialect: TDatabaseDialect;
+        DefName: string;
+        LocalParams: TStringList;
       begin
         // Factory execution: use captured values ONLY (avoids EInvalidPointer in multi-threaded closures)
         FDConn := TFDConnection.Create(nil);
         try
           if ConnectionDefString <> '' then
           begin
-            var DefName := ConnectionDefName;
+            DefName := ConnectionDefName;
             if DefName = '' then DefName := 'DextMemoryDef_' + IntToHex(ConnectionDefString.GetHashCode, 8);
             TDextFireDACManager.Instance.RegisterConnectionDefFromString(DefName, ConnectionDefString);
             FDConn.ConnectionDefName := DefName;
@@ -497,10 +537,10 @@ begin
           end
           else if Pooling then
           begin
-             var LocalParams := TStringList.Create;
+             LocalParams := TStringList.Create;
              try
                LocalParams.Text := ParamsText;
-               var DefName := TDextFireDACManager.Instance.RegisterConnectionDef(
+               DefName := TDextFireDACManager.Instance.RegisterConnectionDef(
                  DriverName, 
                  LocalParams, 
                  PoolMax

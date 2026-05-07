@@ -1,9 +1,10 @@
-﻿unit Dext.Web.Middleware.Compression;
+unit Dext.Web.Middleware.Compression;
 
 interface
 
 uses
   System.Classes,
+  System.Math,
   System.Rtti,
   System.SysUtils,
   System.ZLib,
@@ -44,6 +45,11 @@ type
     procedure AppendCookie(const AName, AValue: string; const AOptions: TCookieOptions); overload;
     procedure AppendCookie(const AName, AValue: string); overload;
     procedure DeleteCookie(const AName: string);
+    procedure Redirect(const AUrl: string; APermanent: Boolean = False);
+    procedure Unauthorized(const AMessage: string = '');
+    procedure Forbidden(const AMessage: string = '');
+    procedure BadRequest(const AMessage: string = '');
+    procedure NotFound(const AMessage: string = '');
     property StatusCode: Integer read GetStatusCode write SetStatusCode;
     property ContentType: string read GetContentType write SetContentType;
     property Buffer: TMemoryStream read FBuffer;
@@ -68,6 +74,11 @@ procedure TBufferedResponse.AddHeader(const AName, AValue: string); begin FInner
 procedure TBufferedResponse.AppendCookie(const AName, AValue: string; const AOptions: TCookieOptions); begin FInner.AppendCookie(AName, AValue, AOptions); end;
 procedure TBufferedResponse.AppendCookie(const AName, AValue: string); begin FInner.AppendCookie(AName, AValue); end;
 procedure TBufferedResponse.DeleteCookie(const AName: string); begin FInner.DeleteCookie(AName); end;
+procedure TBufferedResponse.Redirect(const AUrl: string; APermanent: Boolean); begin FInner.Redirect(AUrl, APermanent); end;
+procedure TBufferedResponse.Unauthorized(const AMessage: string); begin FInner.Unauthorized(AMessage); end;
+procedure TBufferedResponse.Forbidden(const AMessage: string); begin FInner.Forbidden(AMessage); end;
+procedure TBufferedResponse.BadRequest(const AMessage: string); begin FInner.BadRequest(AMessage); end;
+procedure TBufferedResponse.NotFound(const AMessage: string); begin FInner.NotFound(AMessage); end;
 function TBufferedResponse.GetStatusCode: Integer; begin Result := FInner.StatusCode; end;
 function TBufferedResponse.GetContentType: string; begin Result := FInner.ContentType; end;
 procedure TBufferedResponse.Json(const AJson: string);
@@ -115,6 +126,7 @@ var
   OriginalResponse: IHttpResponse;
   CompressedStream: TMemoryStream;
   ZStream: TZCompressionStream;
+  OutBuffer: TBytes;
 begin
   AcceptEncoding := AContext.Request.GetHeader('Accept-Encoding').ToLower;
   
@@ -148,7 +160,7 @@ begin
         OriginalResponse.SetContentLength(CompressedStream.Size);
         
         CompressedStream.Position := 0;
-        var OutBuffer: TBytes;
+        OutBuffer := nil;
         SetLength(OutBuffer, CompressedStream.Size);
         CompressedStream.ReadBuffer(OutBuffer[0], CompressedStream.Size);
         OriginalResponse.Write(OutBuffer);
