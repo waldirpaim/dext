@@ -467,6 +467,8 @@ var
   Key: string;
   Intf: IInterface;
   Obj: TObject;
+  ServiceGuid: TGUID;
+  Resolved: Boolean;
 begin
   // Special handling for IServiceProvider to return Self without dictionary cycle
   if AServiceType.IsInterface and IsEqualGUID(AServiceType.AsInterface, IServiceProvider) then
@@ -477,6 +479,7 @@ begin
     Exit(nil);
 
   Key := AServiceType.ToString;
+  ServiceGuid := AServiceType.AsInterface;
 
   FLock.Enter;
   try
@@ -488,11 +491,14 @@ begin
           if not FSingletonInterfaces.TryGetValue(Key, Intf) then
           begin
             Obj := CreateInstance(Descriptor);
-            if not Supports(Obj, AServiceType.AsInterface, Intf) then
+            if not IsEqualGUID(ServiceGuid, TGUID.Empty) then
+              Resolved := Obj.GetInterface(ServiceGuid, Intf)
+            else
+              Resolved := Supports(Obj, IInterface, Intf);
+            if not Resolved then
             begin
               Obj.Free;
-              raise EDextDIException.CreateFmt('Service %s does not implement interface %s',
-                [Obj.ClassName, GUIDToString(AServiceType.AsInterface)]);
+              raise EDextDIException.CreateFmt('Service %s does not implement IInterface', [Obj.ClassName]);
             end;
             FSingletonInterfaces.Add(Key, Intf);
             // Note: The object is now owned by ARC via the interface reference
@@ -508,11 +514,14 @@ begin
         if not FScopedInterfaces.TryGetValue(Key, Intf) then
         begin
           Obj := CreateInstance(Descriptor);
-          if not Supports(Obj, AServiceType.AsInterface, Intf) then
+          if not IsEqualGUID(ServiceGuid, TGUID.Empty) then
+            Resolved := Obj.GetInterface(ServiceGuid, Intf)
+          else
+            Resolved := Supports(Obj, IInterface, Intf);
+          if not Resolved then
           begin
             Obj.Free;
-            raise EDextDIException.CreateFmt('Service %s does not implement interface %s',
-              [Obj.ClassName, GUIDToString(AServiceType.AsInterface)]);
+            raise EDextDIException.CreateFmt('Service %s does not implement IInterface', [Obj.ClassName]);
           end;
           FScopedInterfaces.Add(Key, Intf);
         end;
@@ -522,11 +531,14 @@ begin
       TServiceLifetime.Transient:
       begin
         Obj := CreateInstance(Descriptor);
-        if not Supports(Obj, AServiceType.AsInterface, Intf) then
+        if not IsEqualGUID(ServiceGuid, TGUID.Empty) then
+          Resolved := Obj.GetInterface(ServiceGuid, Intf)
+        else
+          Resolved := Supports(Obj, IInterface, Intf);
+        if not Resolved then
         begin
           Obj.Free;
-          raise EDextDIException.CreateFmt('Service %s does not implement interface %s',
-            [Obj.ClassName, GUIDToString(AServiceType.AsInterface)]);
+          raise EDextDIException.CreateFmt('Service %s does not implement IInterface', [Obj.ClassName]);
         end;
         Result := Intf;
       end;

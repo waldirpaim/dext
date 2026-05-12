@@ -30,3 +30,4 @@ node_modules/
 *.a
 /Sources/*.bpi
 *.dsv
+test-results.xml

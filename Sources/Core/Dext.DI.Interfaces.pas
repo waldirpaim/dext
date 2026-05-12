@@ -1,4 +1,4 @@
-{***************************************************************************}
+﻿{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -28,9 +28,10 @@ unit Dext.DI.Interfaces;
 interface
 
 uses
+  System.Rtti,
   System.SysUtils,
-  Dext.Collections,
-  System.TypInfo;
+  System.TypInfo,
+  Dext.Collections;
 
 type
   IServiceCollection = interface;
@@ -331,7 +332,16 @@ end;
 function TServiceType.ToString: string;
 begin
   if FIsInterface then
-    Result := 'I:' + GUIDToString(FGuid)
+  begin
+    // IMPORTANT: for generic interfaces (e.g., IList<T>) GUID may be shared
+    // across different specializations. TypeInfo must be the primary identity.
+    if FTypeInfo <> nil then
+      Result := 'IT:' + IntToHex(NativeUInt(FTypeInfo), SizeOf(Pointer) * 2)
+    else if not IsEqualGUID(FGuid, TGUID.Empty) then
+      Result := 'I:' + GUIDToString(FGuid)
+    else
+      Result := 'I:EMPTY';
+  end
   else
     Result := 'C:' + AsClass.ClassName;
 end;
@@ -342,7 +352,16 @@ begin
     Exit(False);
 
   if A.FIsInterface then
-    Result := IsEqualGUID(A.FGuid, B.FGuid)
+  begin
+    // IMPORTANT: when both have TypeInfo (common for generic interfaces),
+    // compare TypeInfo first to avoid collisions between specializations.
+    if (A.FTypeInfo <> nil) and (B.FTypeInfo <> nil) then
+      Result := A.FTypeInfo = B.FTypeInfo
+    else if not IsEqualGUID(A.FGuid, TGUID.Empty) and not IsEqualGUID(B.FGuid, TGUID.Empty) then
+      Result := IsEqualGUID(A.FGuid, B.FGuid)
+    else
+      Result := A.FTypeInfo = B.FTypeInfo;
+  end
   else
     Result := A.AsClass = B.AsClass;
 end;
@@ -389,11 +408,8 @@ begin
 end;
 
 function TDextServices.AddSingleton<TService, TImplementation>(const AFactory: TFunc<IServiceProvider, TObject>): TDextServices;
-var
-  Guid: TGUID;
 begin
-  Guid := GetTypeData(TypeInfo(TService))^.Guid;
-  FServices.AddSingleton(TServiceType.FromInterface(Guid), TImplementation, AFactory);
+  FServices.AddSingleton(TServiceType.FromInterface(TypeInfo(TService)), TImplementation, AFactory);
   Result := Self;
 end;
 
@@ -404,11 +420,8 @@ begin
 end;
 
 function TDextServices.AddSingleton<T>(const AInstance: T): TDextServices;
-var
-  Guid: TGUID;
 begin
-  Guid := GetTypeData(TypeInfo(T))^.Guid;
-  FServices.AddSingleton(TServiceType.FromInterface(Guid), AInstance as TObject);
+  FServices.AddSingleton(TServiceType.FromInterface(TypeInfo(T)), AInstance as TObject);
   Result := Self;
 end;
 
@@ -418,11 +431,8 @@ begin
 end;
 
 function TDextServices.AddTransient<TService, TImplementation>(const AFactory: TFunc<IServiceProvider, TObject>): TDextServices;
-var
-  Guid: TGUID;
 begin
-  Guid := GetTypeData(TypeInfo(TService))^.Guid;
-  FServices.AddTransient(TServiceType.FromInterface(Guid), TImplementation, AFactory);
+  FServices.AddTransient(TServiceType.FromInterface(TypeInfo(TService)), TImplementation, AFactory);
   Result := Self;
 end;
 
@@ -432,11 +442,8 @@ begin
 end;
 
 function TDextServices.AddScoped<TService, TImplementation>(const AFactory: TFunc<IServiceProvider, TObject>): TDextServices;
-var
-  Guid: TGUID;
 begin
-  Guid := GetTypeData(TypeInfo(TService))^.Guid;
-  FServices.AddScoped(TServiceType.FromInterface(Guid), TImplementation, AFactory);
+  FServices.AddScoped(TServiceType.FromInterface(TypeInfo(TService)), TImplementation, AFactory);
   Result := Self;
 end;
 
@@ -510,15 +517,12 @@ end;
 
 class function TDextServices.GetRequiredService<T>(const AProvider: IServiceProvider): T;
 var
-  Guid: TGUID;
   LService: IInterface;
 begin
-  Guid := GetTypeData(TypeInfo(T))^.Guid;
-  LService := AProvider.GetServiceAsInterface(TServiceType.FromInterface(Guid));
+  LService := AProvider.GetServiceAsInterface(TServiceType.FromInterface(TypeInfo(T)));
   if not Assigned(LService) then
     raise EDextDIException.Create('Service not registered: ' + string(PTypeInfo(TypeInfo(T))^.Name));
-  if not Supports(LService, Guid, Result) then
-    raise EDextDIException.Create('Service persistent instance does not support interface: ' + string(PTypeInfo(TypeInfo(T))^.Name));
+  IInterface(Result) := LService;
 end;
 
 class function TDextServices.GetRequiredServiceObject<T>(const AProvider: IServiceProvider): T;
@@ -531,15 +535,12 @@ end;
 
 class function TDextServices.GetService<T>(const AProvider: IServiceProvider): T;
 var
-  Guid: TGUID;
   Intf: IInterface;
 begin
-  Guid := GetTypeData(TypeInfo(T))^.Guid;
-  Intf := AProvider.GetServiceAsInterface(TServiceType.FromInterface(Guid));
+  Intf := AProvider.GetServiceAsInterface(TServiceType.FromInterface(TypeInfo(T)));
   if Intf = nil then
     Exit(Default(T));
-  if not Supports(Intf, Guid, Result) then
-    Exit(Default(T));
+  IInterface(Result) := Intf;
 end;
 
 class function TDextServices.GetServiceObject<T>(const AProvider: IServiceProvider): T;

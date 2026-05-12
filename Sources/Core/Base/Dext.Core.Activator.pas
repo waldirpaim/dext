@@ -1,4 +1,4 @@
-{***************************************************************************}
+﻿{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -122,6 +122,25 @@ uses
   Winapi.Windows,
   {$ENDIF}
   Dext.Core.Reflection;
+
+function MakeTypedInterfaceValue(const AIntf: IInterface; AType: PTypeInfo): TValue;
+var
+  LTyped: IInterface;
+  LGuid: TGUID;
+begin
+  if (AType <> nil) and (AType.Kind = tkInterface) then
+  begin
+    LGuid := GetTypeData(AType)^.Guid;
+    if (not IsEqualGUID(LGuid, TGUID.Empty)) and Supports(AIntf, LGuid, LTyped) then
+    begin
+      TValue.Make(@LTyped, AType, Result);
+      Exit;
+    end;
+  end;
+
+  // Fallback for interfaces without GUID/special cases
+  Result := TValue.From<IInterface>(AIntf);
+end;
 
 { TActivator }
 
@@ -288,13 +307,13 @@ begin
   if AParamType.TypeKind = tkInterface then
   begin
     LGuid := TRttiInterfaceType(AParamType).GUID;
-    if not LGuid.IsEmpty then
+    if (AParamType.Handle <> nil) or (not LGuid.IsEmpty) then
     begin
-      LServiceType := TServiceType.FromInterface(LGuid);
+      LServiceType := TServiceType.FromInterface(AParamType.Handle);
       LIntf := AProvider.GetServiceAsInterface(LServiceType);
       if LIntf <> nil then
       begin
-        TValue.Make(@LIntf, AParamType.Handle, AResolvedService);
+        AResolvedService := MakeTypedInterfaceValue(LIntf, AParamType.Handle);
         Result := True;
       end;
     end;
@@ -815,7 +834,6 @@ var
   RegisteredImpl: TClass;
   InstanceObj: TObject;
   Intf: IInterface;
-  Guid: TGUID;
   ImplRtti: TRttiType;
   TypeName, ElementTypeName, ImplName: string;
   TmpType: TRttiType;
@@ -827,6 +845,7 @@ var
   KeyName, ValName: string;
   CtorArgs: TArray<TValue>;
   J: Integer;
+  BaseIntf: IInterface;
 begin
   if AType = nil then
     Exit(TValue.Empty);
@@ -844,30 +863,17 @@ begin
       if (RttiType <> nil) and FInterfaceDefaultImpl.TryGetValue(AType, RegisteredImpl) then
       begin
         InstanceObj := CreateInstance(AProvider, RegisteredImpl);
-        if InstanceObj.GetInterface(TRttiInterfaceType(RttiType).GUID, Intf) then
-          TValue.Make(@Intf, AType, Result)
+        if Supports(InstanceObj, IInterface, BaseIntf) then
+          Result := MakeTypedInterfaceValue(BaseIntf, AType)
         else
           Result := TValue.From(InstanceObj);
         Exit;
       end;
 
-      // 2. Try to resolve via DI
-      if (AProvider <> nil) and (RttiType <> nil) then
-      begin
-        Guid := TRttiInterfaceType(RttiType).GUID;
-        if Guid <> TGUID.Empty then
-        begin
-          ServiceType := TServiceType.FromInterface(Guid);
-          Intf := AProvider.GetServiceAsInterface(ServiceType);
-          if Intf <> nil then
-          begin
-            TValue.Make(@Intf, AType, Result);
-            Exit;
-          end;
-        end;
-      end;
-
-      // 3. Fallback for Collections (IList/IEnumerable)
+      // 2. Fallback for Collections (IList/IEnumerable)
+      // IMPORTANT: generic interface specializations can collide in interface-cast
+      // paths in some Delphi RTTI scenarios. Prioritize collection instantiation
+      // before DI lookup to keep IList<T>/IEnumerable<T> deterministic.
       if IsListType(AType) then
       begin
         ElementType := GetListElementType(AType);
@@ -935,20 +941,9 @@ begin
                  
               if AType.Kind = tkInterface then
               begin
-                // GetInterface with GUID works for concrete interfaces.
-                // For generic specializations (e.g. IList<TFoo>), the GUID in RTTI
-                // is TGUID.Empty, so GetInterface always returns False.
-                // Use Supports as primary strategy (works via GUID or interface slot),
-                // then fall back to a direct IInterface assignment.
-                Intf := nil;
-                if not TRttiInterfaceType(RttiType).GUID.IsEmpty then
-                  InstanceVal.AsObject.GetInterface(TRttiInterfaceType(RttiType).GUID, Intf);
-
-                if Intf = nil then
-                  Supports(InstanceVal.AsObject, IInterface, IInterface(Intf));
-
-                if Intf <> nil then
-                  TValue.Make(@Intf, AType, Result)
+                BaseIntf := nil;
+                if Supports(InstanceVal.AsObject, IInterface, BaseIntf) then
+                  Result := MakeTypedInterfaceValue(BaseIntf, AType)
                 else
                   Result := InstanceVal; // last resort: return as class
               end
@@ -1003,8 +998,9 @@ begin
               InstanceVal := BestConstructor.Invoke(TargetClass, CtorArgs);
               if AType.Kind = tkInterface then
               begin
-                if InstanceVal.AsObject.GetInterface(TRttiInterfaceType(RttiType).GUID, Intf) then
-                  Result := TValue.From<IInterface>(Intf)
+                BaseIntf := nil;
+                if Supports(InstanceVal.AsObject, IInterface, BaseIntf) then
+                  Result := MakeTypedInterfaceValue(BaseIntf, AType)
                 else 
                   Result := InstanceVal;
               end
@@ -1013,6 +1009,18 @@ begin
               Exit;
             end;
           end;
+        end;
+      end;
+
+      // 4. Try to resolve via DI (non-collection interfaces)
+      if (AProvider <> nil) and (RttiType <> nil) then
+      begin
+        ServiceType := TServiceType.FromInterface(AType);
+        Intf := AProvider.GetServiceAsInterface(ServiceType);
+        if Intf <> nil then
+        begin
+          Result := MakeTypedInterfaceValue(Intf, AType);
+          Exit;
         end;
       end;
       

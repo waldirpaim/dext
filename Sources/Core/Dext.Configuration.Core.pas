@@ -262,6 +262,7 @@ end;
 constructor TConfigurationProvider.Create;
 begin
   inherited;
+  FData := TCollections.CreateDictionaryIgnoreCase<string, string>;
 end;
 
 destructor TConfigurationProvider.Destroy;

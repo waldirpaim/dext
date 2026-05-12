@@ -63,7 +63,7 @@ end;
 class procedure TOptionsServiceCollectionExtensions.Configure<T>(Services: IServiceCollection; Configuration: IConfiguration);
 begin
   Services.AddSingleton(
-    TServiceType.FromInterface(GetTypeData(TypeInfo(IOptions<T>))^.Guid),
+    TServiceType.FromInterface(TypeInfo(IOptions<T>)),
     TClass(TOptions<T>),
     function(Provider: IServiceProvider): TObject
     var
@@ -79,7 +79,7 @@ class procedure TOptionsServiceCollectionExtensions.Configure<T>(Services: IServ
   Configuration: IConfiguration; const Validator: TFunc<T, string>);
 begin
   Services.AddSingleton(
-    TServiceType.FromInterface(GetTypeData(TypeInfo(IOptions<T>))^.Guid),
+    TServiceType.FromInterface(TypeInfo(IOptions<T>)),
     TClass(TOptions<T>),
     function(Provider: IServiceProvider): TObject
     var
@@ -106,7 +106,7 @@ end;
 class procedure TOptionsServiceCollectionExtensions.Configure<T>(Services: IServiceCollection; Section: IConfigurationSection);
 begin
   Services.AddSingleton(
-    TServiceType.FromInterface(GetTypeData(TypeInfo(IOptions<T>))^.Guid),
+    TServiceType.FromInterface(TypeInfo(IOptions<T>)),
     TClass(TOptions<T>),
     function(Provider: IServiceProvider): TObject
     var
@@ -122,7 +122,7 @@ class procedure TOptionsServiceCollectionExtensions.Configure<T>(Services: IServ
   Section: IConfigurationSection; const Validator: TFunc<T, string>);
 begin
   Services.AddSingleton(
-    TServiceType.FromInterface(GetTypeData(TypeInfo(IOptions<T>))^.Guid),
+    TServiceType.FromInterface(TypeInfo(IOptions<T>)),
     TClass(TOptions<T>),
     function(Provider: IServiceProvider): TObject
     var

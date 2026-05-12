@@ -154,7 +154,7 @@ begin
   try
     Doc := Parser.Parse(Content);
     try
-      FData.Clear;
+      ClearData;
       if Doc.Root <> nil then
         FlattenNode(Doc.Root, '');
     finally
