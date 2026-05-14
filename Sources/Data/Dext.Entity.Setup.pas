@@ -59,11 +59,17 @@ type
 
     // Fluent Helpers
     function UseSQLite(const DatabaseFile: string): TDbContextOptions;
+    function UseSQLServer(const AConnectionString: string): TDbContextOptions;
+    function UsePostgreSQL(const AConnectionString: string): TDbContextOptions;
+    function UseMySQL(const AConnectionString: string): TDbContextOptions;
+    function UseFirebird(const AConnectionString: string): TDbContextOptions;
+    function UseOracle(const AConnectionString: string): TDbContextOptions;
     function UseDriver(const ADriverName: string): TDbContextOptions;
     function UseConnectionDef(const ADefName: string): TDbContextOptions;
     function WithPooling(Enable: Boolean = True; MaxSize: Integer = 50): TDbContextOptions;
     function ConfigureOptimizations(AOpts: TFireDACOptimizations): TDbContextOptions;
     function UseCustomDialect(const ADialect: ISQLDialect): TDbContextOptions;
+    function UseDialect(ADialect: TDatabaseDialect): TDbContextOptions;
     function UseNamingStrategy(const AStrategy: INamingStrategy): TDbContextOptions;
     function UseSnakeCaseNamingConvention: TDbContextOptions;
     function LogTo(AProc: TProc<string>): TDbContextOptions;
@@ -125,6 +131,41 @@ begin
   Result := Self;
 end;
 
+function TDbContextOptions.UseSQLServer(const AConnectionString: string): TDbContextOptions;
+begin
+  FDriverName := 'MSSQL';
+  FConnectionString := AConnectionString;
+  Result := Self;
+end;
+
+function TDbContextOptions.UsePostgreSQL(const AConnectionString: string): TDbContextOptions;
+begin
+  FDriverName := 'PG';
+  FConnectionString := AConnectionString;
+  Result := Self;
+end;
+
+function TDbContextOptions.UseMySQL(const AConnectionString: string): TDbContextOptions;
+begin
+  FDriverName := 'MySQL';
+  FConnectionString := AConnectionString;
+  Result := Self;
+end;
+
+function TDbContextOptions.UseFirebird(const AConnectionString: string): TDbContextOptions;
+begin
+  FDriverName := 'FB';
+  FConnectionString := AConnectionString;
+  Result := Self;
+end;
+
+function TDbContextOptions.UseOracle(const AConnectionString: string): TDbContextOptions;
+begin
+  FDriverName := 'Ora';
+  FConnectionString := AConnectionString;
+  Result := Self;
+end;
+
 function TDbContextOptions.WithPooling(Enable: Boolean; MaxSize: Integer): TDbContextOptions;
 begin
   FPooling := Enable;
@@ -141,6 +182,12 @@ end;
 function TDbContextOptions.UseCustomDialect(const ADialect: ISQLDialect): TDbContextOptions;
 begin
   FDialect := ADialect;
+  Result := Self;
+end;
+
+function TDbContextOptions.UseDialect(ADialect: TDatabaseDialect): TDbContextOptions;
+begin
+  FDialect := TDialectFactory.CreateDialect(ADialect);
   Result := Self;
 end;
 

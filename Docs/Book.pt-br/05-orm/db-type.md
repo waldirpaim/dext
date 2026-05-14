@@ -83,3 +83,16 @@ SELECT * FROM (
 ```
 
 Isso é tratado de forma transparente pelo `TOracleDialect`. Você não precisa alterar o código da sua aplicação; basta usar `.Skip(x).Take(y)` e o Dext gerará o SQL correto para o seu dialeto.
+
+### Configuração Manual do Dialeto
+
+Se a detecção automática falhar (comum ao usar strings de conexão complexas), você pode forçar o dialeto no seu `Startup`:
+
+```pascal
+procedure TStartup.ConfigureDatabase(Options: TDbContextOptions);
+begin
+  Options
+    .UseSQLServer(Configuration.Get('ConnectionStrings:Default'))
+    .UseDialect(ddSQLServer); // Força o uso do dialeto SQL Server
+end;
+```

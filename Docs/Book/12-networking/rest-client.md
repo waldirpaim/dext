@@ -51,6 +51,21 @@ Client.Delete('/resource');
 Client.Patch('/resource');
 ```
 
+#### Builder Mode (`Request`)
+
+While direct methods like `Get`, `Post`, etc., are ideal for quick requests, Dext provides the `.Request` portal for complex constructions. This separates the *execution intent* from the *request configuration*.
+
+```pascal
+Client.Request
+  .Post('/users')
+  .Header('X-Custom', 'Value')
+  .QueryParam('debug', 'true')
+  .Body(LMyDto)
+  .Execute<TResponse>
+  .OnComplete(...)
+  .Start;
+```
+
 ### Adding Headers and Query Parameters
 
 You can easily add headers and query parameters using the builder pattern:
@@ -98,9 +113,52 @@ Client.Post('/upload')
   .Start;
 ```
 
+#### Record and Collection Support
+
+Dext REST Client natively supports **records** and **arrays of records** as DTOs, eliminating the need to manually manage memory for simple objects.
+
+```pascal
+type
+  TUserRecord = record
+    Id: Integer;
+    Name: string;
+  end;
+
+var
+  LUser: TUserRecord;
+begin
+  // Send a record
+  Client.Post<TUserRecord>('/users', LUser).Start;
+  
+  // Send a list of records (TArray)
+  var LUsers: TArray<TUserRecord>;
+  Client.Request.Post('/users/batch')
+    .BodyArray<TUserRecord>(LUsers)
+    .Execute
+    .Start;
+end;
+```
+
 ## Handling Responses
 
 You can handle responses as raw strings, streams, or typed objects.
+
+### Success Verification
+
+The `IRestResponse` provides the `IsSuccess` property to quickly check if the status code is within the success range (200-299).
+
+```pascal
+Client.Get('/users/1')
+  .OnComplete(
+    procedure(Res: IRestResponse)
+    begin
+      if Res.IsSuccess then
+        Writeln('Operation successful!')
+      else
+        Writeln('Failed: ', Res.StatusCode);
+    end)
+  .Start;
+```
 
 ### Typed Responses (Deserialization)
 

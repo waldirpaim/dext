@@ -42,7 +42,9 @@ type
     function AddProvider(const AProvider: ILoggerProvider): ILoggingBuilder;
     function SetMinimumLevel(ALevel: TLogLevel): ILoggingBuilder;
     function AddConsole: ILoggingBuilder;
+    function AddFile(const AFileName: string; AMaxFileSizeMB: Integer = 0; ARollDaily: Boolean = False): ILoggingBuilder;
     function AddTelemetry: ILoggingBuilder;
+    function AddAsync(ACapacityPowerOfTwo: Integer = 16): ILoggingBuilder;
   end;
 
   /// <summary>
@@ -60,6 +62,8 @@ uses
   System.Math,
   Dext.Collections,
   Dext.Logging.Console,
+  Dext.Logging.Sinks,
+  Dext.Logging.Async,
   Dext.Logging.Telemetry;
 
 type
@@ -77,8 +81,11 @@ type
   private
     FServices: IServiceCollection;
     FProviders: IList<ILoggerProvider>;
+    FSinks: IList<ILogSink>;
     FMinLevel: TLogLevel;
     FTelemetryEnabled: Boolean;
+    FAsync: Boolean;
+    FAsyncCapacity: Integer;
   public
     constructor Create(AServices: IServiceCollection);
     destructor Destroy; override;
@@ -87,11 +94,16 @@ type
     function AddProvider(const AProvider: ILoggerProvider): ILoggingBuilder;
     function SetMinimumLevel(ALevel: TLogLevel): ILoggingBuilder;
     function AddConsole: ILoggingBuilder;
+    function AddFile(const AFileName: string; AMaxFileSizeMB: Integer = 0; ARollDaily: Boolean = False): ILoggingBuilder;
     function AddTelemetry: ILoggingBuilder;
+    function AddAsync(ACapacityPowerOfTwo: Integer = 16): ILoggingBuilder;
     
     function ExtractProviders: IList<ILoggerProvider>;
+    function ExtractSinks: IList<ILogSink>;
     function GetMinLevel: TLogLevel;
     function GetTelemetryEnabled: Boolean;
+    function IsAsync: Boolean;
+    function GetAsyncCapacity: Integer;
   end;
 
 { TLoggerFactoryOwner }
@@ -120,13 +132,17 @@ begin
   inherited Create;
   FServices := AServices;
   FProviders := TCollections.CreateList<ILoggerProvider>;
+  FSinks := TCollections.CreateList<ILogSink>;
   FMinLevel := TLogLevel.Information;
   FTelemetryEnabled := False;
+  FAsync := False;
+  FAsyncCapacity := 16;
 end;
 
 destructor TLoggingBuilder.Destroy;
 begin
   FProviders := nil;
+  FSinks := nil;
   inherited;
 end;
 
@@ -149,7 +165,20 @@ end;
 
 function TLoggingBuilder.AddConsole: ILoggingBuilder;
 begin
-  Result := AddProvider(TConsoleLoggerProvider.Create);
+  if FAsync then
+    FSinks.Add(TConsoleSink.Create)
+  else
+    AddProvider(TConsoleLoggerProvider.Create);
+  Result := Self;
+end;
+
+function TLoggingBuilder.AddFile(const AFileName: string; AMaxFileSizeMB: Integer; ARollDaily: Boolean): ILoggingBuilder;
+begin
+  if FAsync then
+    FSinks.Add(TFileSink.Create(AFileName, AMaxFileSizeMB, ARollDaily))
+  else
+    AddProvider(TFileLoggerProvider.Create(AFileName, AMaxFileSizeMB, ARollDaily));
+  Result := Self;
 end;
 
 function TLoggingBuilder.AddTelemetry: ILoggingBuilder;
@@ -158,10 +187,23 @@ begin
   Result := Self;
 end;
 
+function TLoggingBuilder.AddAsync(ACapacityPowerOfTwo: Integer): ILoggingBuilder;
+begin
+  FAsync := True;
+  FAsyncCapacity := ACapacityPowerOfTwo;
+  Result := Self;
+end;
+
 function TLoggingBuilder.ExtractProviders: IList<ILoggerProvider>;
 begin
   Result := FProviders;
   FProviders := TCollections.CreateList<ILoggerProvider>; 
+end;
+
+function TLoggingBuilder.ExtractSinks: IList<ILogSink>;
+begin
+  Result := FSinks;
+  FSinks := TCollections.CreateList<ILogSink>;
 end;
 
 function TLoggingBuilder.GetMinLevel: TLogLevel;
@@ -172,6 +214,16 @@ end;
 function TLoggingBuilder.GetTelemetryEnabled: Boolean;
 begin
   Result := FTelemetryEnabled;
+end;
+
+function TLoggingBuilder.IsAsync: Boolean;
+begin
+  Result := FAsync;
+end;
+
+function TLoggingBuilder.GetAsyncCapacity: Integer;
+begin
+  Result := FAsyncCapacity;
 end;
 
 { TServiceCollectionLoggingExtensions }
@@ -197,61 +249,91 @@ begin
   LProvidersList := LBuilderObj.ExtractProviders;
   LProvidersArray := LProvidersList.ToArray;
   LProvidersList := nil;
+  
   LMinLevel := LBuilderObj.GetMinLevel;
   LTelemetryEnabled := LBuilderObj.GetTelemetryEnabled;
   
   // Capture state for factory delegate
   CapturedMinLevel := LMinLevel;
   CapturedTelemetryEnabled := LTelemetryEnabled;
-  // Dynamic arrays are managed types, so they are safely captured by value (copy-on-write reference)
   CapturedProviders := LProvidersArray;
 
-  // 1. Register Owner (as concrete singleton Class) to ensure lifecycle destruction
-  AServices.AddSingleton(
-    TServiceType.FromClass(TLoggerFactoryOwner),
-    TClass(nil),
-    function(Provider: IServiceProvider): TObject
-    var
-      Factory: TLoggerFactory;
-      Owner: TLoggerFactoryOwner;
-      P: ILoggerProvider;
-      L: ILogger;
-    begin
-      Factory := TLoggerFactory.Create;
-      try
-        Factory.SetMinimumLevel(CapturedMinLevel);
-        for P in CapturedProviders do
-          Factory.AddProvider(P);
-          
-        // If Telemetry is enabled, start the bridge
+  if LBuilderObj.IsAsync then
+  begin
+    var CapturedSinks := LBuilderObj.ExtractSinks.ToArray;
+    // Register Async Factory
+    AServices.AddSingleton(
+      TServiceType.FromInterface(ILoggerFactory),
+      TClass(nil),
+      function(Provider: IServiceProvider): TObject
+      var
+        AsyncFactory: TAsyncLoggerFactory;
+        S: ILogSink;
+        L: ILogger;
+      begin
+        AsyncFactory := TAsyncLoggerFactory.Create;
+        AsyncFactory.SetMinimumLevel(CapturedMinLevel);
+        for S in CapturedSinks do
+          AsyncFactory.AddSink(S);
+
         if CapturedTelemetryEnabled then
         begin
-           L := Factory.CreateLogger('Telemetry');
+           L := AsyncFactory.CreateLogger('Telemetry');
            TDiagnosticSource.Instance.Subscribe(TLoggingTelemetryObserver.Create(L));
         end;
-        
-        Owner := TLoggerFactoryOwner.Create(Factory);
-        Result := Owner;
-      except
-        Factory.Free;
-        raise;
-      end;
-    end
-  );
+        Result := AsyncFactory;
+      end
+    );
+  end
+  else
+  begin
+    // 1. Register Owner (as concrete singleton Class) to ensure lifecycle destruction
+    AServices.AddSingleton(
+      TServiceType.FromClass(TLoggerFactoryOwner),
+      TClass(nil),
+      function(Provider: IServiceProvider): TObject
+      var
+        Factory: TLoggerFactory;
+        Owner: TLoggerFactoryOwner;
+        P: ILoggerProvider;
+        L: ILogger;
+      begin
+        Factory := TLoggerFactory.Create;
+        try
+          Factory.SetMinimumLevel(CapturedMinLevel);
+          for P in CapturedProviders do
+            Factory.AddProvider(P);
+            
+          // If Telemetry is enabled, start the bridge
+          if CapturedTelemetryEnabled then
+          begin
+             L := Factory.CreateLogger('Telemetry');
+             TDiagnosticSource.Instance.Subscribe(TLoggingTelemetryObserver.Create(L));
+          end;
+          
+          Owner := TLoggerFactoryOwner.Create(Factory);
+          Result := Owner;
+        except
+          Factory.Free;
+          raise;
+        end;
+      end
+    );
 
-  // 2. Register ILoggerFactory to resolve via Owner
-  AServices.AddSingleton(
-    TServiceType.FromInterface(ILoggerFactory),
-    TClass(nil),
-    function(Provider: IServiceProvider): TObject
-    var
-      Owner: TLoggerFactoryOwner;
-    begin
-      // Resolve owner (guaranteed to exist and be managed)
-      Owner := Provider.GetService(TServiceType.FromClass(TLoggerFactoryOwner)) as TLoggerFactoryOwner;
-      Result := Owner.Factory;
-    end
-  );
+    // 2. Register ILoggerFactory to resolve via Owner
+    AServices.AddSingleton(
+      TServiceType.FromInterface(ILoggerFactory),
+      TClass(nil),
+      function(Provider: IServiceProvider): TObject
+      var
+        Owner: TLoggerFactoryOwner;
+      begin
+        // Resolve owner (guaranteed to exist and be managed)
+        Owner := Provider.GetService(TServiceType.FromClass(TLoggerFactoryOwner)) as TLoggerFactoryOwner;
+        Result := Owner.Factory;
+      end
+    );
+  end;
     
   // Register generic ILogger (default) - Resolve from ILoggerFactory
   AServices.AddSingleton(TServiceType.FromInterface(ILogger), TClass(nil),

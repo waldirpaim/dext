@@ -107,6 +107,25 @@ Drivers suportados:
 - `.UsePostgreSQL('connection-string')`
 - `.UseMySQL('connection-string')`
 - `.UseSQLServer('connection-string')`
+- `.UseFirebird('connection-string')`
+- `.UseOracle('connection-string')`
+
+### 3.1. Configuração de Dialeto
+
+O Dext tenta inferir o dialeto SQL automaticamente baseado no DriverID da conexão FireDAC. Se você estiver usando uma Connection String customizada ou se a detecção falhar, você pode forçar o dialeto manualmente:
+
+```pascal
+procedure TStartup.ConfigureDatabase(Options: TDbContextOptions);
+begin
+  Options
+    .UseSQLServer(Configuration.Get('ConnectionStrings:Default'))
+    .UseDialect(ddSQLServer) // Opcional se a detecção falhar
+    .WithPooling(True);
+end;
+```
+
+> [!TIP]
+> Para o **SQL Server**, o Dext utiliza por padrão o `TSQLServerDialect` que é otimizado para versões 2012+. Se você estiver em uma versão legada (2008), o comportamento de paginação (Skip/Take) pode exigir atenção especial.
 
 > [!WARNING]
 > **Connection Pooling**: APIs Web são multithreaded. **SEMPRE** habilite pooling via `.WithPooling(True)` para evitar exaustão de conexões.

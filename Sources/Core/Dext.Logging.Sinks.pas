@@ -27,20 +27,51 @@ type
     procedure Flush;
   end;
 
-  /// <summary>
-  ///   Sink that writes to a file.
-  /// </summary>
   TFileSink = class(TInterfacedObject, ILogSink)
   private
     FFileName: string;
+    FMaxFileSize: Int64;
+    FRollDaily: Boolean;
+    FCurrentDate: TDateTime;
     FBuffer: TStringBuilder;
     FLock: TObject;
     procedure FlushInternal;
+    procedure CheckRolling;
+    function GetActualFileName: string;
   public
-    constructor Create(const AFileName: string);
+    constructor Create(const AFileName: string; AMaxFileSizeMB: Integer = 0; ARollDaily: Boolean = False);
     destructor Destroy; override;
     procedure Emit(const Entry: TLogEntry);
     procedure Flush;
+  end;
+
+  /// <summary>
+  ///   Logger that writes to a file using TFileSink.
+  /// </summary>
+  TFileLogger = class(TAbstractLogger)
+  private
+    FCategoryName: string;
+    FSink: ILogSink;
+  protected
+    procedure Log(ALevel: TLogLevel; const AMessage: string; const AArgs: array of const); override;
+    procedure Log(ALevel: TLogLevel; const AException: Exception; const AMessage: string; const AArgs: array of const); override;
+    function IsEnabled(ALevel: TLogLevel): Boolean; override;
+    function BeginScope(const AMessage: string; const AArgs: array of const): IDisposable; override;
+    function BeginScope(const AState: TObject): IDisposable; override;
+  public
+    constructor Create(const ACategoryName: string; const ASink: ILogSink);
+  end;
+
+  /// <summary>
+  ///   Provider for file logging.
+  /// </summary>
+  TFileLoggerProvider = class(TInterfacedObject, ILoggerProvider)
+  private
+    FSink: ILogSink;
+  public
+    constructor Create(const AFileName: string; AMaxFileSizeMB: Integer = 0; ARollDaily: Boolean = False);
+    function CreateLogger(const ACategoryName: string): ILogger;
+    procedure Dispose;
   end;
 
 implementation
@@ -86,10 +117,13 @@ end;
 
 { TFileSink }
 
-constructor TFileSink.Create(const AFileName: string);
+constructor TFileSink.Create(const AFileName: string; AMaxFileSizeMB: Integer; ARollDaily: Boolean);
 begin
   inherited Create;
   FFileName := AFileName;
+  FMaxFileSize := Int64(AMaxFileSizeMB) * 1024 * 1024;
+  FRollDaily := ARollDaily;
+  FCurrentDate := Int(Now);
   FBuffer := TStringBuilder.Create;
   FLock := TObject.Create;
   
@@ -103,6 +137,80 @@ begin
   FBuffer.Free;
   FLock.Free;
   inherited;
+end;
+
+function TFileSink.GetActualFileName: string;
+begin
+  Result := FFileName;
+end;
+
+procedure TFileSink.CheckRolling;
+var
+  LBaseDir, LBaseName, LExt, LNewName: string;
+  LDate: TDateTime;
+  LSize: Int64;
+  I: Integer;
+begin
+  if not TFile.Exists(FFileName) then Exit;
+
+  // 1. Daily Rolling
+  if FRollDaily then
+  begin
+    LDate := Int(Now);
+    if LDate <> FCurrentDate then
+    begin
+      LBaseDir := TPath.GetDirectoryName(FFileName);
+      LBaseName := TPath.GetFileNameWithoutExtension(FFileName);
+      LExt := TPath.GetExtension(FFileName);
+      LNewName := TPath.Combine(LBaseDir, Format('%s-%s%s', [LBaseName, FormatDateTime('yyyy-mm-dd', FCurrentDate), LExt]));
+      
+      try
+        if not TFile.Exists(LNewName) then
+          TFile.Move(FFileName, LNewName);
+        FCurrentDate := LDate;
+      except
+        // ignore move errors
+      end;
+    end;
+  end;
+
+  // 2. Size Rolling
+  if (FMaxFileSize > 0) then
+  begin
+    LSize := 0;
+    try
+      // Simple way to get size
+      var LFileStream := TFileStream.Create(FFileName, fmOpenRead or fmShareDenyNone);
+      try
+        LSize := LFileStream.Size;
+      finally
+        LFileStream.Free;
+      end;
+    except
+      LSize := 0;
+    end;
+
+    if LSize >= FMaxFileSize then
+    begin
+      LBaseDir := TPath.GetDirectoryName(FFileName);
+      LBaseName := TPath.GetFileNameWithoutExtension(FFileName);
+      LExt := TPath.GetExtension(FFileName);
+      
+      for I := 1 to 999 do
+      begin
+        LNewName := TPath.Combine(LBaseDir, Format('%s.%3.3d%s', [LBaseName, I, LExt]));
+        if not TFile.Exists(LNewName) then
+        begin
+          try
+            TFile.Move(FFileName, LNewName);
+            Break;
+          except
+            // next try
+          end;
+        end;
+      end;
+    end;
+  end;
 end;
 
 procedure TFileSink.Emit(const Entry: TLogEntry);
@@ -146,11 +254,79 @@ begin
   if FBuffer.Length = 0 then Exit;
   
   try
+    CheckRolling;
     TFile.AppendAllText(FFileName, FBuffer.ToString, TEncoding.UTF8);
     FBuffer.Clear;
   except
     // ignore file errors
   end;
+end;
+
+{ TFileLogger }
+
+constructor TFileLogger.Create(const ACategoryName: string; const ASink: ILogSink);
+begin
+  inherited Create;
+  FCategoryName := ACategoryName;
+  FSink := ASink;
+end;
+
+function TFileLogger.IsEnabled(ALevel: TLogLevel): Boolean;
+begin
+  Result := ALevel <> TLogLevel.None;
+end;
+
+procedure TFileLogger.Log(ALevel: TLogLevel; const AMessage: string; const AArgs: array of const);
+var
+  LEntry: TLogEntry;
+begin
+  if not IsEnabled(ALevel) then Exit;
+
+  LEntry := Default(TLogEntry);
+  LEntry.TimeStamp := Now;
+  LEntry.Level := ALevel;
+  LEntry.FormattedMessage := TLogFormatter.FormatMessage(AMessage, AArgs);
+  
+  FSink.Emit(LEntry);
+end;
+
+procedure TFileLogger.Log(ALevel: TLogLevel; const AException: Exception; const AMessage: string; const AArgs: array of const);
+begin
+  if not IsEnabled(ALevel) then Exit;
+  if AException <> nil then
+    Log(ALevel, AMessage + ' [Ex: ' + AException.Message + ']', AArgs)
+  else
+    Log(ALevel, AMessage, AArgs);
+end;
+
+function TFileLogger.BeginScope(const AMessage: string; const AArgs: array of const): IDisposable;
+begin
+  Result := TNullDisposable.Create;
+end;
+
+function TFileLogger.BeginScope(const AState: TObject): IDisposable;
+begin
+  Result := TNullDisposable.Create;
+end;
+
+{ TFileLoggerProvider }
+
+constructor TFileLoggerProvider.Create(const AFileName: string; AMaxFileSizeMB: Integer; ARollDaily: Boolean);
+begin
+  inherited Create;
+  FSink := TFileSink.Create(AFileName, AMaxFileSizeMB, ARollDaily);
+end;
+
+function TFileLoggerProvider.CreateLogger(const ACategoryName: string): ILogger;
+begin
+  Result := TFileLogger.Create(ACategoryName, FSink);
+end;
+
+procedure TFileLoggerProvider.Dispose;
+begin
+  if FSink <> nil then
+    FSink.Flush;
+  FSink := nil;
 end;
 
 end.

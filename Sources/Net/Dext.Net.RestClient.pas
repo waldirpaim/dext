@@ -67,10 +67,15 @@ uses
     /// <summary>Returns all response headers as a TNetHeaders array.</summary>
     function GetHeaders: TNetHeaders;
     
+    /// <summary>Returns true if the status code is in the 2xx range (200-299).</summary>
+    function GetIsSuccess: Boolean;
+    
     property StatusCode: Integer read GetStatusCode;
     property StatusText: string read GetStatusText;
     property ContentStream: TStream read GetContentStream;
     property ContentString: string read GetContentString;
+    /// <summary>Returns true if the status code is in the 2xx range (200-299).</summary>
+    property IsSuccess: Boolean read GetIsSuccess;
   end;
 
   /// <summary>Represents an HTTP response whose content is automatically deserialized to type T.</summary>
@@ -96,6 +101,7 @@ uses
     function GetContentString: string;
     function GetHeader(const AName: string): string;
     function GetHeaders: TNetHeaders;
+    function GetIsSuccess: Boolean;
   public
     constructor Create(AStatusCode: Integer; const AStatusText: string; AStream: TStream;
       const AHeaders: TNetHeaders = nil);
@@ -226,8 +232,11 @@ uses
     class function Create(const ABaseUrl: string = ''): TRestClient; static;
     
     // Configuração Fluída
+    /// <summary>Sets the base URL for all subsequent requests.</summary>
     function BaseUrl(const AValue: string): TRestClient;
+    /// <summary>Sets the connection/request timeout in milliseconds.</summary>
     function Timeout(AValue: Integer): TRestClient;
+    /// <summary>Sets the maximum number of retry attempts for failed requests.</summary>
     function Retry(AValue: Integer): TRestClient;
     /// <summary>Configures Bearer (JWT) authentication for requests.</summary>
     function BearerToken(const AToken: string): TRestClient;
@@ -245,8 +254,11 @@ uses
     /// <param name="AScope">Optional space-separated list of requested scopes.</param>
     function OAuth2ClientCredentials(const ATokenUrl, AClientId, AClientSecret: string;
       const AScope: string = ''): TRestClient;
+    /// <summary>Configures a custom authentication provider.</summary>
     function Auth(AProvider: IAuthenticationProvider): TRestClient;
+    /// <summary>Adds a default header that will be sent with every request from this client.</summary>
     function Header(const AName, AValue: string): TRestClient;
+    /// <summary>Sets the default Content-Type for this client.</summary>
     function ContentType(AValue: TDextContentType): TRestClient;
 
     // === ContentType shortcuts ===
@@ -267,13 +279,14 @@ uses
     /// <summary>Executes an asynchronous GET and returns the raw response.</summary>
     function Get(const AEndpoint: string = ''): TAsyncBuilder<IRestResponse>; overload;
     /// <summary>Executes an asynchronous GET and automatically deserializes the JSON to type T.</summary>
-    function Get<T: class>(const AEndpoint: string = ''): TAsyncBuilder<T>; overload;
+    function Get<T>(const AEndpoint: string = ''): TAsyncBuilder<T>; overload;
     
-    /// <summary>Executes an asynchronous POST.</summary>
+    /// <summary>Executes an asynchronous POST to the base URL.</summary>
     function Post(const AEndpoint: string = ''): TAsyncBuilder<IRestResponse>; overload;
+    /// <summary>Executes an asynchronous POST with a raw stream body.</summary>
     function Post(const AEndpoint: string; const ABody: TStream): TAsyncBuilder<IRestResponse>; overload;
-    /// <summary>Executes a POST sending an object serialized as JSON and awaits a typed response.</summary>
-    function Post<TRes: class>(const AEndpoint: string; const ABody: TRes): TAsyncBuilder<IRestResponse<TRes>>; overload;
+    /// <summary>Executes a POST sending a payload (class or record) serialized as JSON and awaits a typed response.</summary>
+    function Post<TRes>(const AEndpoint: string; const ABody: TRes): TAsyncBuilder<IRestResponse<TRes>>; overload;
     /// <summary>
     ///   Executes an asynchronous POST sending a raw JSON string.
     ///   Encapsulates stream creation and UTF-8 encoding internally.
@@ -285,10 +298,14 @@ uses
     /// </summary>
     function PostJson(const AEndpoint, APayload: string): TAsyncBuilder<IRestResponse>; overload;
 
+    /// <summary>Executes an asynchronous PUT to the base URL.</summary>
     function Put(const AEndpoint: string = ''): TAsyncBuilder<IRestResponse>; overload;
+    /// <summary>Executes an asynchronous PUT with a raw stream body.</summary>
     function Put(const AEndpoint: string; const ABody: TStream): TAsyncBuilder<IRestResponse>; overload;
-    function Put<TRes: class>(const AEndpoint: string; const ABody: TRes): TAsyncBuilder<IRestResponse<TRes>>; overload;
-    function Put<T: class>(const AEndpoint: string = ''): TAsyncBuilder<T>; overload;
+    /// <summary>Executes a PUT sending a payload (class or record) serialized as JSON and awaits a typed response.</summary>
+    function Put<TRes>(const AEndpoint: string; const ABody: TRes): TAsyncBuilder<IRestResponse<TRes>>; overload;
+    /// <summary>Executes an asynchronous PUT and automatically deserializes the JSON response to type T.</summary>
+    function Put<T>(const AEndpoint: string = ''): TAsyncBuilder<T>; overload;
     /// <summary>
     ///   Executes an asynchronous PUT sending a raw JSON string.
     ///   Encapsulates stream creation and UTF-8 encoding internally.
@@ -300,8 +317,10 @@ uses
     /// </summary>
     function PutJson(const AEndpoint, APayload: string): TAsyncBuilder<IRestResponse>; overload;
 
+    /// <summary>Executes an asynchronous DELETE request.</summary>
     function Delete(const AEndpoint: string = ''): TAsyncBuilder<IRestResponse>; overload;
-    function Delete<T: class>(const AEndpoint: string = ''): TAsyncBuilder<T>; overload;
+    /// <summary>Executes an asynchronous DELETE and automatically deserializes the JSON response to type T.</summary>
+    function Delete<T>(const AEndpoint: string = ''): TAsyncBuilder<T>; overload;
     
     function ExecuteAsync(AMethod: TDextHttpMethod; const AEndpoint: string; 
       const ABody: TStream = nil; AOwnsBody: Boolean = False;
@@ -397,6 +416,11 @@ end;
 function TRestResponse.GetStatusText: string;
 begin
   Result := FStatusText;
+end;
+
+function TRestResponse.GetIsSuccess: Boolean;
+begin
+  Result := (FStatusCode >= 200) and (FStatusCode < 300);
 end;
 
 { TRestResponse<T> }

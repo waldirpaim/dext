@@ -107,6 +107,25 @@ Supported database drivers:
 - `.UsePostgreSQL('connection-string')`
 - `.UseMySQL('connection-string')`
 - `.UseSQLServer('connection-string')`
+- `.UseFirebird('connection-string')`
+- `.UseOracle('connection-string')`
+
+### 3.1. Dialect Configuration
+
+Dext attempts to infer the SQL dialect automatically based on the FireDAC DriverID. If you are using a custom Connection String or if detection fails, you can force the dialect manually:
+
+```pascal
+procedure TStartup.ConfigureDatabase(Options: TDbContextOptions);
+begin
+  Options
+    .UseSQLServer(Configuration.Get('ConnectionStrings:Default'))
+    .UseDialect(ddSQLServer) // Optional if detection fails
+    .WithPooling(True);
+end;
+```
+
+> [!TIP]
+> For **SQL Server**, Dext uses `TSQLServerDialect` by default, which is optimized for 2012+ versions. If you are using a legacy version (2008), paging behavior (Skip/Take) may require special attention.
 
 > [!WARNING]
 > **Connection Pooling**: Web APIs are multithreaded. **ALWAYS** enable pooling via `.WithPooling(True)` to avoid connection exhaustion.
