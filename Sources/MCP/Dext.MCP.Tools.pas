@@ -27,7 +27,7 @@
 {      .Description('Does something useful')                                }
 {      .Param('query', 'Search term', ptString)                             }
 {      .OnCall(function(Args: TJSONObject): string                          }
-{        begin Result := '{"ok":true}'; end);                               }
+{        begin Result := JsonSuccessResponse; end);                          }
 {                                                                           }
 {  Rich result builder (preferred for new tools):                           }
 {    Server.Tool('my-tool')                                                 }
