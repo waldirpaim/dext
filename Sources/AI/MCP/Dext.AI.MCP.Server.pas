@@ -214,8 +214,7 @@ implementation
 
 {$IFDEF MSWINDOWS}
 uses
-  Winapi.Windows,
-  System.Rtti;
+  Winapi.Windows;
 {$ENDIF}
 
 // ---------------------------------------------------------------------------
