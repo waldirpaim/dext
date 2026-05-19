@@ -92,72 +92,85 @@ function hub() {
 
 
 function connectSSE() {
-    console.log("Starting SSE Connection...");
+    console.log("Starting SSE Connection (Legacy)...");
     if (window.dashboardSSE) window.dashboardSSE.close();
     window.dashboardSSE = new EventSource("/events");
     var evtSource = window.dashboardSSE;
 
-    evtSource.onopen = function () { console.log("SSE Connection Opened (Global)"); };
+    evtSource.onopen = function () { console.log("SSE Connection Opened (Legacy)"); };
     evtSource.onerror = function (e) {
         if (e.target.readyState == EventSource.CLOSED) {
             console.log("SSE Closed. Reconnecting in 5s...");
             setTimeout(connectSSE, 5000);
         }
     };
-    // Generic message listener removed (too verbose)
 
-    evtSource.addEventListener("run_start", function (e) {
-        var d = JSON.parse(e.data);
-        // Payload has 'totalTests', JS expects 'total'
-        var total = d.total || d.totalTests || 0;
-        trState = { total: total, current: 0, passed: 0, failed: 0, open: true };
-        updateTestProgress();
-    });
-
-    evtSource.addEventListener("test_start", function (e) {
-        // var d = JSON.parse(e.data);
-    });
-
-    evtSource.addEventListener("test_complete", function (e) {
-        var info = JSON.parse(e.data);
-        trState.current++;
-
-        // Derive passed boolean from status string
-        var isPassed = (info.status === "Passed");
-        if (isPassed) trState.passed++; else trState.failed++;
-
-        // Log equivalent - MUST match format expected by updateTestState (Fixture.Test)
-        var testFullName = (info.fixture ? info.fixture + "." : "") + info.test;
-        var msg = (isPassed ? "Passed" : "Failed") + " Test: " + testFullName;
-
-        var lvl = isPassed ? "Info" : "Error";
-        processLog(lvl, msg);
-
-        updateTestProgress();
-    });
-
-    evtSource.addEventListener("run_complete", function (e) {
-        trState.open = false;
-        updateTestProgress(true);
+    ["run_start", "test_start", "test_complete", "run_complete", "log"].forEach(function(evt) {
+        evtSource.addEventListener(evt, function(e) {
+            handleSseEvent(evt, e.data);
+        });
     });
 }
 
-function processLog(level, message) {
+function handleSseEvent(eventName, data) {
+    if (eventName === "log") {
+        try {
+            var logObj = JSON.parse(data);
+            processLog(logObj.lvl || "Info", logObj.msg || data, logObj.ts);
+        } catch(e) {
+            processLog("Info", data);
+        }
+        return;
+    }
+
+    if (eventName === "run_start") {
+        var d = JSON.parse(data);
+        var total = d.total || d.totalTests || 0;
+        trState = { total: total, current: 0, passed: 0, failed: 0, open: true };
+        updateTestProgress();
+    } else if (eventName === "test_complete") {
+        var info = JSON.parse(data);
+        trState.current++;
+        var isPassed = (info.status === "Passed");
+        if (isPassed) trState.passed++; else trState.failed++;
+        
+        var testFullName = (info.fixture ? info.fixture + "." : "") + info.test;
+        var msg = (isPassed ? "Passed" : "Failed") + " Test: " + testFullName;
+        processLog(isPassed ? "Info" : "Error", msg);
+        updateTestProgress();
+    } else if (eventName === "run_complete") {
+
+        trState.open = false;
+        updateTestProgress(true);
+    }
+
+    // Update Test Tree (New Feature)
+    if (eventName !== "log") {
+        updateTestState(eventName, JSON.parse(data));
+    }
+}
+
+
+
+function processLog(level, message, timestamp) {
     var logs1 = document.getElementById("logs");
     var logs2 = document.getElementById("logs-full");
-    var t = new Date().toLocaleTimeString();
+    var t = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
     var x = level.toLowerCase().indexOf("error") >= 0 ? "log-e" : level.toLowerCase().indexOf("warn") >= 0 ? "log-w" : "log-i";
 
     var html = "<div class=\"log\"><span class=\"log-t\">[" + t + "]</span><span class=\"" + x + "\">" + message + "</span></div>";
 
     if (logs1) {
         logs1.innerHTML += html;
+        if (logs1.children.length > 100) logs1.removeChild(logs1.firstChild);
         logs1.scrollTop = logs1.scrollHeight;
     }
     if (logs2) {
         logs2.innerHTML += html;
+        if (logs2.children.length > 500) logs2.removeChild(logs2.firstChild);
         logs2.scrollTop = logs2.scrollHeight;
     }
+
 
     // --- Test Runner Progress Parsing (For SignalR/Log Mode) ---
     // If we are in SSE mode, this parsing is redundant but harmless as logs from SSE are synthetic here.
@@ -188,29 +201,12 @@ function processLog(level, message) {
 }
 
 function updateTestProgress(done) {
-    // We need a UI element for this.
-    // For now, let's inject a status card into the Dashboard if not exists, or update it.
     var el = document.getElementById("tr-status");
-    if (!el) {
-        // Create card dynamically in the first grid
-        var grid = document.querySelector(".cg");
-        if (grid) {
-            el = document.createElement("div");
-            el.id = "tr-status";
-            el.className = "cd";
-            el.innerHTML = `
-                <div class="cd-hd"><span class="cd-tt">Test Runner</span>
-                    <div class="cd-ic"><span class="ms material-symbols-outlined">play_circle</span></div>
-                </div>
-                <div class="cd-val" id="tr-main">Ready</div>
-                <div class="cd-sub" id="tr-sub">Waiting for execution...</div>
-                <div class="cd-bar" style="margin-top:10px;height:4px;background:#333;border-radius:2px;overflow:hidden">
-                    <div id="tr-bar" style="width:0%;height:100%;background:var(--primary);transition:width 0.3s"></div>
-                </div>
-            `;
-            grid.insertBefore(el, grid.firstChild);
-        } else return;
-    }
+    if (!el) return;
+
+    if (trState.open || done) el.style.display = "flex";
+    else el.style.display = "none";
+
 
     var pct = trState.total > 0 ? (trState.current / trState.total) * 100 : 0;
     if (pct > 100) pct = 100;
@@ -579,30 +575,44 @@ var testSuite = {};
 var currentTestDetail = null;
 
 // Debug logging for parser
-function updateTestState(msg) {
-    if (msg.indexOf("Run Started") >= 0) {
-        console.log("Resetting testSuite (Run Started detected)");
-        testSuite = {};
-        renderTestTree();
-        return;
+function updateTestState(evt, data) {
+    var fixtureName = "", testName = "", status = "", msg = "";
+
+    // Handle structured events (S23)
+    if (typeof evt === 'string' && data && typeof data === 'object') {
+        if (evt === 'run_start') {
+            testSuite = {}; renderTestTree(); return;
+        }
+        fixtureName = data.fixture || "";
+        testName = data.test || "";
+        msg = data.message || "";
+        if (evt === 'test_start') status = 'running';
+        else if (evt === 'test_complete') {
+            status = data.status ? data.status.toLowerCase() : 'none';
+        }
+    } 
+    // Handle legacy log strings (SignalR fallback)
+    else if (typeof evt === 'string') {
+        var log = evt;
+        if (log.indexOf("Run Started") >= 0) {
+            testSuite = {}; renderTestTree(); return;
+        }
+        if (log.indexOf("Started Test:") >= 0) {
+            var parts = log.split(":")[1].trim().split(".");
+            if (parts.length >= 2) { fixtureName = parts[0]; testName = parts.slice(1).join("."); status = "running"; }
+        } else if (log.indexOf("Passed Test:") >= 0) {
+            var parts = log.split(":")[1].trim().split(" ")[0].split(".");
+            if (parts.length >= 2) { fixtureName = parts[0]; testName = parts.slice(1).join("."); status = "passed"; }
+        } else if (log.indexOf("Failed Test:") >= 0) {
+            var parts = log.split(":")[1].trim().split(" ")[0].split(".");
+            if (parts.length >= 2) { fixtureName = parts[0]; testName = parts.slice(1).join("."); status = "failed"; }
+        } else if (log.indexOf("Skipped Test:") >= 0) {
+            var parts = log.split(":")[1].trim().split(" ")[0].split(".");
+            if (parts.length >= 2) { fixtureName = parts[0]; testName = parts.slice(1).join("."); status = "skipped"; }
+        }
+        msg = log;
     }
 
-    var fixtureName = "", testName = "";
-    var status = "";
-
-    if (msg.indexOf("Started Test:") >= 0) {
-        var parts = msg.split(":")[1].trim().split(".");
-        if (parts.length >= 2) { fixtureName = parts[0]; testName = parts.slice(1).join("."); status = "running"; }
-    } else if (msg.indexOf("Passed Test:") >= 0) {
-        var parts = msg.split(":")[1].trim().split(" ")[0].split("."); // Split space to handle potential extra text
-        if (parts.length >= 2) { fixtureName = parts[0]; testName = parts.slice(1).join("."); status = "passed"; }
-    } else if (msg.indexOf("Failed Test:") >= 0) {
-        var parts = msg.split(":")[1].trim().split(" ")[0].split(".");
-        if (parts.length >= 2) { fixtureName = parts[0]; testName = parts.slice(1).join("."); status = "failed"; }
-    } else if (msg.indexOf("Skipped Test:") >= 0) {
-        var parts = msg.split(":")[1].trim().split(" ")[0].split(".");
-        if (parts.length >= 2) { fixtureName = parts[0]; testName = parts.slice(1).join("."); status = "skipped"; }
-    }
 
     if (fixtureName && testName) {
         // console.log("Parsed:", fixtureName, testName, status);
@@ -610,7 +620,8 @@ function updateTestState(msg) {
         if (!testSuite[fixtureName].tests[testName]) testSuite[fixtureName].tests[testName] = { status: "none", logs: "" };
 
         testSuite[fixtureName].tests[testName].status = status;
-        testSuite[fixtureName].tests[testName].logs += msg + "\n";
+        testSuite[fixtureName].tests[testName].logs += (msg || (status + " test")) + "\n";
+
 
         if (status == "failed") testSuite[fixtureName].status = "failed";
 
@@ -1112,4 +1123,5 @@ function findTestResult(results, fixtureName, testName) {
 // ==================== Init ====================
 load();
 // hub(); // SignalR Disabled - forcing SSE
-connectSSE();
+// connectSSE(); // Now managed by DextSSE in index.html
+

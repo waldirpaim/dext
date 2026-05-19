@@ -1,4 +1,4 @@
-﻿
+
 unit Dext.Entity.DataSet;
 
 interface
@@ -25,7 +25,8 @@ uses
   Dext.Entity.Dialects,
   Dext.Entity.DataProvider,
   Dext.Entity.Mapping,
-  Dext.Json.Utf8;
+  Dext.Json.Utf8,
+  Dext.Specifications.Interfaces;
 
 type
   PBytes = ^TBytes;
@@ -105,6 +106,9 @@ type
     FVirtualIndex: TVector<Integer>;
     FOnPrepareField: TPrepareFieldEvent;
     FStringFieldKind: TStringFieldKind;
+    FFilterExpression: IExpression;
+
+    procedure SetFilterExpression(const Value: IExpression);
 
     function CompareObjectsInternal(A, B: TObject; const APropNames: TArray<string>; RttiType: TRttiType): Integer;
     function CreateNewEntity: TObject;
@@ -209,11 +213,13 @@ type
     procedure LoadFromUtf8Json(const ASpan: TByteSpan; AClass: TClass); overload;
     procedure LoadFromUtf8Json<T: class>(const ASpan: TByteSpan); overload;
     procedure Refresh;
+    procedure RefreshRecord;
     procedure SetFieldData(Field: TField; Buffer: Pointer); overload; override;
     procedure SetFieldData(Field: TField; Buffer: TValueBuffer); overload; override;
 
     property DbContext: TDbContext read FDbContext write FDbContext;
     property Items: IObjectList read FItems write SetItems;
+    property FilterExpression: IExpression read FFilterExpression write SetFilterExpression;
   published
     property Active stored IsActiveStored;
     property DataProvider: TEntityDataProvider read FDataProvider write SetDataProvider;
@@ -271,6 +277,8 @@ type
     constructor Create(ADataSet: TEntityDataSet);
   end;
 
+function TranslateExpressionToFilterText(const AExpression: IExpression): string;
+
 implementation
 
 uses
@@ -283,8 +291,8 @@ uses
   Dext.Entity.Core,
   Dext.Json,
   Dext.Specifications.Evaluator,
-  Dext.Specifications.Interfaces,
-  Dext.Specifications.Parser;
+  Dext.Specifications.Parser,
+  Dext.Specifications.Types;
 
 type
   TEntityBlobStream = class(TMemoryStream)
@@ -339,6 +347,12 @@ begin
     ApplyFilterAndSort(Filtered);
     Resync([]);
   end;
+end;
+
+procedure TEntityDataSet.RefreshRecord;
+begin
+  if Active and (FCurrentRec >= 0) then
+    Resync([]);
 end;
 
 function TEntityDataSet.GetProperty(const APropName: string): TRttiProperty;
@@ -1050,13 +1064,13 @@ begin
     if Assigned(FMasterLink) and (FMasterLink.DataSource <> nil) then
       SyncMasterDetail;
 
-    FVirtualIndex.Clear;
-    FCurrentRec := -1;
-
     // Salvar objeto p/ restaurar cursor
     CurrentObj := ATrackObj;
     if Assigned(FItems) and (CurrentObj = nil) and (FCurrentRec >= 0) and (FCurrentRec < FVirtualIndex.Count) then
       CurrentObj := FItems[FVirtualIndex[FCurrentRec]];
+
+    FVirtualIndex.Clear;
+    FCurrentRec := -1;
 
     if Assigned(FItems) and (FItems.Count > 0) then 
       ItemsCount := FItems.Count
@@ -1066,8 +1080,8 @@ begin
       ItemsCount := 0;
 
     try
-      Expr := nil;
-      if AFiltered and (Filter <> '') then
+      Expr := FFilterExpression;
+      if (Expr = nil) and AFiltered and (Filter <> '') then
         Expr := TStringExpressionParser.Parse(Filter);
     except
       if csDesigning in ComponentState then
@@ -1416,6 +1430,97 @@ begin
     FItems := Value;
     FOwnsItems := False; // Por padrão não somos donos de uma lista injetada via property
 
+    if Active then
+    begin
+      ApplyFilterAndSort;
+      Resync([]);
+    end;
+  end;
+end;
+
+function TranslateExpressionToFilterText(const AExpression: IExpression): string;
+var
+  Obj: TObject;
+  Bin: TBinaryExpression;
+  LogExpr: TLogicalExpression;
+  Un: TUnaryExpression;
+  Val: TValue;
+  OpStr: string;
+begin
+  Result := '';
+  if AExpression = nil then
+    Exit;
+
+  Obj := AExpression as TObject;
+  if Obj = nil then
+    Exit;
+
+  if Obj is TPropertyExpression then
+  begin
+    Result := TPropertyExpression(Obj).PropertyName;
+  end
+  else if Obj is TLiteralExpression then
+  begin
+    Val := TLiteralExpression(Obj).Value;
+    if Val.Kind in [tkChar, tkString, tkWChar, tkLString, tkUString] then
+      Result := QuotedStr(Val.ToString)
+    else
+      // Garante o uso do ponto como separador decimal para compatibilidade com o parser de filtros do TDataSet
+      Result := Val.ToString.Replace(',', '.');
+  end
+  else if Obj is TBinaryExpression then
+  begin
+    Bin := TBinaryExpression(Obj);
+    case Bin.BinaryOperator of
+      boEqual: OpStr := '=';
+      boNotEqual: OpStr := '<>';
+      boGreaterThan: OpStr := '>';
+      boGreaterThanOrEqual: OpStr := '>=';
+      boLessThan: OpStr := '<';
+      boLessThanOrEqual: OpStr := '<=';
+      boLike: OpStr := 'LIKE';
+      else OpStr := '=';
+    end;
+    Result := Format('(%s %s %s)', [TranslateExpressionToFilterText(Bin.Left), OpStr, TranslateExpressionToFilterText(Bin.Right)]);
+  end
+  else if Obj is TLogicalExpression then
+  begin
+    LogExpr := TLogicalExpression(Obj);
+    case LogExpr.LogicalOperator of
+      loAnd: OpStr := 'AND';
+      loOr: OpStr := 'OR';
+      else OpStr := 'AND';
+    end;
+    Result := Format('(%s %s %s)', [TranslateExpressionToFilterText(LogExpr.Left), OpStr, TranslateExpressionToFilterText(LogExpr.Right)]);
+  end
+  else if Obj is TUnaryExpression then
+  begin
+    Un := TUnaryExpression(Obj);
+    case Un.UnaryOperator of
+      uoNot:
+        Result := 'NOT (' + TranslateExpressionToFilterText(Un.Expression) + ')';
+      uoIsNull:
+        Result := Un.PropertyName + ' IS NULL';
+      uoIsNotNull:
+        Result := Un.PropertyName + ' IS NOT NULL';
+    end;
+  end;
+end;
+
+procedure TEntityDataSet.SetFilterExpression(const Value: IExpression);
+begin
+  if FFilterExpression <> Value then
+  begin
+    FFilterExpression := Value;
+    
+    // Automatically translate the expression to standard Filter text 
+    if FFilterExpression <> nil then
+      Filter := TranslateExpressionToFilterText(FFilterExpression)
+    else
+      Filter := '';
+      
+    Filtered := (FFilterExpression <> nil) or (Filter <> '');
+    
     if Active then
     begin
       ApplyFilterAndSort;
@@ -3393,6 +3498,8 @@ begin
           PBoolean(P)^ := PBoolean(Buffer)^;
         ftDateTime, ftDate, ftTime:
           PDateTime(P)^ := TimeStampToDateTime(MSecsToTimeStamp(Trunc(PDouble(Buffer)^)));
+        ftCurrency:
+          PCurrency(P)^ := PDouble(Buffer)^;
       else
         Move(Buffer^, P^, Field.DataSize);
       end;
@@ -3424,7 +3531,7 @@ begin
         ftFloat:
           V := PDouble(Buffer)^;
         ftCurrency:
-          V := PCurrency(Buffer)^;
+          V := Currency(PDouble(Buffer)^);
         ftBoolean:
           V := PBoolean(Buffer)^;
         ftDateTime, ftDate, ftTime:
@@ -3477,16 +3584,18 @@ begin
   begin
     FEntityDataSet.SyncMasterDetail;
     FEntityDataSet.ApplyFilterAndSort;
+    FEntityDataSet.Resync([]);
   end;
 end;
 
 procedure TEntityMasterDataLink.RecordChanged(Field: TField);
 begin
-  // Field = nil significa que o cursor mudou de posição no mestre
+  // Field = nil significa que o cursor mudou de posiÃ§Ã£o no mestre
   if (FEntityDataSet <> nil) and (Field = nil) then
   begin
     FEntityDataSet.SyncMasterDetail;
     FEntityDataSet.ApplyFilterAndSort;
+    FEntityDataSet.Resync([]);
   end;
 end;
 

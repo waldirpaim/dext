@@ -35,6 +35,8 @@ uses
   Dext.Http.Executor,
   Dext.Http.Request;
 
+
+
 type
   /// <summary>
   ///   Configures routes and endpoints for the Dext Dashboard.
@@ -886,12 +888,44 @@ begin
     procedure(Ctx: IHttpContext)
     var
       Body: string;
-      EventType: string;
-      JO: IDextJsonObject;
       Node: IDextJsonNode;
+      JA: IDextJsonArray;
       SR: TStreamReader;
-      SseEvent: string;
+      Streamer: IEventStreamer;
+      I: Integer;
+      ItemNode: IDextJsonNode;
+
+      procedure ProcessItem(AItem: IDextJsonObject);
+      var
+        EType, SEvent: string;
+      begin
+        EType := '';
+        if AItem.Contains('event') then EType := AItem.GetString('event');
+
+        SEvent := '';
+        if EType = 'RunStart' then SEvent := 'run_start'
+        else if EType = 'TestStart' then SEvent := 'test_start'
+        else if EType = 'TestComplete' then SEvent := 'test_complete'
+        else if EType = 'RunComplete' then SEvent := 'run_complete';
+
+        // If it's a specific dashboard event, broadcast legacy + push to S23
+        if SEvent <> '' then
+        begin
+          BroadcastSSE(SEvent, AItem.ToJson);
+          if Streamer <> nil then
+            Streamer.PushEvent(SEvent, AItem.ToJson);
+        end
+        else
+        begin
+          // Assume it's a standard log entry
+          if Streamer <> nil then
+            Streamer.PushEvent('log', AItem.ToJson);
+        end;
+      end;
+
     begin
+      Streamer := TDextServices.GetService<IEventStreamer>(Ctx.Services);
+
       // Read logs
       SR := TStreamReader.Create(Ctx.Request.Body);
       try
@@ -905,30 +939,31 @@ begin
         // ADAPTER: Telemetry to Dashboard
         try
           Node := TDextJson.Provider.Parse(Body);
-          if (Node <> nil) and (Node.GetNodeType = jntObject) then
+          if Node <> nil then
           begin
-            JO := Node as IDextJsonObject;
-            EventType := '';
-            if JO.Contains('event') then EventType := JO.GetString('event');
-                 
-            SseEvent := '';
-            if EventType = 'RunStart' then SseEvent := 'run_start'
-            else if EventType = 'TestStart' then SseEvent := 'test_start'
-            else if EventType = 'TestComplete' then SseEvent := 'test_complete'
-            else if EventType = 'RunComplete' then SseEvent := 'run_complete';
-            
-            if SseEvent <> '' then
-                 BroadcastSSE(SseEvent, JO.ToJson);
+            if Node.GetNodeType = jntObject then
+              ProcessItem(Node as IDextJsonObject)
+            else if Node.GetNodeType = jntArray then
+            begin
+              JA := Node as IDextJsonArray;
+              for I := 0 to JA.GetCount - 1 do
+              begin
+                ItemNode := JA.GetNode(I);
+                if (ItemNode <> nil) and (ItemNode.GetNodeType = jntObject) then
+                  ProcessItem(ItemNode as IDextJsonObject);
+              end;
+            end;
           end;
         except
-          // Log parsing error but don't fail the request (telemetry ingestion often just accepts)
+          // Log parsing error but don't fail the request
         end;
-        
+
         Ctx.Response.StatusCode := 202; // Accepted
       finally
         SR.Free;
       end;
     end);
+
 
   // API: Run Tests
   App.MapPost('/api/tests/run',
@@ -1036,8 +1071,154 @@ begin
                TMonitor.Exit(FLock);
             end;
          end;
+     end);
+
+  // ----------------------------------------------------------------------------------
+  // S23 Validation: Streamable Sessions + HTMX Fragments
+  // ----------------------------------------------------------------------------------
+
+  // POST /sidecar/session
+  // Creates a new IStreamableSession and returns its ID.
+  // Used by HTMX or any client to establish a bidirectional stream channel.
+  App.MapPost('/sidecar/session',
+    procedure(Ctx: IHttpContext)
+    var
+      Manager: IStreamableSessionManager;
+      Session: IStreamableSession;
+    begin
+      Manager := TDextServices.GetService<IStreamableSessionManager>(Ctx.Services);
+      if Manager = nil then
+      begin
+        Results.StatusCode(503, '{"error":"StreamableSession not registered. Call Services.AddStreamableSessions."}').Execute(Ctx);
+        Exit;
+      end;
+      Session := Manager.CreateSession;
+      Results.Json(Format('{"sessionId":"%s"}', [Session.Id])).Execute(Ctx);
     end);
-    
+
+  // GET /sidecar/events
+  // SSE endpoint that streams events from an IStreamableSession.
+  // Requires ?sessionId=<id> query param (or Dext-Session-Id header).
+  App.MapGet('/sidecar/events',
+    procedure(Ctx: IHttpContext)
+    var
+      Manager: IStreamableSessionManager;
+      Session: IStreamableSession;
+      SessionId, EventName, Data: string;
+      IndyCtx: TIdContext;
+      Msg: string;
+      HeartbeatTick: Integer;
+    begin
+      if not Ctx.Request.Query.TryGetValue('sessionId', SessionId) then
+        SessionId := Ctx.Request.GetHeader('Dext-Session-Id');
+
+      if SessionId.IsEmpty then
+      begin
+        Results.BadRequest('{"error":"sessionId required"}').Execute(Ctx);
+        Exit;
+      end;
+
+      Manager := TDextServices.GetService<IStreamableSessionManager>(Ctx.Services);
+      if Manager = nil then
+      begin
+        Results.StatusCode(503, '{"error":"StreamableSession not registered."}').Execute(Ctx);
+        Exit;
+      end;
+
+      Session := Manager.GetSession(SessionId);
+      if Session = nil then
+      begin
+        Results.NotFound('{"error":"Session not found or expired."}').Execute(Ctx);
+        Exit;
+      end;
+
+      IndyCtx := nil;
+      if Ctx is TDextIndyHttpContext then
+        IndyCtx := TDextIndyHttpContext(Ctx).Context;
+
+      if IndyCtx <> nil then
+      begin
+        IndyCtx.Connection.IOHandler.WriteLn('HTTP/1.1 200 OK');
+        IndyCtx.Connection.IOHandler.WriteLn('Content-Type: text/event-stream; charset=utf-8');
+        IndyCtx.Connection.IOHandler.WriteLn('Cache-Control: no-cache');
+        IndyCtx.Connection.IOHandler.WriteLn('Connection: keep-alive');
+        IndyCtx.Connection.IOHandler.WriteLn('');
+        IndyCtx.Connection.IOHandler.Write('event: connected'#10'data: {"sessionId":"' + SessionId + '"}'#10#10);
+
+        HeartbeatTick := 0;
+        while IndyCtx.Connection.Connected do
+        begin
+          if Session.TryDequeueEvent(EventName, Data) then
+          begin
+            Msg := Format('event: %s'#10'data: %s'#10#10, [EventName, Data]);
+            IndyCtx.Connection.IOHandler.Write(ToBytes(Msg, IndyTextEncoding_UTF8));
+            HeartbeatTick := 0;
+          end
+          else
+          begin
+            Inc(HeartbeatTick);
+            // Send heartbeat comment every ~15s (75 * 200ms) to keep alive through proxies
+            if HeartbeatTick >= 75 then
+            begin
+              IndyCtx.Connection.IOHandler.Write(ToBytes(':heartbeat'#10#10, IndyTextEncoding_UTF8));
+              HeartbeatTick := 0;
+            end;
+            Sleep(200);
+          end;
+        end;
+      end
+      else
+      begin
+        // Fallback for non-Indy hosts
+        Ctx.Response.SetContentType('text/event-stream; charset=utf-8');
+        Ctx.Response.AddHeader('Cache-Control', 'no-cache');
+        Ctx.Response.Write('event: connected'#10'data: {"sessionId":"' + SessionId + '"}'#10#10);
+      end;
+
+      Manager.DestroySession(SessionId);
+    end);
+
+  // GET /sidecar/fragments/metrics
+  // HTMX-compatible HTML fragment with real-time Windows system metrics.
+  // Designed for: hx-get="/sidecar/fragments/metrics" hx-trigger="every 3s" hx-swap="innerHTML"
+  App.MapGet('/sidecar/fragments/metrics',
+    procedure(Ctx: IHttpContext)
+    var
+      MemStatus: TMemoryStatusEx;
+      TotalMB, AvailMB, UsedMB: Int64;
+      UsedPct: Double;
+      Html: string;
+    begin
+      MemStatus.dwLength := SizeOf(MemStatus);
+      GlobalMemoryStatusEx(MemStatus);
+
+      TotalMB := MemStatus.ullTotalPhys div (1024 * 1024);
+      AvailMB := MemStatus.ullAvailPhys div (1024 * 1024);
+      UsedMB  := TotalMB - AvailMB;
+      UsedPct := MemStatus.dwMemoryLoad;
+
+      Html :=
+        '<div class="s23-metrics">' +
+        '  <div class="s23-metric">' +
+        '    <span class="s23-metric-label">Memory Used</span>' +
+        '    <span class="s23-metric-value">' + IntToStr(UsedMB) + ' MB</span>' +
+        '    <span class="s23-metric-sub">' + IntToStr(TotalMB) + ' MB total &mdash; ' +
+               FormatFloat('0.0', UsedPct) + '% used</span>' +
+        '    <div class="s23-bar-bg"><div class="s23-bar-fill" style="width:' +
+               FormatFloat('0.0', UsedPct) + '%"></div></div>' +
+        '  </div>' +
+        '  <div class="s23-metric">' +
+        '    <span class="s23-metric-label">Sidecar</span>' +
+        '    <span class="s23-metric-value" style="color:#2ecc71">&#x25CF; Online</span>' +
+        '    <span class="s23-metric-sub">S23 HTMX Fragment &mdash; ' +
+               FormatDateTime('hh:nn:ss', Now) + '</span>' +
+        '  </div>' +
+        '</div>';
+
+      // Results.Html sets Content-Type: text/html — required for HTMX fragment swap
+      Results.Html(Html, 200).Execute(Ctx);
+    end);
+
 end;
 
 procedure BroadcastSSE(const EventName, Data: string);

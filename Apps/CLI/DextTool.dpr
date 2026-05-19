@@ -24,12 +24,8 @@ uses
   Dext.Hosting.CLI.Commands.MigrateUp in 'Commands\Dext.Hosting.CLI.Commands.MigrateUp.pas',
   Dext.Hosting.CLI.Commands.Scaffold in 'Commands\Dext.Hosting.CLI.Commands.Scaffold.pas',
   Dext.Hosting.CLI.Commands.Test in 'Commands\Dext.Hosting.CLI.Commands.Test.pas',
-  Dext.Dashboard.Routes in '..\..\Sources\Dashboard\Dext.Dashboard.Routes.pas',
-  Dext.Hosting.CLI.Commands.UI in 'Commands\Dext.Hosting.CLI.Commands.UI.pas',
-  Dext.Hosting.CLI.Tools.DocGen in 'Tools\Dext.Hosting.CLI.Tools.DocGen.pas',
-  Dext.Hosting.CLI.Hubs.Dashboard in 'Hubs\Dext.Hosting.CLI.Hubs.Dashboard.pas',
-  Dext.Dashboard.TestScanner in '..\..\Sources\Dashboard\Dext.Dashboard.TestScanner.pas',
-  Dext.Dashboard.TestRunner in '..\..\Sources\Dashboard\Dext.Dashboard.TestRunner.pas';
+  Dext.Hosting.CLI.Tools.DocGen in 'Tools\Dext.Hosting.CLI.Tools.DocGen.pas';
+
 
 function CreateDbContext: IDbContext;
 var
@@ -115,7 +111,7 @@ begin
       CLI.AddCommand(TTestCommand.Create);
       CLI.AddCommand(TConfigInitCommand.Create);
       CLI.AddCommand(TEnvScanCommand.Create);
-      CLI.AddCommand(TUICommand.Create);
+
       CLI.AddCommand(TScaffoldCommand.Create);
       CLI.AddCommand(TDocCommand.Create);
       CLI.AddCommand(TFacadeCommand.Create);

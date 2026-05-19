@@ -57,14 +57,14 @@ function Test-Endpoint {
             Write-Host "[FAILED] Status: $statusCode" -ForegroundColor Red
             $script:failed++
             
-            # Print Body if available
-            if ($_.Exception.Response) {
-                $stream = $_.Exception.Response.GetResponseStream()
-                if ($stream) {
-                    $reader = New-Object System.IO.StreamReader($stream)
-                    $body = $reader.ReadToEnd()
-                    if ($body) { Write-Host "    Response: $body" -ForegroundColor DarkRed }
-                }
+            # Extract response body safely
+            if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+                 Write-Host "    Response: $($_.ErrorDetails.Message)" -ForegroundColor DarkRed
+            }
+            elseif ($_.Exception.Response) {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $body = $reader.ReadToEnd()
+                if ($body) { Write-Host "    Response: $body" -ForegroundColor DarkRed }
             }
         }
         return $null
