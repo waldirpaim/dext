@@ -239,9 +239,30 @@ begin
   FViewData := AData;
 end;
 
+{$IF CompilerVersion >= 37.0}
+function MakeScalarLookup(const AData: IViewData; const AName: string): TWebStencilsLookupFunc;
+begin
+  Result :=
+    function(AVar: TWebStencilsDataVar; const APropName: string; var AValue: string): Boolean
+    var
+      LValue, LUnwrapped: TValue;
+    begin
+      Result := False;
+      if AData = nil then Exit;
+      LValue := AData.GetValue(AName);
+      if LValue.IsEmpty then Exit;
+      if TReflection.TryUnwrapProp(LValue, LUnwrapped) then
+        LValue := LUnwrapped;
+      AValue := LValue.ToString;
+      Result := True;
+    end;
+end;
+{$IFEND}
+
 procedure TWebStencilsRenderContext.SetupProcessor(AProcessor: TWebStencilsProcessor);
 var
   ObjPair: Dext.Collections.Dict.TPair<string, TObject>;
+  ValPair: Dext.Collections.Dict.TPair<string, TValue>;
 begin
   for ObjPair in FViewData.Objects do
   begin
@@ -254,6 +275,13 @@ begin
        {$IFEND}
     end;
   end;
+
+  {$IF CompilerVersion >= 37.0}
+  // Register scalars set via WithValue as WebStencils variables. Each lookup
+  // re-reads from FViewData so late updates (e.g. Layout override) are honored.
+  for ValPair in FViewData.Values do
+    AProcessor.AddVar(ValPair.Key, nil, False, MakeScalarLookup(FViewData, ValPair.Key));
+  {$IFEND}
 end;
 
 function TWebStencilsRenderContext.ResolveValue(AObj: TObject; const APropName: string): TValue;
@@ -304,10 +332,16 @@ begin
   if (Obj = nil) and ((AObjectName = '') or SameText(AObjectName, 'Model')) then
   begin
     Value := FViewData.GetValue(APropName);
-    if Value.IsEmpty then
+    if not Value.IsEmpty then
     begin
-      Obj := FViewData.GetData('Model');
+      // Scalar registered via WithValue: emit directly (unwrap SmartProps if any)
+      if TReflection.TryUnwrapProp(Value, Unwrapped) then
+        Value := Unwrapped;
+      AValue := Value.ToString;
+      AHandled := True;
+      Exit;
     end;
+    Obj := FViewData.GetData('Model');
   end;
 
   // 3. If we have the object, resolve and unwrap SmartProps
