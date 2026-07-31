@@ -130,7 +130,14 @@ type
     procedure ReleaseConnection(const ConnectionId: string);
     function ClientError(const DetailedMessage, SafeMessage: string): string;
     function IsTransportEnabled(const TransportName: string): Boolean;
-    
+
+    /// <summary>
+    /// Returns True only when the active HTTP engine exposes an upgradable
+    /// connection. IHttpContext.Connection is nil on engines that do not
+    /// implement the raw server connection (Indy, DCS, WebBroker).
+    /// </summary>
+    function ConnectionSupportsUpgrade(const Ctx: IHttpContext): Boolean;
+
     function FindDispatcher(const Path: string; out HubPath: string): THubDispatcher;
   public
     constructor Create; overload;
@@ -157,6 +164,7 @@ implementation
 
 uses
   System.TypInfo,
+  Dext.Server.Engine.Interfaces,
   Dext.Utils;
 
 function ReadStreamToString(AStream: TStream; AMaximumBytes: Int64): string;
@@ -522,6 +530,17 @@ begin
       Exit(True);
 end;
 
+function THubMiddleware.ConnectionSupportsUpgrade(
+  const Ctx: IHttpContext): Boolean;
+var
+  LConnection: IDextServerConnection;
+begin
+  LConnection := Ctx.Connection;
+  Result := Assigned(LConnection);
+  if Result then
+    Result := LConnection.SupportsUpgrade;
+end;
+
 procedure THubMiddleware.Shutdown;
 begin
   if FSSETransport <> nil then
@@ -596,14 +615,18 @@ begin
       Ctx.Response.SetContentType('application/json');
       Ctx.Response.Write('{"error":"WebSocket transport is disabled"}');
     end
-    else if Ctx.Connection.SupportsUpgrade then
+    else if ConnectionSupportsUpgrade(Ctx) then
       HandleWebSocket(HubPath, Ctx, Dispatcher)
     else
     begin
+      // No upgradable connection on this engine: answer 426 instead of
+      // dereferencing a nil Connection (RFC 7231 section 6.5.15).
       Ctx.Response.StatusCode := 426;
       Ctx.Response.AddHeader('Upgrade', 'websocket');
+      Ctx.Response.AddHeader('Connection', 'Upgrade');
       Ctx.Response.SetContentType('application/json');
-      Ctx.Response.Write('{"error":"WebSocket upgrade is not supported by the active HTTP engine"}');
+      Ctx.Response.Write(
+        '{"error":"WebSocket upgrade is not supported by the active HTTP engine"}');
     end;
     Exit;
   end;
@@ -639,7 +662,7 @@ begin
   SetLength(Response.AvailableTransports, 0);
   LTransportCount := 0;
   if IsTransportEnabled('WebSockets') and
-     Ctx.Connection.SupportsUpgrade then
+     ConnectionSupportsUpgrade(Ctx) then
   begin
     SetLength(Response.AvailableTransports, LTransportCount + 1);
     Response.AvailableTransports[LTransportCount] :=
