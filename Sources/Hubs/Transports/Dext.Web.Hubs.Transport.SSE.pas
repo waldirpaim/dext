@@ -200,8 +200,8 @@ end;
 
 function TSSEConnection.GetUserIdentifier: string;
 begin
-  if (FUser <> nil) and FUser.HasClaim('sub') then
-    Result := FUser.FindClaim('sub').Value
+  if FUser <> nil then
+    Result := FUser.FindClaim('sub').Value // Standard claim for user ID
   else
     Result := '';
 end;

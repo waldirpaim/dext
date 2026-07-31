@@ -157,7 +157,7 @@ begin
     
     WriteLn('Hub endpoints:');
     WriteLn('  POST /hubs/demo/negotiate - Get connection ID');
-    WriteLn('  GET  /hubs/demo/poll?id=xxx - Poll for messages');
+    WriteLn('  GET  /hubs/demo?id=xxx    - SSE stream');
     WriteLn('  POST /hubs/demo?id=xxx    - Invoke method');
     WriteLn;
     WriteLn('Static files: ./wwwroot');

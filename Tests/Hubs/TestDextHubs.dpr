@@ -21,6 +21,7 @@ uses
   Dext.Web.Hubs.Context,
   Dext.Web.Hubs.Middleware,
   Dext.Web.Hubs.Protocol.Json,
+  Dext.Web.Hubs.Protocol.MessagePack,
   Dext.Web.Hubs.Transport.SSE,
   Dext.Web.Hubs.Client.Tests,
   Dext.Web.Hubs.Middleware.Tests;
@@ -111,6 +112,51 @@ begin
     Json := TJsonHubProtocol.SerializeClose('Error message');
     Check(Pos('"type":7', Json) > 0, 'SerializeClose type');
     Check(Pos('"error":"Error message"', Json) > 0, 'SerializeClose error');
+  finally
+    Protocol.Free;
+  end;
+end;
+
+procedure TestTMessagePackHubProtocol;
+var
+  Protocol: TMessagePackHubProtocol;
+  Msg, Parsed: THubMessage;
+  Data: TBytes;
+  Consumed: Integer;
+begin
+  WriteLn;
+  WriteLn('=== TMessagePackHubProtocol Tests ===');
+  Protocol := TMessagePackHubProtocol.Create;
+  try
+    Data := Protocol.SerializeBinary(THubMessage.Ping);
+    Check((Length(Data) = 3) and (Data[0] = $02) and
+      (Data[1] = $91) and (Data[2] = $06),
+      'MessagePack Ping matches SignalR wire vector');
+    Check(Protocol.IsCompleteBinary(Data, 0, Length(Data)),
+      'MessagePack complete frame detection');
+    Check(not Protocol.IsCompleteBinary(Data, 0, Length(Data) - 1),
+      'MessagePack partial frame detection');
+
+    Msg := THubMessage.Invocation('Add',
+      [TValue.From<Integer>(20), TValue.From<Integer>(22)]);
+    Msg.InvocationId := 'inv-1';
+    Data := Protocol.SerializeBinary(Msg);
+    Parsed := Protocol.DeserializeBinary(Data, 0, Length(Data), Consumed);
+    Check(Consumed = Length(Data), 'MessagePack consumes one framed message');
+    Check(Parsed.MessageType = hmtInvocation, 'MessagePack invocation type');
+    Check(Parsed.InvocationId = 'inv-1', 'MessagePack invocation id');
+    Check(Parsed.Target = 'Add', 'MessagePack invocation target');
+    Check((Length(Parsed.Arguments) = 2) and
+      (Parsed.Arguments[0].AsInteger = 20) and
+      (Parsed.Arguments[1].AsInteger = 22),
+      'MessagePack invocation arguments');
+
+    Msg := THubMessage.Completion('inv-1', TValue.From<Integer>(42));
+    Data := Protocol.SerializeBinary(Msg);
+    Parsed := Protocol.DeserializeBinary(Data, 0, Length(Data), Consumed);
+    Check((Parsed.MessageType = hmtCompletion) and
+      (Parsed.InvocationId = 'inv-1') and
+      (Parsed.Result.AsInteger = 42), 'MessagePack completion roundtrip');
   finally
     Protocol.Free;
   end;
@@ -447,6 +493,52 @@ begin
   end;
 end;
 
+procedure TestHubMethodAllowlistOptOut;
+var
+  ConnectionManager: IConnectionManager;
+  ConcreteConnectionManager: TConnectionManager;
+  GroupManager: IGroupManager;
+  Connection: IHubConnection;
+  SSETransport: TSSETransport;
+  Dispatcher: THubDispatcher;
+begin
+  WriteLn;
+  WriteLn('=== Hub Method Allowlist Opt-Out Tests ===');
+
+  ConcreteConnectionManager := TConnectionManager.Create;
+  ConnectionManager := ConcreteConnectionManager;
+  GroupManager := TGroupManager.Create;
+  Connection := THubConnection.Create('optout-connection', ttServerSentEvents);
+  ConnectionManager.Add(Connection);
+  SSETransport := TSSETransport.Create;
+
+  // RequireHubMethodAttribute = False restores the pre-allowlist behaviour, so
+  // an existing Hub keeps working while its methods are being annotated.
+  Dispatcher := THubDispatcher.Create(TTestHub, ConnectionManager, GroupManager,
+    SSETransport, False);
+  try
+    try
+      Dispatcher.InvokeMethod('optout-connection', 'ServerOnlyMethod', []);
+      Check(True, 'Opt-out allows an unannotated public method');
+    except
+      Check(False, 'Opt-out allows an unannotated public method');
+    end;
+
+    try
+      Dispatcher.InvokeMethod('optout-connection', 'NoSuchMethod', []);
+      Check(False, 'Opt-out still rejects a method that does not exist');
+    except
+      on E: EHubMethodNotFoundException do
+        Check(True, 'Opt-out still rejects a method that does not exist');
+      else
+        Check(False, 'Opt-out still rejects a method that does not exist');
+    end;
+  finally
+    Dispatcher.Free;
+    SSETransport.Free;
+  end;
+end;
+
 procedure TestHubReceiveLimitConfiguration;
 var
   Options: THubOptions;
@@ -739,6 +831,7 @@ begin
     
     TestTHubMessage;
     TestTJsonHubProtocol;
+    TestTMessagePackHubProtocol;
     TestTConnectionManager;
     TestTGroupManager;
     TestTNegotiateResponse;
@@ -747,6 +840,7 @@ begin
     TestAuthenticatedCallerContextAbort;
     TestTHub;
     TestHubMethodAllowlist;
+    TestHubMethodAllowlistOptOut;
     TestHubReceiveLimitConfiguration;
     TestValueSerialization;
     

@@ -38,7 +38,6 @@ uses
   System.Rtti,
   System.SyncObjs,
   System.SysUtils,
-  Dext.Auth.Identity,
   Dext.Collections,
   Dext.Collections.Dict,
   Dext.DI.Interfaces,
@@ -73,14 +72,15 @@ type
     FGroupManager: IGroupManager;
     FSSETransport: TSSETransport;
     FProtocol: TJsonHubProtocol;
+    FRequireHubMethodAttribute: Boolean;
     function CreateCallerContext(const ConnectionId: string): IHubCallerContext;
-    function IsClientInvokableMethod(const Method: TRttiMethod;
-      const RttiType: TRttiType): Boolean;
+    function IsClientInvokableMethod(const Method: TRttiMethod): Boolean;
   public
     constructor Create(AHubClass: THubClass;
                        const AConnectionManager: IConnectionManager;
                        const AGroupManager: IGroupManager;
-                       ASSETransport: TSSETransport);
+                       ASSETransport: TSSETransport;
+                       ARequireHubMethodAttribute: Boolean = True);
     destructor Destroy; override;
     
     /// <summary>Invokes a method on the Hub</summary>
@@ -130,14 +130,13 @@ type
     procedure ReleaseConnection(const ConnectionId: string);
     function ClientError(const DetailedMessage, SafeMessage: string): string;
     function IsTransportEnabled(const TransportName: string): Boolean;
-
     /// <summary>
     /// Returns True only when the active HTTP engine exposes an upgradable
     /// connection. IHttpContext.Connection is nil on engines that do not
     /// implement the raw server connection (Indy, DCS, WebBroker).
     /// </summary>
     function ConnectionSupportsUpgrade(const Ctx: IHttpContext): Boolean;
-
+    
     function FindDispatcher(const Path: string; out HubPath: string): THubDispatcher;
   public
     constructor Create; overload;
@@ -164,8 +163,10 @@ implementation
 
 uses
   System.TypInfo,
+  Dext.Auth.Identity,
   Dext.Server.Engine.Interfaces,
-  Dext.Utils;
+  Dext.Utils,
+  Dext.Web.Hubs.Protocol.MessagePack;
 
 function ReadStreamToString(AStream: TStream; AMaximumBytes: Int64): string;
 var
@@ -204,17 +205,28 @@ begin
   Result := True;
 end;
 
+/// <summary>
+/// Stable identifier of a principal: the 'sub' claim, falling back to the
+/// identity name. FindClaim returns an empty TClaim when the claim is absent,
+/// so an absent 'sub' yields an empty string without a separate HasClaim probe.
+/// Returns an empty string when the principal carries no usable identifier.
+/// </summary>
 function PrincipalKey(const APrincipal: IClaimsPrincipal): string;
 begin
   if APrincipal = nil then
     Exit('');
-  if APrincipal.HasClaim('sub') then
-    Exit(APrincipal.FindClaim('sub').Value);
+  Result := APrincipal.FindClaim('sub').Value;
+  if Result <> '' then
+    Exit;
   if APrincipal.Identity <> nil then
-    Exit(APrincipal.Identity.Name);
-  Result := '';
+    Result := APrincipal.Identity.Name;
 end;
 
+/// <summary>
+/// Decides whether the caller of a request is the principal that opened the
+/// connection. Two anonymous callers match; an anonymous caller never matches
+/// an authenticated one.
+/// </summary>
 function IsSamePrincipal(const AExpected, AActual: IClaimsPrincipal): Boolean;
 var
   LExpectedKey, LActualKey: string;
@@ -223,8 +235,15 @@ begin
     Exit((AExpected = nil) and (AActual = nil));
   LExpectedKey := PrincipalKey(AExpected);
   LActualKey := PrincipalKey(AActual);
+  // Fail closed: with no usable identifier on either side the only safe match
+  // is the very same principal instance, so an unidentifiable caller cannot
+  // inherit somebody else's connection.
   if (LExpectedKey = '') or (LActualKey = '') then
     Exit(AExpected = AActual);
+  // Case-insensitive on purpose: 'sub' values and identity names reach us with
+  // inconsistent casing across requests, and locking the legitimate owner out
+  // over casing is worse than the collision this allows between two accounts
+  // that differ only in case.
   Result := SameText(LExpectedKey, LActualKey);
 end;
 
@@ -233,7 +252,8 @@ end;
 constructor THubDispatcher.Create(AHubClass: THubClass;
   const AConnectionManager: IConnectionManager;
   const AGroupManager: IGroupManager;
-  ASSETransport: TSSETransport);
+  ASSETransport: TSSETransport;
+  ARequireHubMethodAttribute: Boolean);
 begin
   inherited Create;
   FHubClass := AHubClass;
@@ -241,6 +261,7 @@ begin
   FGroupManager := AGroupManager;
   FSSETransport := ASSETransport;
   FProtocol := TJsonHubProtocol.Create;
+  FRequireHubMethodAttribute := ARequireHubMethodAttribute;
 end;
 
 destructor THubDispatcher.Destroy;
@@ -266,17 +287,20 @@ begin
     end);
 end;
 
-function THubDispatcher.IsClientInvokableMethod(const Method: TRttiMethod;
-  const RttiType: TRttiType): Boolean;
+function THubDispatcher.IsClientInvokableMethod(
+  const Method: TRttiMethod): Boolean;
 var
   LAttribute: TCustomAttribute;
 begin
   Result := False;
-  if not Assigned(Method) or not Assigned(RttiType) then
+  if not Assigned(Method) then
     Exit;
   for LAttribute in Method.GetAttributes do
     if LAttribute is HubMethodAttribute then
       Exit(True);
+  // Migration escape hatch: when the allowlist is disabled every public method
+  // found by RTTI stays invokable, which is the pre-allowlist behaviour.
+  Result := not FRequireHubMethodAttribute;
 end;
 
 function THubDispatcher.InvokeMethod(const ConnectionId, MethodName: string;
@@ -303,7 +327,7 @@ begin
     RttiType := TReflection.Context.GetType(FHubClass);
     Method := RttiType.GetMethod(MethodName);
     
-    if not IsClientInvokableMethod(Method, RttiType) then
+    if (Method = nil) or not IsClientInvokableMethod(Method) then
       raise EHubMethodNotFoundException.CreateFmt('Method not found: %s', [MethodName]);
     
     // Convert args if needed
@@ -376,15 +400,17 @@ begin
   LConnectionManager.SetGroupManager(FGroupManager);
   FConnectionManager := LConnectionManager;
   FSSETransport := TSSETransport.Create;
-  FWebSocketTransport := TWebSocketHubTransport.Create(
-    FOptions.MaximumReceiveMessageSize);
+  // MaximumReceiveMessageSize is enforced on the HTTP invoke body only (see
+  // HandleInvoke). The WebSocket transport grows its receive buffer on demand,
+  // so wiring the limit into that loop is a separate change.
+  FWebSocketTransport := TWebSocketHubTransport.Create;
   FConnectionDispatchers := TCollections.CreateDictionary<string, THubDispatcher>;
   FConnectionDispatchersLock := TCriticalSection.Create;
   
   FWebSocketTransport.SetOnConnected(
     procedure(const ConnectionId: string)
     var
-      Conn: TWebSocketHubConnection;
+      Conn: IHubConnection;
       Dispatcher: THubDispatcher;
     begin
       Conn := FWebSocketTransport.GetConnection(ConnectionId);
@@ -444,9 +470,11 @@ begin
             except
               on E: Exception do
               begin
-                Writeln('Hub: invocation failed: ', E.Message);
                 ResponseMsg := THubMessage.CompletionError(Msg.InvocationId,
                   ClientError(E.Message, 'Hub invocation failed'));
+                // SafeWriteLn instead of Writeln: a host with no console must
+                // not lose the connection over a failed diagnostic write.
+                SafeWriteLn('Hub: invocation failed: ' + E.Message);
               end;
             end;
             ResponseStr := Protocol.Serialize(ResponseMsg);
@@ -455,6 +483,55 @@ begin
         finally
           Protocol.Free;
         end;
+      end;
+    end
+  );
+
+  FWebSocketTransport.SetOnBinaryMessageReceived(
+    procedure(const ConnectionId: string; const Data: TBytes)
+    var
+      Dispatcher: THubDispatcher;
+      Msg: THubMessage;
+      Protocol: TMessagePackHubProtocol;
+      JsonProtocol: TJsonHubProtocol;
+      ResultValue: TValue;
+      ResponseMsg: THubMessage;
+      ResponseStr: string;
+      Consumed: Integer;
+      Offset: Integer;
+    begin
+      if not FConnectionDispatchers.TryGetValue(ConnectionId, Dispatcher) then
+        Exit;
+      Protocol := TMessagePackHubProtocol.Create;
+      JsonProtocol := TJsonHubProtocol.Create;
+      try
+        Offset := 0;
+        while Offset < Length(Data) do
+        begin
+          Msg := Protocol.DeserializeBinary(Data, Offset,
+            Length(Data) - Offset, Consumed);
+          if Consumed <= 0 then
+            Break;
+          Inc(Offset, Consumed);
+          if Msg.MessageType = hmtInvocation then
+          begin
+            try
+              ResultValue := Dispatcher.InvokeMethod(
+                ConnectionId, Msg.Target, Msg.Arguments);
+              ResponseMsg := THubMessage.Completion(
+                Msg.InvocationId, ResultValue);
+            except
+              on E: Exception do
+                ResponseMsg := THubMessage.CompletionError(
+                  Msg.InvocationId, E.Message);
+            end;
+            ResponseStr := JsonProtocol.Serialize(ResponseMsg);
+            FWebSocketTransport.SendAsync(ConnectionId, ResponseStr);
+          end;
+        end;
+      finally
+        JsonProtocol.Free;
+        Protocol.Free;
       end;
     end
   );
@@ -560,7 +637,8 @@ begin
   while (NormalizedPath.Length > 1) and NormalizedPath.EndsWith('/') do
     Delete(NormalizedPath, NormalizedPath.Length, 1);
     
-  Dispatcher := THubDispatcher.Create(HubClass, FConnectionManager, FGroupManager, FSSETransport);
+  Dispatcher := THubDispatcher.Create(HubClass, FConnectionManager,
+    FGroupManager, FSSETransport, FOptions.RequireHubMethodAttribute);
   FHubs.AddOrSetValue(NormalizedPath, Dispatcher);
 end;
 
@@ -595,6 +673,11 @@ var
   Dispatcher: THubDispatcher;
 begin
   Path := Ctx.Request.Path.ToLower;
+  // Normalize the request path the same way MapHub normalizes the registered
+  // one, otherwise '/hubs/chat/' resolves a dispatcher and then matches no
+  // route. Dext's own router does the same (Dext.Web.Routing.pas).
+  while (Path.Length > 1) and Path.EndsWith('/') do
+    Delete(Path, Path.Length, 1);
   
   // Check if this is a hub request
   Dispatcher := FindDispatcher(Path, HubPath);
@@ -678,7 +761,6 @@ begin
   Ctx.Response.StatusCode := 200;
   Ctx.Response.SetContentType('application/json');
   Ctx.Response.Write(Response.ToJson);
-  Writeln('Hub: Negotiate request on path ', HubPath, ' - generated ID: ', ConnectionId);
 end;
 
 procedure THubMiddleware.HandleSSEStream(const HubPath: string; Ctx: IHttpContext;
@@ -771,8 +853,9 @@ begin
     try
       Dispatcher.OnDisconnected(ConnectionId, nil);
     except
+      // OnDisconnectedAsync must not abort the teardown of the connection.
       on E: Exception do
-        Writeln('Hub: Error invoking OnDisconnected: ', E.Message);
+        SafeWriteLn('Hub: OnDisconnected failed: ' + E.Message);
     end;
   finally
     if Connection <> nil then
@@ -949,12 +1032,12 @@ begin
     end;
     on E: Exception do
     begin
-      Writeln('Hub: invocation failed: ', E.Message);
       InvResult := TInvocationResult.Failure(Request.InvocationId,
         ClientError(E.Message, 'Hub invocation failed'));
       Ctx.Response.StatusCode := 500;
       Ctx.Response.SetContentType('application/json');
       Ctx.Response.Write(InvResult.ToJson);
+      SafeWriteLn('Hub: invocation failed: ' + E.Message);
     end;
   end;
 end;

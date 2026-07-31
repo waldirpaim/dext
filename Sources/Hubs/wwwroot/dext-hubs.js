@@ -20,7 +20,10 @@ class DextHubConnection {
    * @param {Object} options - Connection options
    */
   constructor(hubUrl, options = {}) {
-    this.hubUrl = hubUrl;
+    // Drop a trailing slash so the derived URLs stay canonical: '/hubs/demo/'
+    // would otherwise produce '/hubs/demo//negotiate', which the server routes
+    // as a distinct path and rejects.
+    this.hubUrl = hubUrl.length > 1 ? hubUrl.replace(/\/+$/, '') : hubUrl;
     this.options = {
       transport: 'auto',
       fallback: true,
@@ -81,6 +84,9 @@ class DextHubConnection {
     }
     
     this.state = 'connecting';
+    // Clear the previous transport: a reconnect that finds no usable transport
+    // must fail closed instead of reporting 'connected' on a stale value.
+    this.transport = null;
     
     try {
       // Step 1: Negotiate
@@ -397,15 +403,6 @@ class DextHubConnection {
         }
       };
     });
-  }
-  
-  /**
-   * Connect using Long Polling (fallback)
-   * @private
-   */
-  async _connectLongPolling() {
-    // Long polling implementation would go here
-    throw new Error('Long polling not yet implemented');
   }
   
   /**

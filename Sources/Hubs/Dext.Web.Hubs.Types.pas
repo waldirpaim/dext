@@ -105,10 +105,22 @@ type
     ClientTimeoutInterval: Integer;
     /// <summary>Keep-alive ping interval in seconds</summary>
     KeepAliveInterval: Integer;
-    /// <summary>Maximum message size in bytes</summary>
+    /// <summary>
+    ///   Maximum message size in bytes, enforced on the body of an HTTP
+    ///   invocation. The WebSocket transport is not covered yet: it sizes its
+    ///   receive buffer on demand, so applying this limit there is a separate
+    ///   change.
+    /// </summary>
     MaximumReceiveMessageSize: Int64;
     /// <summary>Enabled transports</summary>
     EnabledTransports: TArray<string>;
+    /// <summary>
+    ///   When True (the default) only methods annotated with HubMethod can be
+    ///   invoked by a remote client. Set it to False to restore the previous
+    ///   behaviour, where every public method reachable through RTTI was
+    ///   invokable, while annotating an existing Hub.
+    /// </summary>
+    RequireHubMethodAttribute: Boolean;
     
     class function Default: THubOptions; static;
   end;
@@ -293,6 +305,7 @@ begin
   Result.KeepAliveInterval := 15;
   Result.MaximumReceiveMessageSize := 32 * 1024; // 32KB
   Result.EnabledTransports := ['WebSockets', 'ServerSentEvents'];
+  Result.RequireHubMethodAttribute := True;
 end;
 
 end.
