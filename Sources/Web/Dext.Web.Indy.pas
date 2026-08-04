@@ -93,6 +93,9 @@ type
     procedure Write(const AContent: string); overload;
     procedure Write(const ABuffer: TBytes); overload;
     procedure Write(const AStream: TStream); overload;
+    procedure SendJsonUtf8(const AUtf8Json: RawByteString); overload;
+    procedure SendJsonUtf8(const ABuffer: TBytes); overload;
+    function GetOutputStream: TStream;
     procedure Json(const AJson: string); overload;
     procedure Json(const AValue: TValue); overload;
     procedure AddHeader(const AName, AValue: string);
@@ -121,6 +124,9 @@ type
     FHeaders: IStringDictionary;
     FCookies: IStringDictionary;
     FFiles: IFormFileCollection;
+    FPath: string;
+    FPathBase: string;
+    FHasCustomPath: Boolean;
     function ParseQueryString(const AQuery: string): IStringDictionary;
     function ParseHeaders(AHeaderList: TIdHeaderList): IStringDictionary;
     procedure ParseMultipart;
@@ -130,6 +136,10 @@ type
 
     function GetMethod: string;
     function GetPath: string;
+    procedure SetPath(const AValue: string);
+    function GetPathBase: string;
+    procedure SetPathBase(const AValue: string);
+    function ToAppUrl(const ARelativePath: string): string;
     function GetQuery: IStringDictionary;
     function GetBody: TStream;
     function GetRouteParams: TRouteValueDictionary;
@@ -141,6 +151,7 @@ type
     function GetFiles: IFormFileCollection;
     property Method: string read GetMethod;
     property Path: string read GetPath;
+    property PathBase: string read GetPathBase write SetPathBase;
     property Query: IStringDictionary read GetQuery;
     property Body: TStream read GetBody;
     property RouteParams: TRouteValueDictionary read GetRouteParams;
@@ -305,10 +316,40 @@ end;
 
 function TDextIndyHttpRequest.GetPath: string;
 begin
+  if FHasCustomPath then
+    Exit(FPath);
   Result := FRequestInfo.Document;
   // Ensure empty paths are '/'
   if Result = '' then
     Result := '/';
+end;
+
+procedure TDextIndyHttpRequest.SetPath(const AValue: string);
+begin
+  FPath := AValue;
+  FHasCustomPath := True;
+end;
+
+function TDextIndyHttpRequest.GetPathBase: string;
+begin
+  Result := FPathBase;
+end;
+
+procedure TDextIndyHttpRequest.SetPathBase(const AValue: string);
+begin
+  FPathBase := AValue;
+end;
+
+function TDextIndyHttpRequest.ToAppUrl(const ARelativePath: string): string;
+var
+  BasePath, RelPath: string;
+begin
+  BasePath := GetPathBase;
+  RelPath := ARelativePath;
+  if BasePath = '/' then BasePath := '';
+  if (RelPath <> '') and not RelPath.StartsWith('/') then RelPath := '/' + RelPath;
+  Result := BasePath + RelPath;
+  if Result = '' then Result := '/';
 end;
 
 function TDextIndyHttpRequest.GetQuery: IStringDictionary;
@@ -1036,6 +1077,50 @@ begin
     FResponseInfo.ContentStream := MemStream;
     FResponseInfo.FreeContentStream := True;
   end;
+end;
+
+procedure TDextIndyHttpResponse.SendJsonUtf8(const AUtf8Json: RawByteString);
+var
+  Stream: TMemoryStream;
+begin
+  SetContentType('application/json; charset=utf-8');
+  if Length(AUtf8Json) > 0 then
+  begin
+    Stream := TMemoryStream.Create;
+    Stream.WriteBuffer(AUtf8Json[1], Length(AUtf8Json));
+    Stream.Position := 0;
+    FResponseInfo.ContentStream := Stream;
+    FResponseInfo.FreeContentStream := True;
+  end;
+end;
+
+procedure TDextIndyHttpResponse.SendJsonUtf8(const ABuffer: TBytes);
+var
+  Stream: TMemoryStream;
+begin
+  SetContentType('application/json; charset=utf-8');
+  if Length(ABuffer) > 0 then
+  begin
+    Stream := TMemoryStream.Create;
+    Stream.WriteBuffer(ABuffer[0], Length(ABuffer));
+    Stream.Position := 0;
+    FResponseInfo.ContentStream := Stream;
+    FResponseInfo.FreeContentStream := True;
+  end;
+end;
+
+function TDextIndyHttpResponse.GetOutputStream: TStream;
+var
+  Stream: TMemoryStream;
+begin
+  SetContentType('application/json; charset=utf-8');
+  if not Assigned(FResponseInfo.ContentStream) then
+  begin
+    Stream := TMemoryStream.Create;
+    FResponseInfo.ContentStream := Stream;
+    FResponseInfo.FreeContentStream := True;
+  end;
+  Result := FResponseInfo.ContentStream;
 end;
 
 procedure TDextIndyHttpResponse.Json(const AJson: string);

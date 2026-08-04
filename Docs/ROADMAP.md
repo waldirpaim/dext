@@ -39,7 +39,7 @@ Status | Task | Spec | Description
 ✅ | **DbSet Batch UPDATE & DELETE** | [S59](../../Docs/Specs/S59-DbSet-Batch-Update-Delete.md) | Single-statement dialect-aware batching for PostgreSQL (`unnest`/`VALUES`), MySQL (`CASE-WHEN`), and Tuple-IN deletes.
 ✅ | **Native Delphi IDE Test Runner** | [S36](Specs/S36-IDE-Test-Runner.md) | Native IDE Test Runner expert with decoupled DUnitX, DUnit, DUnit2, and TestInsight integrations and rich reporting.
 ✅ | **Public Symbol Indexing** | [dext index] | Extract and generate public symbol maps (Markdown, JSON, CSV) with line numbers for AI agents and NotebookLM.
-🟡 | **Dext IDE Explorer** | [S05](Specs/S05-Advanced-Tooling.md) | Initial visual tool for Migrations inside the IDE (Only TFDConnection scaffolding implemented).
+✅ | **Performance Benchmarks** | [S18](Specs/S18-Performance-Benchmarks.md) | Benchmark suite for core Reflection, JSON, FastPath, and ORM components.
 🔴 | **Dext Studio (Expert)**| [S15](Specs/S15-Dext-Studio-IDE-Expert.md) | Visual IDE Expert for schema mapping and continuous syncing via YAML.
 🟡 | **Production Middleware** | - | SPA Fallback, Forwarded Headers, and Resilience.
 
@@ -132,6 +132,7 @@ Status | Tarefa | Spec | Descrição
 ✅ | **Método HTTP QUERY** | [S49](Specs/S49-Http-Query-Method.md) | Suporte ao método HTTP QUERY padronizado (RFC 10008) no cliente e no servidor.
 ✅ | **Evolução do Epoll Linux** | [S50](Specs/S50-Linux-Epoll-Evolution.md) | CPU Pinning, TCP_DEFER_ACCEPT, TFO, zero-copy sendfile, buffer pools lock-free e keep-alive timing wheels.
 ✅ | **Codecs Diretos & Geração Estática** | [S54](Specs/S54-Codegen-Direct-Codecs.md) | Runtime finalizado: codecs compartilhados por offset direto e geração estática para gRPC, REST/JSON, hidratação ORM e sync do EntityDataSet. Expert DX adiado.
+✅ | **Suporte a Base Path (#182)** | [S55](Specs/S55-Base-Path-Support.md) | Suporte a hospedagem sob prefixo de caminho (HTTP.sys prefix, TDextPathBaseMiddleware e Request.ToAppUrl).
 ✅ | **Model Context Protocol (MCP)** | [S23](Specs/S23-Http-Streamable-HTMX.md) | Integração nativa do servidor MCP v2025-03-26 com API builder e suporte a HTTP.sys.
 
 ## 🔮 Futuro / Pós-V1

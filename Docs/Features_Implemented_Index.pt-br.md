@@ -234,11 +234,14 @@ O Dext foi desenhado para alavancar recursos modernos da linguagem Object Pascal
 ### 3.1 Bootstrapping & Minimal API
 - **TWebApplication** — Fachada fluente para inicialização: carrega automaticamente `appsettings.json`, `appsettings.yaml`, Environment Variables, registra serviços e constrói o pipeline em uma única cadeia.
 - **Minimal API** — Registro direto de handlers via delegates sem controllers (`app.MapGet`, `app.MapPost`, `app.MapQuery`).
+- **FastPath** (`app.MapFast`) — Registro de rotas de altíssimo throughput com desvio (bypass) de DI Scope e ativação de RTTI, reduzindo o tempo por requisição ao mínimo possível.
+- **Data API Streaming Direct UTF-8** (`Db.UseSql`) — Execução de SQL nativo com serialização e gravação direta dos dados em UTF-8 no stream do socket (`Res.GetOutputStream`) sem alocação de objetos `TJsonObject` na Heap.
 - **Mapeamento HTTP QUERY** — Endpoints de consulta de dados seguros e idempotentes utilizando corpos de requisição estruturados.
 
 ### 3.2 Middleware Pipeline
 - **Chain of Responsibility** — Middlewares funcionais (delegates anônimos) e baseados em classe com injeção de dependência via construtor.
 - **Built-in Middlewares** — Logger, Compression (GZip/Brotli), Exception Handling (**ProblemDetails** RFC 9457), **DeveloperExceptionPage**, CORS, StartupLock.
+- **Base Path Hosting (`UsePathBase`)** — Suporte a hospedagem sob prefixo de caminho (`app.UsePathBase('/myapp')`), remoção automática do prefixo no pipeline (`TDextPathBaseMiddleware`), preenchimento de `Request.PathBase` e gerador de URL `Request.ToAppUrl('/route')`. Registro nativo de prefixos no kernel do HTTP.sys (`http://+:8080/myapp/`).
 
 ### 3.3 Routing Engine
 - **Parâmetros Dinâmicos** — Rotas com `{id}`, `{slug}`, restrições de tipo.

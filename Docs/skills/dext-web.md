@@ -82,6 +82,12 @@ Builder.MapQuery<TUserSearchQuery, IUserService, IResult>('/api/users/search',
   begin
     Result := Results.Ok(Svc.Search(Query));
   end);
+
+// FASTPATH: Direct route for extreme performance (bypasses DI scope & RTTI)
+App.MapFast('GET', '/fastping', procedure(const Req: IHttpRequest; const Res: IHttpResponse)
+  begin
+    Res.SendJsonUtf8('{"message":"pong"}');
+  end);
 ```
 
 > **NEVER** do `Ctx.RequestServices.GetService<T>` or `Ctx.Request.BodyAsJson<T>`.
@@ -312,6 +318,7 @@ begin
   App.Builder
     .UseExceptionHandler
     .UseHttpLogging
+    .UsePathBase('/myapp')     // Serve application under /myapp prefix
     .MapControllers            // Map routes BEFORE Swagger
     .UseSwagger(Swagger.Title('My API').Version('v1'));
 end;

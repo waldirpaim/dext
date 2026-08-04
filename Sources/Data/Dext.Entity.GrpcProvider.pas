@@ -114,11 +114,16 @@ type
     FPath: string;
     FBody: TStream;
     FHeaders: IStringDictionary;
+    FPathBase: string;
   public
     constructor Create(const APath: string; ABody: TBytes);
     destructor Destroy; override;
     function GetMethod: string;
     function GetPath: string;
+    procedure SetPath(const AValue: string);
+    function GetPathBase: string;
+    procedure SetPathBase(const AValue: string);
+    function ToAppUrl(const ARelativePath: string): string;
     function GetQuery: IStringDictionary;
     function GetBody: TStream;
     function GetRouteParams: TRouteValueDictionary;
@@ -128,6 +133,7 @@ type
     function GetQueryParam(const AName: string): string;
     function GetCookies: IStringDictionary;
     function GetFiles: IFormFileCollection;
+    property PathBase: string read GetPathBase write SetPathBase;
   end;
 
   TMockHttpResponse = class(TInterfacedObject, Dext.Web.Interfaces.IHttpResponse)
@@ -149,6 +155,9 @@ type
     procedure Write(const AContent: string); overload;
     procedure Write(const ABuffer: TBytes); overload;
     procedure Write(const AStream: TStream); overload;
+    procedure SendJsonUtf8(const AUtf8Json: RawByteString); overload;
+    procedure SendJsonUtf8(const ABuffer: TBytes); overload;
+    function GetOutputStream: TStream;
     procedure Json(const AJson: string); overload;
     procedure Json(const AValue: TValue); overload;
     procedure AddHeader(const AName, AValue: string);
@@ -209,6 +218,20 @@ end;
 
 function TMockHttpRequest.GetMethod: string; begin Result := 'POST'; end;
 function TMockHttpRequest.GetPath: string; begin Result := FPath; end;
+procedure TMockHttpRequest.SetPath(const AValue: string); begin FPath := AValue; end;
+function TMockHttpRequest.GetPathBase: string; begin Result := FPathBase; end;
+procedure TMockHttpRequest.SetPathBase(const AValue: string); begin FPathBase := AValue; end;
+function TMockHttpRequest.ToAppUrl(const ARelativePath: string): string;
+var
+  BasePath, RelPath: string;
+begin
+  BasePath := GetPathBase;
+  RelPath := ARelativePath;
+  if BasePath = '/' then BasePath := '';
+  if (RelPath <> '') and not RelPath.StartsWith('/') then RelPath := '/' + RelPath;
+  Result := BasePath + RelPath;
+  if Result = '' then Result := '/';
+end;
 function TMockHttpRequest.GetQuery: IStringDictionary; begin Result := nil; end;
 function TMockHttpRequest.GetBody: TStream; begin Result := FBody; end;
 function TMockHttpRequest.GetRouteParams: TRouteValueDictionary;
@@ -262,6 +285,23 @@ end;
 procedure TMockHttpResponse.Write(const AStream: TStream);
 begin
   FBody.CopyFrom(AStream, AStream.Size - AStream.Position);
+end;
+procedure TMockHttpResponse.SendJsonUtf8(const AUtf8Json: RawByteString);
+begin
+  SetContentType('application/json');
+  if Length(AUtf8Json) > 0 then
+    FBody.Write(AUtf8Json[1], Length(AUtf8Json));
+end;
+procedure TMockHttpResponse.SendJsonUtf8(const ABuffer: TBytes);
+begin
+  SetContentType('application/json');
+  if Length(ABuffer) > 0 then
+    FBody.Write(ABuffer[0], Length(ABuffer));
+end;
+function TMockHttpResponse.GetOutputStream: TStream;
+begin
+  SetContentType('application/json');
+  Result := FBody;
 end;
 procedure TMockHttpResponse.Json(const AJson: string); begin end;
 procedure TMockHttpResponse.Json(const AValue: TValue); begin end;

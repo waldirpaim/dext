@@ -23,7 +23,7 @@ ID | Title | Status | Goal
 **S15** | [Dext Studio & Visual Scaffolding](S15-Dext-Studio-IDE-Expert.md) | 📝 Draft | Visual IDE Expert for schema mapping, GitOps (YAML), and continuous DB syncing.
 **S16** | [Simd Quad Search](S16-Simd_Quad_Search.md) | 📝 Reserved | Reserved for the Future (Idea / Study).
 **S17** | [Design-Time Scaffolding](S17-Design-Time-Scaffolding.md) | ✅ Finalized | DB integration and IDE scaffolding support.
-**S18** | [Performance Benchmarks](S18-Performance-Benchmarks.md) | 📝 Draft | Benchmark suite for core Reflection, JSON, and ORM components.
+**S18** | [Performance Benchmarks](S18-Performance-Benchmarks.md) | ✅ Finalized | Benchmark suite for core Reflection, JSON, FastPath, and ORM components.
 **S19** | [FluentQuery Join Evolution](S19-FluentQuery-Join-Evolution.md) | ✅ Finalized | Unified DSL for complex SQL Joins via Managed Records.
 **S20** | [Fluent REST Evolution](S20-Fluent-Rest-Evolution.md) | ✅ Finalized | Enhanced TRestClient factories and native record/array payload support.
 **S21** | [Soft Delete: Timestamp-based Audit](S21-SoftDelete-Timestamp-Audit.md) | ✅ Finalized | Soft Delete based on nullable timestamps for audit trails.
@@ -60,6 +60,7 @@ ID | Title | Status | Goal
 **S52** | [SOCKS5 Proxy Client & Server](S52-Net-Proxy-Socks5.md) | 📝 Draft | Support SOCKS5 client tunnels, Socks over TLS, and SOCKS5 server backlog.
 **S53** | [Cloud Object Storage](S53-Storage-ObjectStorage.md) | 📝 Draft | Unified object storage API (S3-Compatible, AWS, OCI, MinIO) and cloud backlog (Queues, Email, Document DBs).
 **S54** | [Direct Codecs & Static Code Generation](S54-Codegen-Direct-Codecs.md) | ✅ Runtime Finalized | Shared direct-offset and generated-code codec architecture for gRPC, REST/JSON, ORM, and EntityDataSet. IDE Expert DX is deferred to S15/S54.
+**S55** | [Base Path Support (#182)](S55-Base-Path-Support.md) | ✅ Finalized | HTTP.sys URL prefix path binding, TDextPathBaseMiddleware, and Request.ToAppUrl builder.
 **S59** | [DbSet Dialect-Aware Batch UPDATE & DELETE Strategy](../../Docs/Specs/S59-DbSet-Batch-Update-Delete.md) | ✅ Finalized | Single-statement dialect-aware batching for PostgreSQL (`unnest`/`VALUES`), MySQL (`CASE-WHEN`), and Tuple-IN deletes.
 
 ---

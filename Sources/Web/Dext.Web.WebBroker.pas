@@ -58,6 +58,9 @@ type
     FCookies: IStringDictionary;
     FRouteParams: TRouteValueDictionary;
     FFiles: IFormFileCollection;
+    FPath: string;
+    FPathBase: string;
+    FHasCustomPath: Boolean;
     function ParseQueryString(const AQuery: string): IStringDictionary;
     function BuildHeaders: IStringDictionary;
     function BuildCookies: IStringDictionary;
@@ -67,6 +70,10 @@ type
 
     function GetMethod: string;
     function GetPath: string;
+    procedure SetPath(const AValue: string);
+    function GetPathBase: string;
+    procedure SetPathBase(const AValue: string);
+    function ToAppUrl(const ARelativePath: string): string;
     function GetQuery: IStringDictionary;
     function GetBody: TStream;
     function GetRouteParams: TRouteValueDictionary;
@@ -78,6 +85,7 @@ type
     function GetFiles: IFormFileCollection;
     property Method: string read GetMethod;
     property Path: string read GetPath;
+    property PathBase: string read GetPathBase write SetPathBase;
     property Query: IStringDictionary read GetQuery;
     property Body: TStream read GetBody;
     property RouteParams: TRouteValueDictionary read GetRouteParams;
@@ -127,6 +135,9 @@ type
     procedure Write(const AContent: string); overload;
     procedure Write(const ABuffer: TBytes); overload;
     procedure Write(const AStream: TStream); overload;
+    procedure SendJsonUtf8(const AUtf8Json: RawByteString); overload;
+    procedure SendJsonUtf8(const ABuffer: TBytes); overload;
+    function GetOutputStream: TStream;
     procedure Json(const AJson: string); overload;
     procedure Json(const AValue: TValue); overload;
     procedure AddHeader(const AName, AValue: string);
@@ -436,9 +447,39 @@ end;
 
 function TDextWebBrokerRequest.GetPath: string;
 begin
+  if FHasCustomPath then
+    Exit(FPath);
   Result := FWebRequest.PathInfo;
   if Result = '' then
     Result := '/';
+end;
+
+procedure TDextWebBrokerRequest.SetPath(const AValue: string);
+begin
+  FPath := AValue;
+  FHasCustomPath := True;
+end;
+
+function TDextWebBrokerRequest.GetPathBase: string;
+begin
+  Result := FPathBase;
+end;
+
+procedure TDextWebBrokerRequest.SetPathBase(const AValue: string);
+begin
+  FPathBase := AValue;
+end;
+
+function TDextWebBrokerRequest.ToAppUrl(const ARelativePath: string): string;
+var
+  BasePath, RelPath: string;
+begin
+  BasePath := GetPathBase;
+  RelPath := ARelativePath;
+  if BasePath = '/' then BasePath := '';
+  if (RelPath <> '') and not RelPath.StartsWith('/') then RelPath := '/' + RelPath;
+  Result := BasePath + RelPath;
+  if Result = '' then Result := '/';
 end;
 
 function TDextWebBrokerRequest.GetQuery: IStringDictionary;
@@ -622,6 +663,26 @@ end;
 procedure TDextWebBrokerResponse.Write(const AStream: TStream);
 begin
   FBuffer.CopyFrom(AStream, 0);
+end;
+
+procedure TDextWebBrokerResponse.SendJsonUtf8(const AUtf8Json: RawByteString);
+begin
+  FContentType := 'application/json; charset=utf-8';
+  if Length(AUtf8Json) > 0 then
+    FBuffer.WriteBuffer(AUtf8Json[1], Length(AUtf8Json));
+end;
+
+procedure TDextWebBrokerResponse.SendJsonUtf8(const ABuffer: TBytes);
+begin
+  FContentType := 'application/json; charset=utf-8';
+  if Length(ABuffer) > 0 then
+    FBuffer.WriteBuffer(ABuffer[0], Length(ABuffer));
+end;
+
+function TDextWebBrokerResponse.GetOutputStream: TStream;
+begin
+  FContentType := 'application/json; charset=utf-8';
+  Result := FBuffer;
 end;
 
 procedure TDextWebBrokerResponse.Json(const AJson: string);

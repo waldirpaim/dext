@@ -1,4 +1,4 @@
-﻿{***************************************************************************}
+{***************************************************************************}
 {                                                                           }
 {           Dext Framework                                                  }
 {                                                                           }
@@ -76,6 +76,7 @@ uses
   Dext.Web.Middleware,
   Dext.Web.MultiTenancy,
   Dext.Web.Pipeline,
+  Dext.Web.PathBase,
   Dext.Web.Results,
   Dext.Web.View,
   Dext.Web.View.Native,
@@ -115,8 +116,11 @@ type
   // 🌐 Aliases for Common Web Types
   // ===========================================================================
   
-  // {BEGIN_DEXT_ALIASES}
-  // Generated Aliases
+  // Dext.Web.PathBase
+  /// <summary> Middleware that strips base path from requests. </summary>
+  TDextPathBaseMiddleware = Dext.Web.PathBase.TDextPathBaseMiddleware;
+  /// <summary> Type alias for TDextPathBaseMiddleware. </summary>
+  TPathBaseMiddleware = Dext.Web.PathBase.TPathBaseMiddleware;
 
   // Dext.Auth.Attributes
   /// <summary> Attribute to require authentication or a specific policy. </summary>
@@ -390,6 +394,7 @@ type
   IWebHost = Dext.Web.Interfaces.IWebHost;
   IWebHostBuilder = Dext.Web.Interfaces.IWebHostBuilder;
   TRequestDelegate = Dext.Web.Interfaces.TRequestDelegate;
+  TDextFastRouteHandler = Dext.Web.Interfaces.TDextFastRouteHandler;
   TStaticHandler = Dext.Web.Interfaces.TStaticHandler;
   TMiddlewareDelegate = Dext.Web.Interfaces.TMiddlewareDelegate;
   TOpenAPIResponseMetadata = Dext.Web.Interfaces.TOpenAPIResponseMetadata;
@@ -809,6 +814,12 @@ type
     function MapQuery(const Path: string; Handler: TStaticHandler): AppBuilder; overload;
 
     /// <summary>
+    ///   Maps a fast route bypassing DI and controller RTTI overhead.
+    /// </summary>
+    function MapFast(const AMethod, APath: string; AHandler: TDextFastRouteHandler): AppBuilder; overload;
+    function MapFast(const APath: string; AHandler: TDextFastRouteHandler): AppBuilder; overload;
+
+    /// <summary>
     ///   Builds the request pipeline and returns the main RequestDelegate.
     /// </summary>
     function Build: TRequestDelegate;
@@ -829,6 +840,8 @@ type
     // -------------------------------------------------------------------------
     // ⛓️ Middleware
     // -------------------------------------------------------------------------
+    /// <summary>Adds base path middleware to strip prefix and populate Request.PathBase.</summary>
+    function UsePathBase(const APathBase: string): AppBuilder;
     function UseStaticFiles: AppBuilder; overload;
     function UseStartupLock: AppBuilder;
     function UseExceptionHandler: AppBuilder; overload;
@@ -1264,6 +1277,18 @@ begin
   Result := Self;
 end;
 
+function THttpAppBuilderHelper.MapFast(const AMethod, APath: string; AHandler: TDextFastRouteHandler): AppBuilder;
+begin
+  Self.Unwrap.MapFast(AMethod, APath, AHandler);
+  Result := Self;
+end;
+
+function THttpAppBuilderHelper.MapFast(const APath: string; AHandler: TDextFastRouteHandler): AppBuilder;
+begin
+  Self.Unwrap.MapFast('GET', APath, AHandler);
+  Result := Self;
+end;
+
 function THttpAppBuilderHelper.Build: TRequestDelegate;
 begin
   Result := Self.Unwrap.Build;
@@ -1291,6 +1316,12 @@ end;
 function THttpAppBuilderHelper.UseRateLimiting(const APolicy: TRateLimitPolicy): AppBuilder;
 begin
   TApplicationBuilderRateLimitExtensions.UseRateLimiting(Self.Unwrap, APolicy);
+  Result := Self;
+end;
+
+function THttpAppBuilderHelper.UsePathBase(const APathBase: string): AppBuilder;
+begin
+  Self.Unwrap.UseMiddleware(TDextPathBaseMiddleware.Create(APathBase));
   Result := Self;
 end;
 
