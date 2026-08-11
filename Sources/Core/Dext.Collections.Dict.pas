@@ -432,17 +432,33 @@ end;
 procedure TDictionary<K, V>.Add(const Key: K; const Value: V);
 var
   KP: Pointer;
+  LKey: K;
+  LValue: V;
 begin
-  KP := @Key;
-  FCore.AddRaw(KP, @Value);
+  // Workaround for a dcc64 37.0 codegen fault: taking the address of two
+  // const generic parameters can resolve to the SAME spill slot
+  // (@Key = @Value), storing the value as the key. Copying to locals
+  // guarantees distinct addresses.
+  LKey := Key;
+  LValue := Value;
+  KP := @LKey;
+  FCore.AddRaw(KP, @LValue);
 end;
 
 procedure TDictionary<K, V>.AddOrSetValue(const Key: K; const Value: V);
 var
   VP: Pointer;
   KP: Pointer;
+  LKey: K;
+  LValue: V;
 begin
-  KP := @Key;
+  // Workaround for a dcc64 37.0 codegen fault: taking the address of two
+  // const generic parameters can resolve to the SAME spill slot
+  // (@Key = @Value), storing the value as the key. Copying to locals
+  // guarantees distinct addresses.
+  LKey := Key;
+  LValue := Value;
+  KP := @LKey;
   if FOwnsValues and (PTypeInfo(System.TypeInfo(V))^.Kind = tkClass) then
   begin
     if FCore.TryGetRaw(KP, VP) then
@@ -451,15 +467,19 @@ begin
         TObject(PPointer(VP)^).Free;
     end;
   end;
-  FCore.AddOrSetRaw(KP, @Value);
+  FCore.AddOrSetRaw(KP, @LValue);
 end;
 
 function TDictionary<K, V>.TryGetValue(const Key: K; out Value: V): Boolean;
 var
   VP: Pointer;
   KP: Pointer;
+  LKey: K;
 begin
-  KP := @Key;
+  // Same dcc64 codegen workaround as Add: copy the parameter before taking
+  // its address.
+  LKey := Key;
+  KP := @LKey;
   Result := FCore.TryGetRaw(KP, VP);
   if Result then
     RawCopyElement(@Value, VP, SizeOf(V), System.TypeInfo(V))

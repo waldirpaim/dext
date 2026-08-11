@@ -370,28 +370,49 @@ begin
 end;
 
 procedure TOrderedDictionary<K, V>.Add(const Key: K; const Value: V);
+var
+  LKey: K;
+  LValue: V;
 begin
-  FCore.AddRaw(@Key, @Value);
+  // Workaround for a dcc64 37.0 codegen fault: taking the address of two
+  // const generic parameters can resolve to the SAME spill slot
+  // (@Key = @Value), storing the value as the key. Copying to locals
+  // guarantees distinct addresses.
+  LKey := Key;
+  LValue := Value;
+  FCore.AddRaw(@LKey, @LValue);
 end;
 
 procedure TOrderedDictionary<K, V>.AddOrSetValue(const Key: K; const Value: V);
 var
   Pos: Integer;
+  LKey: K;
+  LValue: V;
 begin
+  // Workaround for a dcc64 37.0 codegen fault: taking the address of two
+  // const generic parameters can resolve to the SAME spill slot
+  // (@Key = @Value), storing the value as the key. Copying to locals
+  // guarantees distinct addresses.
+  LKey := Key;
+  LValue := Value;
   if ValueIsClass then
   begin
-    Pos := FCore.IndexOfRaw(@Key);
+    Pos := FCore.IndexOfRaw(@LKey);
     if Pos >= 0 then
       FreeValueAt(Pos);
   end;
-  FCore.AddOrSetRaw(@Key, @Value);
+  FCore.AddOrSetRaw(@LKey, @LValue);
 end;
 
 function TOrderedDictionary<K, V>.TryGetValue(const Key: K; out Value: V): Boolean;
 var
   VP: Pointer;
+  LKey: K;
 begin
-  Result := FCore.TryGetRaw(@Key, VP);
+  // Same dcc64 codegen workaround as Add: copy the parameter before taking
+  // its address.
+  LKey := Key;
+  Result := FCore.TryGetRaw(@LKey, VP);
   if Result then
     RawCopyElement(@Value, VP, SizeOf(V), System.TypeInfo(V))
   else

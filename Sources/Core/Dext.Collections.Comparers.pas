@@ -165,9 +165,16 @@ end;
 function TDefaultComparer<T>.Compare(const Left, Right: T): Integer;
 var
   LP, RP: Pointer;
+  LV, RV: T;
 begin
-  LP := @Left;
-  RP := @Right;
+  // Workaround for a dcc64 37.0 codegen fault: taking the address of two
+  // const generic parameters can resolve to the SAME spill slot
+  // (@Left = @Right), making every comparison see the second value twice.
+  // Copying to locals guarantees distinct addresses.
+  LV := Left;
+  RV := Right;
+  LP := @LV;
+  RP := @RV;
   case GetTypeKind(T) of
     tkUString:
       Result := CompareStr(PString(LP)^, PString(RP)^);
@@ -284,9 +291,16 @@ end;
 function TDefaultEqualityComparer<T>.Equals(const Left, Right: T): Boolean;
 var
   LP, RP: Pointer;
+  LV, RV: T;
 begin
-  LP := @Left;
-  RP := @Right;
+  // Workaround for a dcc64 37.0 codegen fault: taking the address of two
+  // const generic parameters can resolve to the SAME spill slot
+  // (@Left = @Right), making every comparison see the second value twice.
+  // Copying to locals guarantees distinct addresses.
+  LV := Left;
+  RV := Right;
+  LP := @LV;
+  RP := @RV;
   case GetTypeKind(T) of
     tkUString:
       Result := PString(LP)^ = PString(RP)^;
