@@ -6,7 +6,7 @@
         <FrameworkType>None</FrameworkType>
         <MainSource>WebStencilsDemo.dpr</MainSource>
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
-        <ProjectGuid>{BB27D913-73AA-4982-A0A2-453275B9F6EE}</ProjectGuid>
+        <ProjectGuid>{E26F2001-4A11-4E01-8C26-000000000001}</ProjectGuid>
         <ProjectName Condition="'$(ProjectName)'==''">WebStencilsDemo</ProjectName>
         <ProjectVersion>20.4</ProjectVersion>
         <TargetedPlatforms>3</TargetedPlatforms>
@@ -80,6 +80,8 @@
         </DelphiCompile>
         <DCCReference Include="Startup.pas"/>
         <DCCReference Include="Models\Customer.pas"/>
+        <DCCReference Include="Models\AppDbContext.pas"/>
+        <DCCReference Include="Models\CustomerSearch.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
@@ -112,6 +114,8 @@
                 <Platform value="Win64">True</Platform>
                 <Platform value="iOSDevice64">False</Platform>
                 <Platform value="iOSSimARM64">False</Platform>
+                <Platform value="WinARM64EC">False</Platform>
+                <Platform value="Win64x">False</Platform>
             </Platforms>
         </BorlandProject>
         <ProjectFileVersion>12</ProjectFileVersion>
