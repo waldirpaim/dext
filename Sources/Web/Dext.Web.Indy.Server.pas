@@ -200,6 +200,20 @@ begin
     // Executar pipeline Dext
     FPipeline(DextContext);
 
+    // htmx request without a body: with no ContentText and no ContentStream,
+    // TIdHTTPResponseInfo.WriteHeader fills the body with the placeholder
+    // '<HTML><BODY><B>200 OK</B></BODY></HTML>' and htmx swaps it into the
+    // target. An empty stream makes Indy answer with Content-Length: 0.
+    // A response whose header already went out (streaming/SSE via Flush)
+    // is left untouched.
+    if (not AResponseInfo.HeaderHasBeenWritten) and (AResponseInfo.ContentText = '') and
+      (not Assigned(AResponseInfo.ContentStream)) and
+      SameText(ARequestInfo.RawHeaders.Values['HX-Request'], 'true') then
+    begin
+      AResponseInfo.ContentStream := TMemoryStream.Create;
+      AResponseInfo.FreeContentStream := True;
+    end;
+
   except
     on E: Exception do
     begin
