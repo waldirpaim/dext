@@ -58,7 +58,11 @@ uses
   Dext.Auth.Identity,
   Dext.Web.Results,
   Dext.Json,
-  Dext.Server.Engine.Interfaces;
+  Dext.Server.Engine.Interfaces,
+  {$IFDEF DEXT_ENABLE_ENTITY}
+  Dext.Entity.Core,
+  {$ENDIF}
+  Dext.Entity.FastQuery;
 {$ENDIF DEXT_ENABLE_DCS}
 
 {$IFDEF DEXT_ENABLE_DCS}
@@ -174,9 +178,10 @@ type
     ///   Writes buffered response data to the underlying ICrossHttpResponse.
     ///   Must be called exactly once after the pipeline completes.
     /// </summary>
-    procedure FlushToResponse;
+    procedure FlushToResponse(const APreserveEmptyBody: Boolean = False);
 
-    function Status(AValue: Integer): IHttpResponse;
+    function Status(AValue: Integer): IHttpResponse; overload;
+    function Status(AValue: Integer; const AMessage: string): IHttpResponse; overload;
     function GetStatusCode: Integer;
     function GetContentType: string;
     procedure SetStatusCode(AValue: Integer);
@@ -185,8 +190,19 @@ type
     procedure Write(const AContent: string); overload;
     procedure Write(const ABuffer: TBytes); overload;
     procedure Write(const AStream: TStream); overload;
+    procedure SendJsonUtf8(const AUtf8Json: RawByteString); overload;
+    procedure SendJsonUtf8(const ABuffer: TBytes); overload;
+    function GetOutputStream: TStream;
     procedure Json(const AJson: string); overload;
     procedure Json(const AValue: TValue); overload;
+    procedure WriteJson(const AValue: TValue); overload;
+    procedure WriteJson(ACode: Integer; const AValue: TValue); overload;
+    procedure WriteJson(const AQuery: IDextFastQuery); overload;
+    procedure WriteJson(ACode: Integer; const AQuery: IDextFastQuery); overload;
+    {$IFDEF DEXT_ENABLE_ENTITY}
+    procedure WriteJson(const AStream: IDbSetFastStream); overload;
+    procedure WriteJson(ACode: Integer; const AStream: IDbSetFastStream); overload;
+    {$ENDIF}
     procedure AddHeader(const AName, AValue: string);
     procedure AppendCookie(const AName, AValue: string; const AOptions: TCookieOptions); overload;
     procedure AppendCookie(const AName, AValue: string); overload;
@@ -289,7 +305,6 @@ implementation
 uses
   Dext.Utils,
   Dext.Hosting.ApplicationLifetime,
-  Dext.Json,
   Dext.Json.Utf8,
   Dext.Codecs.Registry;
 
@@ -561,13 +576,14 @@ begin
   inherited;
 end;
 
-procedure TDextDCSResponse.FlushToResponse;
+procedure TDextDCSResponse.FlushToResponse(const APreserveEmptyBody: Boolean);
 var
   I: Integer;
   Entry: TDCSCookieEntry;
   Bytes: TBytes;
   MaxAgeSecs: Integer;
 begin
+  if FResponse.Sent then Exit;
   FResponse.StatusCode := FStatusCode;
   FResponse.ContentType := FContentType;
 
@@ -605,6 +621,12 @@ begin
   begin
     SetLength(Bytes, FBuffer.Size);
     Move(FBuffer.Memory^, Bytes[0], FBuffer.Size);
+    FResponse.Send(Bytes);
+  end
+  else if APreserveEmptyBody then
+  begin
+    // SendStatus insere o texto do status; HTMX precisa receber zero bytes.
+    Bytes := nil;
     FResponse.Send(Bytes);
   end
   else
@@ -691,6 +713,115 @@ begin
   Writer := TUtf8JsonWriter.Create(FBuffer, False);
   Writer.WriteValue(AValue);
 end;
+
+function TDextDCSResponse.Status(AValue: Integer; const AMessage: string): IHttpResponse;
+begin
+  FStatusCode := AValue;
+  Result := Self;
+end;
+
+procedure TDextDCSResponse.SendJsonUtf8(const AUtf8Json: RawByteString);
+begin
+  FContentType := 'application/json; charset=utf-8';
+  if Length(AUtf8Json) > 0 then
+    FBuffer.WriteBuffer(AUtf8Json[1], Length(AUtf8Json));
+end;
+
+procedure TDextDCSResponse.SendJsonUtf8(const ABuffer: TBytes);
+begin
+  FContentType := 'application/json; charset=utf-8';
+  if Length(ABuffer) > 0 then
+    FBuffer.WriteBuffer(ABuffer[0], Length(ABuffer));
+end;
+
+function TDextDCSResponse.GetOutputStream: TStream;
+begin
+  FContentType := 'application/json; charset=utf-8';
+  Result := FBuffer;
+end;
+
+procedure TDextDCSResponse.WriteJson(const AValue: TValue);
+var
+  {$IFDEF DEXT_ENABLE_ENTITY}
+  FastStream: IDbSetFastStream;
+  {$ENDIF}
+  FastQuery: IDextFastQuery;
+  Stream: TStream;
+begin
+  FContentType := 'application/json; charset=utf-8';
+  if AValue.IsEmpty then Exit;
+
+  if AValue.Kind = tkInterface then
+  begin
+    {$IFDEF DEXT_ENABLE_ENTITY}
+    if Supports(AValue.AsInterface, IDbSetFastStream, FastStream) then
+    begin
+      Stream := GetOutputStream;
+      FastStream.ExecuteToUtf8Stream(Stream);
+      Exit;
+    end;
+    {$ENDIF}
+
+    if Supports(AValue.AsInterface, IDextFastQuery, FastQuery) then
+    begin
+      Stream := GetOutputStream;
+      FastQuery.ExecuteToUtf8Proc(
+        procedure(Data: Pointer; Len: Integer)
+        begin
+          if Len > 0 then Stream.WriteBuffer(Data^, Len);
+        end
+      );
+      Exit;
+    end;
+  end;
+
+  Json(AValue);
+end;
+
+procedure TDextDCSResponse.WriteJson(ACode: Integer; const AValue: TValue);
+begin
+  SetStatusCode(ACode);
+  WriteJson(AValue);
+end;
+
+procedure TDextDCSResponse.WriteJson(const AQuery: IDextFastQuery);
+var
+  Stream: TStream;
+begin
+  FContentType := 'application/json; charset=utf-8';
+  if AQuery = nil then Exit;
+  Stream := GetOutputStream;
+  AQuery.ExecuteToUtf8Proc(
+    procedure(Data: Pointer; Len: Integer)
+    begin
+      if Len > 0 then Stream.WriteBuffer(Data^, Len);
+    end
+  );
+end;
+
+procedure TDextDCSResponse.WriteJson(ACode: Integer; const AQuery: IDextFastQuery);
+begin
+  SetStatusCode(ACode);
+  WriteJson(AQuery);
+end;
+
+{$IFDEF DEXT_ENABLE_ENTITY}
+procedure TDextDCSResponse.WriteJson(const AStream: IDbSetFastStream);
+var
+  Stream: TStream;
+begin
+  FContentType := 'application/json; charset=utf-8';
+  if AStream = nil then Exit;
+  Stream := GetOutputStream;
+  AStream.ExecuteToUtf8Stream(Stream);
+end;
+
+procedure TDextDCSResponse.WriteJson(ACode: Integer; const AStream: IDbSetFastStream);
+begin
+  SetStatusCode(ACode);
+  WriteJson(AStream);
+end;
+{$ENDIF}
 
 function TDextDCSResponse.GetHtmx: IHtmxResponse;
 begin
@@ -941,7 +1072,7 @@ begin
   Ctx := TDextDCSContext.Create(DextReq, DextResp, FServices);
   try
     FPipeline(Ctx);
-    DextResp.FlushToResponse;
+    DextResp.FlushToResponse(SameText(DextReq.GetHeader('HX-Request'), 'true'));
   except
     on E: Exception do
     begin
