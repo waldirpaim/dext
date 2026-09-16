@@ -1079,6 +1079,13 @@ begin
   try
     FPipeline(Ctx);
     DextResp.FlushToWebResponse;
+    // WebBroker sobre Indy tambem precisa de um stream explicito para impedir
+    // o placeholder "200 OK" em respostas HTMX vazias. O TWebResponse assume
+    // a posse do stream; respostas enviadas ou com corpo permanecem intactas.
+    if SameText(Req.GetFieldByName('HX-Request'), 'true') and
+       not Resp.Sent and (Resp.Content = '') and
+       not Assigned(Resp.ContentStream) then
+      Resp.ContentStream := TMemoryStream.Create;
   except
     on E: Exception do
     begin
