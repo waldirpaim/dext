@@ -58,19 +58,41 @@ type
   /// </summary>
   TDbContextEntityDataSetStore = class(TInterfacedObject, IEntityDataSetStore)
   private
+    FContinueOnError: Boolean;
     function GetEntityKeys(AEntity: TObject;
       Map: TEntityMap): IDictionary<string, Variant>;
     function ReadPropertyValue(AEntity: TObject;
       PropMap: TPropertyMap; out Value: Variant): Boolean;
     procedure SetPropertyValue(AEntity: TObject;
       PropMap: TPropertyMap; const Value: Variant);
+    function StageChange(AEntityClass: TClass; Map: TEntityMap;
+      const AChange: IDextJsonObject; ADbContext: TDbContext): TObject;
+    function ApplyAtomic(AEntityClass: TClass; const AChanges: IDextJsonArray;
+      ADbContext: TDbContext): IList<TApplyItemResult>;
+    function ApplyEachItem(AEntityClass: TClass; const AChanges: IDextJsonArray;
+      ADbContext: TDbContext): IList<TApplyItemResult>;
   public
     /// <summary>
+    /// Creates the store. By default a batch is applied all-or-nothing.
+    /// </summary>
+    /// <param name="AContinueOnError">See ContinueOnError.</param>
+    constructor Create(AContinueOnError: Boolean = False);
+    /// <summary>
     /// Persists changes using the ORM DbContext SaveChanges.
+    /// By default the whole batch is staged and saved with a single
+    /// SaveChanges, in one transaction (the context's own, or the caller's if
+    /// one is open): if any item fails, nothing is applied and every item is
+    /// reported as failed. With ContinueOnError each item is saved on its own.
     /// </summary>
     function ApplyChanges(AEntityClass: TClass;
       const AChanges: IDextJsonArray;
       ADbContext: TDbContext): IList<TApplyItemResult>;
+    /// <summary>
+    /// Opt-in partial success: each item is saved with its own SaveChanges,
+    /// and a failing item is detached so that later items do not retry it.
+    /// Items applied before a failure stay committed. Default: False.
+    /// </summary>
+    property ContinueOnError: Boolean read FContinueOnError write FContinueOnError;
   end;
 
   /// <summary>
@@ -91,7 +113,115 @@ type
 implementation
 
 uses
+  System.TypInfo,
+  System.DateUtils,
   Dext.Core.Reflection;
+
+/// <summary>
+///   The value of a JSON member as a Variant: null stays Null, a boolean stays
+///   a Boolean, and a string or a number arrives as its text, to be converted
+///   by ConvertToPropertyType. A missing member is Null too.
+/// </summary>
+function JsonMemberValue(const AObject: IDextJsonObject;
+  const AName: string): Variant;
+var
+  Node: IDextJsonNode;
+begin
+  Node := AObject.GetNode(AName);
+  if (Node = nil) or Node.IsNull then
+    Exit(Null);
+  case Node.NodeType of
+    TDextJsonNodeType.jntBoolean:
+      Result := Node.AsBoolean;
+    TDextJsonNodeType.jntString, TDextJsonNodeType.jntNumber:
+      Result := Node.AsString;
+  else
+    Result := Node.ToJson;
+  end;
+end;
+
+/// <summary>
+///   Converts the text of a JSON value to the Variant type of the property.
+///   Numbers and dates are read with the invariant format (JSON always uses a
+///   dot, whatever the machine locale), dates as ISO 8601. A value that cannot
+///   be converted raises EConvertError naming the property, instead of
+///   becoming 0. Null and non-string values are returned unchanged.
+/// </summary>
+function ConvertToPropertyType(const AValue: Variant; ATypeInfo: PTypeInfo;
+  const APropertyName: string): Variant;
+var
+  S: string;
+  I64: Int64;
+  F: Double;
+  C: Currency;
+  D: TDateTime;
+  B: Boolean;
+  Ordinal: Integer;
+
+  procedure Fail;
+  begin
+    raise EConvertError.CreateFmt('Cannot convert "%s" to %s for property "%s"',
+      [S, string(ATypeInfo^.Name), APropertyName]);
+  end;
+
+begin
+  Result := AValue;
+  if (ATypeInfo = nil) or VarIsNull(AValue) or VarIsEmpty(AValue) or
+    not VarIsStr(AValue) then
+    Exit;
+
+  S := VarToStr(AValue);
+  case ATypeInfo^.Kind of
+    tkInteger, tkInt64:
+      begin
+        if not TryStrToInt64(S, I64) then
+          Fail;
+        Result := I64;
+      end;
+    tkEnumeration:
+      if ATypeInfo = TypeInfo(Boolean) then
+      begin
+        if not TryStrToBool(S, B) then
+          Fail;
+        Result := B;
+      end
+      else
+      begin
+        if not TryStrToInt(S, Ordinal) then
+        begin
+          Ordinal := GetEnumValue(ATypeInfo, S);
+          if Ordinal < 0 then
+            Fail;
+        end;
+        Result := Ordinal;
+      end;
+    tkFloat:
+      if (ATypeInfo = TypeInfo(TDateTime)) or (ATypeInfo = TypeInfo(TDate)) or
+        (ATypeInfo = TypeInfo(TTime)) then
+      begin
+        // AReturnUTC = True keeps the value as written: with False a string
+        // without an offset would be shifted to local time.
+        if TryISO8601ToDate(S, D, True) then
+          Result := VarFromDateTime(D)
+        else if TryStrToFloat(S, F, TFormatSettings.Invariant) then
+          Result := VarFromDateTime(F)
+        else
+          Fail;
+      end
+      else if GetTypeData(ATypeInfo)^.FloatType = ftCurr then
+      begin
+        if not TryStrToCurr(S, C, TFormatSettings.Invariant) then
+          Fail;
+        Result := C;
+      end
+      else
+      begin
+        if not TryStrToFloat(S, F, TFormatSettings.Invariant) then
+          Fail;
+        Result := F;
+      end;
+  end;
+end;
 
 { TDbContextEntityDataSetStore }
 
@@ -152,49 +282,65 @@ end;
 procedure TDbContextEntityDataSetStore.SetPropertyValue(AEntity: TObject;
   PropMap: TPropertyMap; const Value: Variant);
 var
+  Typed: Variant;
   PValue: Pointer;
   RttiType: TRttiType;
   RttiProp: TRttiProperty;
+  Cleared: TValue;
 begin
   if (AEntity = nil) or (PropMap = nil) then Exit;
+
+  // The JSON value arrives as text: convert it to the property's type first,
+  // with the invariant format. PropertyType is the inner type for Nullable
+  // and smart properties.
+  Typed := ConvertToPropertyType(Value, PropMap.PropertyType,
+    PropMap.PropertyName);
 
   if PropMap.FieldValueOffset > 0 then
   begin
     if PropMap.FieldOffset > 0 then
       PBoolean(Pointer(PByte(AEntity) + PropMap.FieldOffset))^ :=
-        not VarIsNull(Value);
+        not VarIsNull(Typed);
 
-    if not VarIsNull(Value) then
+    if not VarIsNull(Typed) then
     begin
       PValue := Pointer(PByte(AEntity) + PropMap.FieldValueOffset);
       case PropMap.DataType of
-        ftInteger, ftAutoInc: PInteger(PValue)^ := Value;
-        ftSmallint: PSmallInt(PValue)^ := Value;
-        ftShortint: PShortInt(PValue)^ := Value;
-        ftByte: PByte(PValue)^ := Value;
-        ftWord: PWord(PValue)^ := Value;
-        ftLargeint: PInt64(PValue)^ := Value;
-        ftString, ftWideString: PString(PValue)^ := string(Value);
-        ftFloat: PDouble(PValue)^ := Double(Value);
-        ftCurrency: PCurrency(PValue)^ := Currency(Value);
-        ftBoolean: PBoolean(PValue)^ := Boolean(Value);
-        ftDateTime, ftDate, ftTime: PDateTime(PValue)^ := TDateTime(Value);
+        ftInteger, ftAutoInc: PInteger(PValue)^ := Typed;
+        ftSmallint: PSmallInt(PValue)^ := Typed;
+        ftShortint: PShortInt(PValue)^ := Typed;
+        ftByte: PByte(PValue)^ := Typed;
+        ftWord: PWord(PValue)^ := Typed;
+        ftLargeint: PInt64(PValue)^ := Typed;
+        ftString, ftWideString: PString(PValue)^ := string(Typed);
+        ftFloat: PDouble(PValue)^ := Double(Typed);
+        ftCurrency: PCurrency(PValue)^ := Currency(Typed);
+        ftBoolean: PBoolean(PValue)^ := Boolean(Typed);
+        ftDateTime, ftDate, ftTime: PDateTime(PValue)^ := TDateTime(Typed);
       end;
     end;
+    // The field is written: assigning it again through RTTI would be
+    // redundant, and that second assignment is what failed (#213).
+    Exit;
   end;
 
+  // No direct offset (a getter/setter method, or a property the mapping could
+  // not resolve to a field): go through RTTI, with the value already typed.
   RttiType := TReflection.Context.GetType(AEntity.ClassType);
-  if RttiType <> nil then
+  if RttiType = nil then
+    Exit;
+  RttiProp := RttiType.GetProperty(PropMap.PropertyName);
+  if RttiProp = nil then
+    Exit;
+  if VarIsNull(Typed) then
   begin
-    RttiProp := RttiType.GetProperty(PropMap.PropertyName);
-    if RttiProp <> nil then
-    begin
-      if VarIsNull(Value) then
-        RttiProp.SetValue(AEntity, TValue.Empty)
-      else
-        RttiProp.SetValue(AEntity, TValue.FromVariant(Value));
-    end;
-  end;
+    // The zero value of the property's own type: 0 / '' for a plain
+    // property, "no value" for a Nullable.
+    TValue.Make(nil, RttiProp.PropertyType.Handle, Cleared);
+    RttiProp.SetValue(AEntity, Cleared);
+  end
+  else
+    TReflection.SetValue(AEntity, RttiProp, TValue.FromVariant(Typed));
 end;
 
 function TDbContextEntityDataSetStore.GetEntityKeys(AEntity: TObject;
@@ -217,72 +363,65 @@ begin
   end;
 end;
 
-function TDbContextEntityDataSetStore.ApplyChanges(AEntityClass: TClass;
-  const AChanges: IDextJsonArray;
-  ADbContext: TDbContext): IList<TApplyItemResult>;
+constructor TDbContextEntityDataSetStore.Create(AContinueOnError: Boolean);
+begin
+  inherited Create;
+  FContinueOnError := AContinueOnError;
+end;
+
+function TDbContextEntityDataSetStore.StageChange(AEntityClass: TClass;
+  Map: TEntityMap; const AChange: IDextJsonObject;
+  ADbContext: TDbContext): TObject;
 var
-  Results: IList<TApplyItemResult>;
-  ItemResult: TApplyItemResult;
-  ChangeObj: IDextJsonObject;
   StateStr: string;
   KeysObj: IDextJsonObject;
   ValuesObj: IDextJsonObject;
   EntityObj: TObject;
-  Map: TEntityMap;
   Pair: TPair<string, TPropertyMap>;
-  i: Integer;
 begin
-  Results := TCollections.CreateList<TApplyItemResult>;
-  Map := ADbContext.ModelBuilder.GetMap(AEntityClass.ClassInfo);
+  Result := nil;
+  StateStr := AChange.GetString('state');
+  if not (SameText(StateStr, 'inserted') or SameText(StateStr, 'modified') or
+    SameText(StateStr, 'deleted')) then
+    Exit;
 
-  for i := 0 to AChanges.Count - 1 do
-  begin
-    ChangeObj := AChanges.GetObject(i);
-    StateStr := ChangeObj.GetString('state');
-    KeysObj := nil;
-    if ChangeObj.Contains('key') then
-      KeysObj := ChangeObj.GetObject('key');
-    ValuesObj := nil;
-    if ChangeObj.Contains('values') then
-      ValuesObj := ChangeObj.GetObject('values');
+  KeysObj := nil;
+  if AChange.Contains('key') then
+    KeysObj := AChange.GetObject('key');
+  ValuesObj := nil;
+  if AChange.Contains('values') then
+    ValuesObj := AChange.GetObject('values');
 
-    ItemResult.Index := i;
-    ItemResult.Success := True;
-    ItemResult.ErrorMessage := '';
-    ItemResult.Keys := nil;
-
-    try
-      if SameText(StateStr, 'inserted') then
+  EntityObj := AEntityClass.Create;
+  try
+    if SameText(StateStr, 'inserted') then
+    begin
+      if (ValuesObj <> nil) and (Map <> nil) then
       begin
-        EntityObj := AEntityClass.Create;
-        if (ValuesObj <> nil) and (Map <> nil) then
+        for Pair in Map.Properties do
         begin
-          for Pair in Map.Properties do
-          begin
-            if ValuesObj.Contains(Pair.Key) then
-              SetPropertyValue(EntityObj, Pair.Value,
-                ValuesObj.GetString(Pair.Key));
-          end;
+          if ValuesObj.Contains(Pair.Key) then
+            SetPropertyValue(EntityObj, Pair.Value,
+              JsonMemberValue(ValuesObj, Pair.Key));
         end;
+      end;
 
-        ADbContext.ChangeTracker.Track(EntityObj, esAdded);
-        ADbContext.SaveChanges;
-
-        ItemResult.Keys := GetEntityKeys(EntityObj, Map);
-      end
-      else if SameText(StateStr, 'modified') then
+      ADbContext.ChangeTracker.Track(EntityObj, esAdded);
+    end
+    else
+    begin
+      if (KeysObj <> nil) and (Map <> nil) then
       begin
-        EntityObj := AEntityClass.Create;
-        if (KeysObj <> nil) and (Map <> nil) then
+        for Pair in Map.Properties do
         begin
-          for Pair in Map.Properties do
-          begin
-            if Pair.Value.IsPK and KeysObj.Contains(Pair.Key) then
-              SetPropertyValue(EntityObj, Pair.Value,
-                KeysObj.GetString(Pair.Key));
-          end;
+          if Pair.Value.IsPK and KeysObj.Contains(Pair.Key) then
+            SetPropertyValue(EntityObj, Pair.Value,
+              JsonMemberValue(KeysObj, Pair.Key));
         end;
+      end;
 
+      if SameText(StateStr, 'modified') then
+      begin
         ADbContext.ChangeTracker.Track(EntityObj, esUnchanged);
 
         if (ValuesObj <> nil) and (Map <> nil) then
@@ -292,35 +431,137 @@ begin
             if ValuesObj.Contains(Pair.Key) then
             begin
               SetPropertyValue(EntityObj, Pair.Value,
-                ValuesObj.GetString(Pair.Key));
+                JsonMemberValue(ValuesObj, Pair.Key));
               ADbContext.Entry(EntityObj).Member(Pair.Key).IsModified := True;
             end;
           end;
         end;
-
-        ADbContext.SaveChanges;
       end
-      else if SameText(StateStr, 'deleted') then
-      begin
-        EntityObj := AEntityClass.Create;
-        if (KeysObj <> nil) and (Map <> nil) then
-        begin
-          for Pair in Map.Properties do
-          begin
-            if Pair.Value.IsPK and KeysObj.Contains(Pair.Key) then
-              SetPropertyValue(EntityObj, Pair.Value,
-                KeysObj.GetString(Pair.Key));
-          end;
-        end;
-
+      else
         ADbContext.ChangeTracker.Track(EntityObj, esDeleted);
+    end;
+  except
+    // Not saved yet, so nothing else references it.
+    ADbContext.ChangeTracker.Remove(EntityObj);
+    EntityObj.Free;
+    raise;
+  end;
+  Result := EntityObj;
+end;
+
+function TDbContextEntityDataSetStore.ApplyAtomic(AEntityClass: TClass;
+  const AChanges: IDextJsonArray;
+  ADbContext: TDbContext): IList<TApplyItemResult>;
+var
+  Results: IList<TApplyItemResult>;
+  ItemResult: TApplyItemResult;
+  Entities: IList<TObject>;
+  Entity: TObject;
+  Map: TEntityMap;
+  FailedIndex: Integer;
+  ErrorMessage: string;
+  i: Integer;
+begin
+  Results := TCollections.CreateList<TApplyItemResult>;
+  Entities := TCollections.CreateList<TObject>;
+  Map := ADbContext.ModelBuilder.GetMap(AEntityClass.ClassInfo);
+
+  // Stage every item first, then save the whole batch with one SaveChanges:
+  // it runs in a single transaction (its own, or the caller's when one is
+  // open) and rolls back its own transaction if any statement fails.
+  FailedIndex := -1;
+  ErrorMessage := '';
+  try
+    for i := 0 to AChanges.Count - 1 do
+    begin
+      FailedIndex := i;
+      Entities.Add(StageChange(AEntityClass, Map, AChanges.GetObject(i),
+        ADbContext));
+    end;
+    FailedIndex := -1;
+    ADbContext.SaveChanges;
+  except
+    on E: Exception do
+    begin
+      ErrorMessage := E.Message;
+      // A failed SaveChanges leaves the batch tracked: detach it, so that a
+      // later SaveChanges on this context does not try to save it again.
+      for Entity in Entities do
+      begin
+        if Entity <> nil then
+          ADbContext.Detach(Entity);
+      end;
+    end;
+  end;
+
+  for i := 0 to AChanges.Count - 1 do
+  begin
+    ItemResult.Index := i;
+    ItemResult.Keys := nil;
+    if ErrorMessage = '' then
+    begin
+      ItemResult.Success := True;
+      ItemResult.ErrorMessage := '';
+      if (Entities[i] <> nil) and
+        SameText(AChanges.GetObject(i).GetString('state'), 'inserted') then
+        ItemResult.Keys := GetEntityKeys(Entities[i], Map);
+    end
+    else
+    begin
+      ItemResult.Success := False;
+      if FailedIndex < 0 then
+        ItemResult.ErrorMessage := 'Batch not applied: ' + ErrorMessage
+      else if i = FailedIndex then
+        ItemResult.ErrorMessage := ErrorMessage
+      else
+        ItemResult.ErrorMessage := Format('Batch not applied: item %d failed (%s)',
+          [FailedIndex, ErrorMessage]);
+    end;
+    Results.Add(ItemResult);
+  end;
+
+  Result := Results;
+end;
+
+function TDbContextEntityDataSetStore.ApplyEachItem(AEntityClass: TClass;
+  const AChanges: IDextJsonArray;
+  ADbContext: TDbContext): IList<TApplyItemResult>;
+var
+  Results: IList<TApplyItemResult>;
+  ItemResult: TApplyItemResult;
+  EntityObj: TObject;
+  Map: TEntityMap;
+  i: Integer;
+begin
+  Results := TCollections.CreateList<TApplyItemResult>;
+  Map := ADbContext.ModelBuilder.GetMap(AEntityClass.ClassInfo);
+
+  for i := 0 to AChanges.Count - 1 do
+  begin
+    ItemResult.Index := i;
+    ItemResult.Success := True;
+    ItemResult.ErrorMessage := '';
+    ItemResult.Keys := nil;
+
+    EntityObj := nil;
+    try
+      EntityObj := StageChange(AEntityClass, Map, AChanges.GetObject(i),
+        ADbContext);
+      if EntityObj <> nil then
+      begin
         ADbContext.SaveChanges;
+        if SameText(AChanges.GetObject(i).GetString('state'), 'inserted') then
+          ItemResult.Keys := GetEntityKeys(EntityObj, Map);
       end;
     except
       on E: Exception do
       begin
         ItemResult.Success := False;
         ItemResult.ErrorMessage := E.Message;
+        // The failed entity is still tracked: detach it, or the next item's
+        // SaveChanges would try to save it again.
+        if EntityObj <> nil then
+          ADbContext.Detach(EntityObj);
       end;
     end;
 
@@ -328,6 +569,16 @@ begin
   end;
 
   Result := Results;
+end;
+
+function TDbContextEntityDataSetStore.ApplyChanges(AEntityClass: TClass;
+  const AChanges: IDextJsonArray;
+  ADbContext: TDbContext): IList<TApplyItemResult>;
+begin
+  if FContinueOnError then
+    Result := ApplyEachItem(AEntityClass, AChanges, ADbContext)
+  else
+    Result := ApplyAtomic(AEntityClass, AChanges, ADbContext);
 end;
 
 { TEntityDataSetApi }

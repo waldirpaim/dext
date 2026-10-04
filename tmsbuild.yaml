@@ -69,4 +69,4 @@ paths:
   extra library paths: 
     - Sources\Common
   extra browsing paths: 
-    - Sources\Common        
+    - Sources\Common
