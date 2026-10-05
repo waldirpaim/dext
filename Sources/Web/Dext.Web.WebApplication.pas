@@ -413,6 +413,7 @@ var
   KeyFile: string;
   RootFile: string;
   ProviderName: string;
+  BindAddress: string;
 begin
   // Single-use lifecycle: once the application has been stopped, Teardown has
   // released the service collection and the configuration to break the circular
@@ -532,11 +533,17 @@ begin
       LogWarn('HTTPS configured but certificate files not found. Using HTTP.');
   end;
 
+  // Server:BindAddress (env: Server__BindAddress) restricts the default Indy
+  // host to one local IP literal; empty keeps listening on every interface.
+  BindAddress := '';
+  if ServerSection <> nil then
+    BindAddress := ServerSection['BindAddress'];
+
   // Store active host
   if Assigned(FServerFactory) then
     FActiveHost := FServerFactory(Port, RequestHandler, FServiceProvider)
   else
-    FActiveHost := TDextIndyWebServer.Create(Port, RequestHandler, FServiceProvider, SSLHandler);
+    FActiveHost := TDextIndyWebServer.Create(Port, RequestHandler, FServiceProvider, SSLHandler, BindAddress);
 end;
 
 procedure TWebApplication.Teardown;
