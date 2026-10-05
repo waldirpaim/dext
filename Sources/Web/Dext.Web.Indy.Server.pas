@@ -30,6 +30,7 @@ interface
 
 uses
   System.Classes, System.SysUtils, System.SyncObjs, IdHTTPServer, IdContext, IdCustomHTTPServer, IdCustomTCPServer, IdThread, IdServerIOHandler, IdException,
+  IdGlobal, IdSocketHandle,
   Dext.Web.Interfaces, Dext.DI.Interfaces, Dext.Web.Indy.SSL.Interfaces, Dext.Hosting.ApplicationLifetime;
 
 type
@@ -53,8 +54,13 @@ type
     procedure HandleListenException(AThread: TIdListenerThread; AException: Exception);
     procedure HandleConnectException(AContext: TIdContext; AException: Exception);
   public
+    /// <summary>
+    ///   ABindAddress restricts the listener to one local IP literal (IPv4, or
+    ///   IPv6 without brackets), e.g. '127.0.0.1' for a loopback-only service.
+    ///   Empty keeps Indy's default: listen on every interface.
+    /// </summary>
     constructor Create(APort: Integer; APipeline: TRequestDelegate; const AServices: IServiceProvider;
-      const ASSLHandler: IIndySSLHandler = nil);
+      const ASSLHandler: IIndySSLHandler = nil; const ABindAddress: string = '');
     destructor Destroy; override;
 
     function GetPort: Integer;
@@ -102,7 +108,10 @@ end;
 { TDextIndyWebServer }
 
 constructor TDextIndyWebServer.Create(APort: Integer; APipeline: TRequestDelegate;
-  const AServices: IServiceProvider; const ASSLHandler: IIndySSLHandler);
+  const AServices: IServiceProvider; const ASSLHandler: IIndySSLHandler; const ABindAddress: string);
+var
+  LBindAddress: string;
+  LBinding: TIdSocketHandle;
 begin
   inherited Create;
   FPort := APort;
@@ -113,6 +122,20 @@ begin
 
   FHTTPServer := TIdHTTPServer.Create(nil);
   FHTTPServer.DefaultPort := FPort;
+  // Without an explicit binding Indy listens on every interface (DefaultPort).
+  // With one, only that address is bound: a connection to any other local
+  // interface is refused by the OS, not filtered by the application.
+  LBindAddress := Trim(ABindAddress);
+  if LBindAddress <> '' then
+  begin
+    LBinding := FHTTPServer.Bindings.Add;
+    if Pos(':', LBindAddress) > 0 then
+      LBinding.IPVersion := Id_IPv6
+    else
+      LBinding.IPVersion := Id_IPv4;
+    LBinding.IP := LBindAddress;
+    LBinding.Port := FPort;
+  end;
   FHTTPServer.OnCommandOther := HandleCommandGet;
   FHTTPServer.OnCommandGet := HandleCommandGet;
   FHTTPServer.OnParseAuthentication := HandleParseAuthentication;
