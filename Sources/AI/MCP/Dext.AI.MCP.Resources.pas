@@ -44,7 +44,7 @@ interface
 
 uses
   System.SysUtils,
-  DextJsonDataObjects,
+  Dext.Core.Json.NextGen,
   System.RTTI,
   Dext.Collections,
   Dext.Collections.Dict,
@@ -192,7 +192,9 @@ begin
   begin
     try
       InvokeResult := AMethod.Invoke(AProvider, [TValue.From<string>(AUri)]);
-      Result := InvokeResult.AsType<TMCPResourceContents>;
+      if InvokeResult.IsEmpty or (InvokeResult.Kind <> tkRecord) then
+        raise Exception.Create('Resource invoke returned an unexpected RTTI value');
+      InvokeResult.ExtractRawData(@Result);
     except
       on E: Exception do
         Result := TMCPResourceContents.TextResource(AUri,
@@ -274,13 +276,14 @@ begin
 
   for Def in FResources.Values do
   begin
-    ResObj := Arr.AddObject;
+    ResObj := TJsonObject.Create;
     ResObj.S['uri'] := Def.Uri;
     ResObj.S['name'] := Def.Name;
     if Def.Description <> '' then
       ResObj.S['description'] := Def.Description;
     if Def.MimeType <> '' then
       ResObj.S['mimeType'] := Def.MimeType;
+    Arr.Add(ResObj);
   end;
 
   Result := Arr;

@@ -19,6 +19,7 @@ uses
   Dext.Web.DataApi.Tests in 'Dext.Web.DataApi.Tests.pas',
   Dext.Web.Json.Tests in 'Dext.Web.Json.Tests.pas',
   Dext.Web.Binding.Tests in 'Dext.Web.Binding.Tests.pas',
+  Dext.Web.RecordBinding.Tests in 'Dext.Web.RecordBinding.Tests.pas',
   Dext.Web.Features.Tests in 'Dext.Web.Features.Tests.pas',
   Dext.Web.DataApi.Utils.Tests in 'Dext.Web.DataApi.Utils.Tests.pas',
   Dext.Web.Hosting.Tests in 'Dext.Web.Hosting.Tests.pas',
@@ -32,6 +33,8 @@ uses
   Dext.Web.StaticFiles.Security.Tests in 'Dext.Web.StaticFiles.Security.Tests.pas',
   Dext.Server.HttpSys.Address.Tests in 'Dext.Server.HttpSys.Address.Tests.pas',
   Dext.Server.HttpSys.ResponseReuse.Tests in 'Dext.Server.HttpSys.ResponseReuse.Tests.pas',
+  Dext.Server.HttpSys.LargeBody.Tests in 'Dext.Server.HttpSys.LargeBody.Tests.pas',
+  Dext.Web.HandlerExceptions.Tests in 'Dext.Web.HandlerExceptions.Tests.pas',
   Dext.Web.Mocks in '..\Common\Dext.Web.Mocks.pas',
   Test_Dext.Http2.Connection in 'Test_Dext.Http2.Connection.pas',
   Test_Dext.Http2.Framing in 'Test_Dext.Http2.Framing.pas',
@@ -56,6 +59,7 @@ begin
       .Verbose
       .RegisterFixtures([
         TWebBindingTests,
+        TRecordBindingTests,
         TEntityIdResolverTests,
         TJsonNullableTests,
         TWebFeaturesTests,
@@ -74,6 +78,8 @@ begin
         TStaticFilesSecurityTests,
         THttpSysAddressTests,
         THttpSysResponseReuseTests,
+        THttpSysLargeBodyTests,
+        THandlerExceptionsTests,
         TDextNewFeaturesTests,
         TWebApplicationFactoryTests,
         TWebValidationTests,

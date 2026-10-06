@@ -54,13 +54,14 @@ interface
 
 uses
   System.SysUtils,
-  DextJsonDataObjects,
+  Dext.Core.Json.NextGen,
   System.Rtti,
   Dext.Collections,
   Dext.Collections.Dict,
   Dext.AI.MCP.Types,
   Dext.AI.MCP.Protocol,
   Dext.AI.MCP.Attributes,
+  Dext.Json.Types,
   Dext.Core.Reflection;
 
 type
@@ -135,7 +136,7 @@ type
   private
     FTools: TDictionary<string, TMCPToolDef>;
     FProviders: TList<TMCPToolProvider>;
-    FCachedTools: TJsonArray;
+    FCachedToolsJson: string;
 
     procedure InvalidateCache;
     function BuildInputSchema(const Def: TMCPToolDef): TJsonObject;
@@ -232,9 +233,9 @@ end;
 constructor TMCPToolRegistry.Create;
 begin
   inherited Create;
-  FTools       := TDictionary<string, TMCPToolDef>.Create;
-  FProviders   := TList<TMCPToolProvider>.Create(True); // owns items
-  FCachedTools := nil;
+  FTools           := TDictionary<string, TMCPToolDef>.Create;
+  FProviders       := TList<TMCPToolProvider>.Create(True); // owns items
+  FCachedToolsJson := '';
 end;
 
 destructor TMCPToolRegistry.Destroy;
@@ -247,7 +248,7 @@ end;
 
 procedure TMCPToolRegistry.InvalidateCache;
 begin
-  FreeAndNil(FCachedTools);
+  FCachedToolsJson := '';
 end;
 
 function TMCPToolRegistry.Register(const AName: string): IMCPToolBuilder;
@@ -269,7 +270,10 @@ begin
       InvokeResult := AMethod.Invoke(AProvider,
         [TValue.From<TJsonObject>(Args)]);
       AProvider.AfterCall(AName);
-      Result := InvokeResult.AsType<TMCPToolResult>;
+      // TMCPToolResult is a record — AsType raises "Invalid class typecast".
+      if InvokeResult.IsEmpty or (InvokeResult.Kind <> tkRecord) then
+        raise Exception.Create('Tool invoke returned an unexpected RTTI value');
+      InvokeResult.ExtractRawData(@Result);
     except
       on E: Exception do
         Result := TMCPToolResult.Error(E.Message);
@@ -341,15 +345,18 @@ begin
   Schema := TJsonObject.Create;
   Schema.S['type'] := 'object';
 
-  Props    := Schema.O['properties'];
+  Props := TJsonObject.Create;
+  Schema.O['properties'] := Props;
+
   Required := TJsonArray.Create;
 
   for P in Def.Params do
   begin
-    PropObj := Props.O[P.Name];
+    PropObj := TJsonObject.Create;
     PropObj.S['type'] := P.TypeName;
     if P.Description <> '' then
       PropObj.S['description'] := P.Description;
+    Props.O[P.Name] := PropObj;
 
     if P.Required then
       Required.Add(P.Name);
@@ -367,21 +374,23 @@ function TMCPToolRegistry.BuildToolsArray: TJsonArray;
 var
   Def: TMCPToolDef;
   ToolObj: TJsonObject;
+  Arr: TJsonArray;
 begin
-  if FCachedTools <> nil then
-    Exit(FCachedTools.Clone as TJsonArray);
-
-  FCachedTools := TJsonArray.Create;
-
-  for Def in FTools.Values do
-  begin
-    ToolObj := FCachedTools.AddObject;
-    ToolObj.S['name'] := Def.Name;
-    ToolObj.S['description'] := Def.Description;
-    ToolObj.O['inputSchema'] := BuildInputSchema(Def);
+  Arr := TJsonArray.Create;
+  try
+    for Def in FTools.Values do
+    begin
+      ToolObj := TJsonObject.Create;
+      ToolObj.S['name'] := Def.Name;
+      ToolObj.S['description'] := Def.Description;
+      ToolObj.O['inputSchema'] := BuildInputSchema(Def);
+      Arr.Add(ToolObj);
+    end;
+    Result := Arr;
+  except
+    Arr.Free;
+    raise;
   end;
-
-  Result := FCachedTools.Clone as TJsonArray;
 end;
 
 end.

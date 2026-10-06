@@ -51,11 +51,12 @@ interface
 
 uses
   System.SysUtils,
-  DextJsonDataObjects,
+  Dext.Core.Json.NextGen,
   System.RTTI,
   Dext.Collections,
   Dext.Collections.Dict,
   Dext.Core.Reflection,
+  Dext.Json.Types,
   Dext.AI.MCP.Types,
   Dext.AI.MCP.Attributes;
 
@@ -205,7 +206,9 @@ begin
     try
       InvokeResult := AMethod.Invoke(AProvider,
         [TValue.From<TJsonObject>(Args)]);
-      Result := InvokeResult.AsType<TMCPPromptResult>;
+      if InvokeResult.IsEmpty or (InvokeResult.Kind <> tkRecord) then
+        raise Exception.Create('Prompt invoke returned an unexpected RTTI value');
+      InvokeResult.ExtractRawData(@Result);
     except
       on E: Exception do
       begin
@@ -298,23 +301,27 @@ begin
 
   for Def in FPrompts.Values do
   begin
-    PromptObj := Arr.AddObject;
+    PromptObj := TJsonObject.Create;
     PromptObj.S['name'] := Def.Name;
     if Def.Description <> '' then
       PromptObj.S['description'] := Def.Description;
 
     if Length(Def.Args) > 0 then
     begin
-      ArgsArr := PromptObj.A['arguments'];
+      ArgsArr := TJsonArray.Create;
       for ArgDef in Def.Args do
       begin
-        ArgObj := ArgsArr.AddObject;
+        ArgObj := TJsonObject.Create;
         ArgObj.S['name'] := ArgDef.Name;
         if ArgDef.Description <> '' then
           ArgObj.S['description'] := ArgDef.Description;
         ArgObj.B['required'] := ArgDef.Required;
+        ArgsArr.Add(ArgObj);
       end;
+      PromptObj.A['arguments'] := ArgsArr;
     end;
+
+    Arr.Add(PromptObj);
   end;
 
   Result := Arr;
