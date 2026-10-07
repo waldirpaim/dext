@@ -390,8 +390,16 @@ begin
 end;
 
 function TOrderedDictionary<K, V>.TryAdd(const Key: K; const Value: V): Boolean;
+var
+  LKey: K;
+  LValue: V;
 begin
-  Result := FCore.TryAddRaw(@Key, @Value);
+  // Same dcc64 37.0 workaround as Add: two const generic parameters can
+  // share one spill slot (@Key = @Value). Copying to locals guarantees
+  // distinct addresses.
+  LKey := Key;
+  LValue := Value;
+  Result := FCore.TryAddRaw(@LKey, @LValue);
 end;
 
 procedure TOrderedDictionary<K, V>.AddOrSetValue(const Key: K; const Value: V);

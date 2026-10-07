@@ -45,6 +45,8 @@ type
     procedure ReusesRemovedSlots;
     [Test]
     procedure OwnsValues_RefusedValueIsNotTaken;
+    [Test]
+    procedure PointerKeys_KeyAndValueStayDistinct;
   end;
 
   [TestFixture('OrderedDictionary - TryAdd')]
@@ -60,6 +62,8 @@ type
     procedure Growth_KeepsEveryKeyInOrder;
     [Test]
     procedure Add_Duplicate_StillRaises_AndLeavesTheListsAlone;
+    [Test]
+    procedure PointerKeys_KeyAndValueStayDistinct;
   end;
 
   /// <summary>
@@ -444,6 +448,79 @@ begin
     end;
   finally
     Raw.Free;
+  end;
+end;
+
+{ dcc64 37.0 const generic parameter aliasing (nexo issues #2819 and #3830) }
+
+const
+  ALIAS_N = 50000;
+  ALIAS_BASE = NativeUInt($100000000);
+
+// Distinct keys far above any value used in the test, so a value stored as
+// the key (@Key = @Value) can only show up as a missing key or a false hit.
+function AliasKeys: TArray<Pointer>;
+var
+  I: Integer;
+begin
+  RandSeed := 2819;
+  SetLength(Result, ALIAS_N);
+  for I := 0 to ALIAS_N - 1 do
+    Result[I] := Pointer(ALIAS_BASE + NativeUInt(I) * 4096 + NativeUInt(Random(4096)));
+end;
+
+procedure TDictionaryTryAddTests.PointerKeys_KeyAndValueStayDistinct;
+var
+  D: TDictionary<Pointer, Integer>;
+  Keys: TArray<Pointer>;
+  I, V, FalseHits: Integer;
+begin
+  Keys := AliasKeys;
+  D := TDictionary<Pointer, Integer>.Create;
+  try
+    for I := 0 to ALIAS_N - 1 do
+      Should(D.TryAdd(Keys[I], I)).BeTrue;
+    Should(D.Count).Be(ALIAS_N);
+    for I := 0 to ALIAS_N - 1 do
+    begin
+      Should(D.TryGetValue(Keys[I], V)).BeTrue;
+      Should(V).Be(I);
+    end;
+    FalseHits := 0;
+    for I := 0 to ALIAS_N - 1 do
+      if D.ContainsKey(Pointer(NativeUInt(I))) then
+        Inc(FalseHits);
+    Should(FalseHits).Be(0);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TOrderedDictionaryTryAddTests.PointerKeys_KeyAndValueStayDistinct;
+var
+  D: TOrderedDictionary<Pointer, Integer>;
+  Keys: TArray<Pointer>;
+  I, V, FalseHits: Integer;
+begin
+  Keys := AliasKeys;
+  D := TOrderedDictionary<Pointer, Integer>.Create;
+  try
+    for I := 0 to ALIAS_N - 1 do
+      Should(D.TryAdd(Keys[I], I)).BeTrue;
+    Should(D.Count).Be(ALIAS_N);
+    for I := 0 to ALIAS_N - 1 do
+    begin
+      Should(D.GetKeyAt(I) = Keys[I]).BeTrue;
+      Should(D.TryGetValue(Keys[I], V)).BeTrue;
+      Should(V).Be(I);
+    end;
+    FalseHits := 0;
+    for I := 0 to ALIAS_N - 1 do
+      if D.ContainsKey(Pointer(NativeUInt(I))) then
+        Inc(FalseHits);
+    Should(FalseHits).Be(0);
+  finally
+    D.Free;
   end;
 end;
 
