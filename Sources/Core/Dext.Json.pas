@@ -316,6 +316,12 @@ type
     DirectKind: TDextNativeKind;
     /// <summary>True when JSON can read this property without TValue/RTTI.</summary>
     UseDirect: Boolean;
+    /// <summary>
+    ///   Direct path on a Nullable: offset of its HasValue flag (a Boolean),
+    ///   -1 when the property is not a Nullable. A Nullable without a value
+    ///   is written as null, not as the inner default.
+    /// </summary>
+    HasValueOffset: NativeInt;
   end;
   PSerializationPlanItem = ^TSerializationPlanItem;
 
@@ -1008,6 +1014,7 @@ begin
     Item.ElementNativeKind := nkUnknown;
     Item.ListOwnsObjects := False;
     Item.UseDirect := False;
+    Item.HasValueOffset := -1;
 
     for TypeField in TypeFields do
     begin
@@ -1058,6 +1065,20 @@ begin
               Item.UseDirect := True;
             end;
           end;
+        end;
+
+        // A Nullable read straight at its value would turn "no value" into
+        // the inner default (0, ''): the direct path also needs its HasValue
+        // flag. When that flag is not a Boolean the property stays on the
+        // RTTI path, which already checks HasValue (TryUnwrapProp).
+        if Item.UseDirect and SmartMeta.IsNullable then
+        begin
+          if (SmartMeta.HasValueField <> nil) and
+             (SmartMeta.HasValueField.FieldType <> nil) and
+             (SmartMeta.HasValueField.FieldType.Handle = TypeInfo(Boolean)) then
+            Item.HasValueOffset := Item.DirectOffset + SmartMeta.HasValueField.Offset
+          else
+            Item.UseDirect := False;
         end;
 
         if Item.UseDirect then
@@ -1415,6 +1436,15 @@ begin
 
     if Item^.UseDirect then
     begin
+      // A Nullable without a value: null, like the RTTI path below.
+      if (Item^.HasValueOffset >= 0) and
+         not TDextDirectAccess.ReadBoolean(Obj, Item^.HasValueOffset) then
+      begin
+        if not FSettings.FIgnoreNullValues then
+          Result.SetNull(Item^.JsonName);
+        Continue;
+      end;
+
       if Defaults then
         case Item^.DirectKind of
           nkInt32:
@@ -1562,7 +1592,8 @@ begin
           if FSettings.IgnoreDefaultValues and not PropValue.AsBoolean then
             Continue;
         skEnumAsString, skEnumAsNumber:
-          if FSettings.IgnoreDefaultValues and (PropValue.AsOrdinal = 0) then
+          if FSettings.IgnoreDefaultValues and not FSettings.FKeepDefaultEnums and
+            (PropValue.AsOrdinal = 0) then
             Continue;
         skDateTime:
           if PropValue.AsExtended = 0 then
@@ -2296,6 +2327,28 @@ begin
       Continue;
     end;
 
+    // Default values: the same rules as SerializeObjectWithPlan for class
+    // properties. ShouldSkipField did this for record fields before the
+    // record plan, and is no longer called.
+    if FSettings.IgnoreDefaultValues then
+      case Item^.Kind of
+        skInteger:
+          if FieldValue.AsInt64 = 0 then
+            Continue;
+        skFloat, skDateTime:
+          if FieldValue.AsExtended = 0 then
+            Continue;
+        skString:
+          if FieldValue.AsString = '' then
+            Continue;
+        skBoolean:
+          if not FieldValue.AsBoolean then
+            Continue;
+        skEnumAsString, skEnumAsNumber:
+          if not FSettings.FKeepDefaultEnums and (FieldValue.AsOrdinal = 0) then
+            Continue;
+      end;
+
     if (Item^.FieldTypeInfo = TypeInfo(TGUID)) then
     begin
       Result.SetString(FieldName, GetGUIDString(FieldValue));
@@ -2452,7 +2505,7 @@ begin
         begin
           if not FieldValue.AsBoolean then Exit(True)
         end
-        else if FieldValue.AsOrdinal = 0 then Exit(True);
+        else if not FSettings.FKeepDefaultEnums and (FieldValue.AsOrdinal = 0) then Exit(True);
     end;
   end;
 
